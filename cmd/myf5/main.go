@@ -145,7 +145,7 @@ func handleDownloads(args []string) {
 	}
 
 	switch action {
-	case "families", "list-families":
+	case "families", "products", "list-products", "list-families":
 		client := getDownloadsClient()
 		meta, err := client.GetMetadata(ctx)
 		if err != nil {
@@ -154,7 +154,11 @@ func handleDownloads(args []string) {
 		}
 		fmt.Println("Available Product Families:")
 		for i, fam := range meta.Data.ProductFamilies {
-			fmt.Printf("  %2d) %-15s (%s)\n", i+1, fam.Name, fam.DisplayName)
+			if fam.DisplayName != "" {
+				fmt.Printf("  %2d) %-25s (%s)\n", i+1, fam.Name, fam.DisplayName)
+			} else {
+				fmt.Printf("  %2d) %s\n", i+1, fam.Name)
+			}
 		}
 
 	case "lines", "list-lines":
@@ -171,9 +175,13 @@ func handleDownloads(args []string) {
 		}
 		for _, fam := range meta.Data.ProductFamilies {
 			if strings.EqualFold(fam.Name, targetFamily) {
-				fmt.Printf("Product Lines for '%s':\n", fam.Name)
+				fmt.Printf("Product Lines for '%s':\n", fam.GetTitle())
 				for i, line := range fam.ProductLines {
-					fmt.Printf("  %2d) %-25s (%s)\n", i+1, line.Name, line.DisplayName)
+					if line.DisplayName != "" {
+						fmt.Printf("  %2d) %-25s (%s)\n", i+1, line.Name, line.DisplayName)
+					} else {
+						fmt.Printf("  %2d) %s\n", i+1, line.Name)
+					}
 				}
 				return
 			}
@@ -325,10 +333,13 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 	for {
 		fmt.Println("\nSelect a Product Family:")
 		for i, f := range meta.Data.ProductFamilies {
-			fmt.Printf("  %2d) %s\n", i+1, f.DisplayName)
+			fmt.Printf("  %2d) %s\n", i+1, f.GetTitle())
 		}
 		fmt.Print("\nEnter number (or 'q' to quit): ")
-		input, _ := reader.ReadString('\n')
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
 		input = strings.TrimSpace(input)
 		if input == "q" || input == "exit" {
 			return
@@ -341,13 +352,19 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 		selectedFamily := meta.Data.ProductFamilies[idx-1]
 
 		// Select Line
-		fmt.Printf("\nSelect a Product Line in %s:\n", selectedFamily.DisplayName)
+		fmt.Printf("\nSelect a Product Line in %s:\n", selectedFamily.GetTitle())
 		for i, l := range selectedFamily.ProductLines {
-			fmt.Printf("  %2d) %s\n", i+1, l.DisplayName)
+			fmt.Printf("  %2d) %s\n", i+1, l.GetTitle())
 		}
-		fmt.Print("\nEnter number (or 'b' to go back): ")
-		input, _ = reader.ReadString('\n')
+		fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
+		input, err = reader.ReadString('\n')
+		if err != nil {
+			return
+		}
 		input = strings.TrimSpace(input)
+		if input == "q" || input == "exit" {
+			return
+		}
 		if input == "b" {
 			continue
 		}
@@ -376,9 +393,15 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 		for i, v := range versions {
 			fmt.Printf("  %2d) %-12s (Released: %s)\n", i+1, v.Name, v.ReleaseDate)
 		}
-		fmt.Print("\nEnter number (or 'b' to go back): ")
-		input, _ = reader.ReadString('\n')
+		fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
+		input, err = reader.ReadString('\n')
+		if err != nil {
+			return
+		}
 		input = strings.TrimSpace(input)
+		if input == "q" || input == "exit" {
+			return
+		}
 		if input == "b" {
 			continue
 		}
@@ -411,9 +434,15 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 			fmt.Printf("  %2d) [%s] %-50s (%s)\n",
 				i+1, item.containerName, item.file.Name, downloads.FormatBytes(item.file.FileSize))
 		}
-		fmt.Print("\nEnter number (or 'b' to go back): ")
-		input, _ = reader.ReadString('\n')
+		fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
+		input, err = reader.ReadString('\n')
+		if err != nil {
+			return
+		}
 		input = strings.TrimSpace(input)
+		if input == "q" || input == "exit" {
+			return
+		}
 		if input == "b" {
 			continue
 		}
@@ -441,7 +470,10 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 		fmt.Printf("Mirror URL (expires %s, Region: %s):\n%s\n\n", link.ExpiresAt, link.GetRegion(), link.Href)
 		targetPath := filepath.Join(getDefaultDownloadsDir(), filepath.Base(selectedTarget.file.Name))
 		fmt.Printf("Download this file directly to %s? [y/N]: ", targetPath)
-		input, _ = reader.ReadString('\n')
+		input, err = reader.ReadString('\n')
+		if err != nil {
+			return
+		}
 		if strings.ToLower(strings.TrimSpace(input)) == "y" {
 			var expectedHash, hashAlgo string
 			for _, h := range linkResp.GetAllHashes() {

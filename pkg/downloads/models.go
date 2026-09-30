@@ -112,11 +112,27 @@ type ProductLine struct {
 	DisplayName string `json:"displayName,omitempty"`
 }
 
+// GetTitle returns DisplayName if populated, otherwise Name.
+func (pl *ProductLine) GetTitle() string {
+	if pl.DisplayName != "" {
+		return pl.DisplayName
+	}
+	return pl.Name
+}
+
 // ProductFamily represents a product family (e.g. BIG-IP, BIG-IQ, NGINX).
 type ProductFamily struct {
 	Name         string        `json:"name"`
 	DisplayName  string        `json:"displayName,omitempty"`
 	ProductLines []ProductLine `json:"productLines,omitempty"`
+}
+
+// GetTitle returns DisplayName if populated, otherwise Name.
+func (pf *ProductFamily) GetTitle() string {
+	if pf.DisplayName != "" {
+		return pf.DisplayName
+	}
+	return pf.Name
 }
 
 // DownloadsMetadataResponse is the API response for /downloads-management/v1/downloads/metadata.
