@@ -16,6 +16,7 @@ import (
 	"myf5-api/pkg/cases"
 	"myf5-api/pkg/downloads"
 	"myf5-api/pkg/ihealth"
+	"myf5-api/pkg/progress"
 
 	"golang.org/x/term"
 )
@@ -268,38 +269,19 @@ func handleDownloads(args []string) {
 		if expectedHash != "" {
 			fmt.Printf("Expected SHA:  %s\n", expectedHash)
 		}
-		fmt.Println("Streaming multi-GB image at wire speed...")
 
+		bar := progress.NewBar(0, "Downloading")
 		renderProgress := func(transferred, total int64, speed float64) {
-			pct := 0.0
-			if total > 0 {
-				pct = float64(transferred) / float64(total) * 100.0
-			}
-			barWidth := 30
-			filled := int(pct / 100.0 * float64(barWidth))
-			if filled > barWidth {
-				filled = barWidth
-			}
-			bar := strings.Repeat("=", filled) + strings.Repeat(" ", barWidth-filled)
-
-			etaStr := "--"
-			if speed > 0 && total > transferred {
-				remSec := int(float64(total-transferred) / speed)
-				etaStr = fmt.Sprintf("%dm%02ds", remSec/60, remSec%60)
-			}
-
-			fmt.Printf("\r[%s] %5.1f%% (%s / %s) [%s/s] ETA: %s",
-				bar, pct, downloads.FormatBytes(transferred), downloads.FormatBytes(total),
-				downloads.FormatBytes(int64(speed)), etaStr)
+			bar.Total = total
+			bar.Update(transferred)
 		}
 
 		err = downloads.DownloadFile(ctx, link.Href, outPath, expectedHash, hashAlgo, renderProgress)
-		fmt.Println()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "\n[DOWNLOAD FAILED] %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Println("[SUCCESS] Download verified and complete!")
+		bar.Finish(fmt.Sprintf("Download verified and complete: %s", outPath))
 
 	case "browse":
 		runInteractiveBrowser(ctx, getDownloadsClient())
@@ -469,11 +451,16 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 					break
 				}
 			}
-			_ = downloads.DownloadFile(ctx, link.Href, targetPath, expectedHash, hashAlgo, func(transferred, total int64, speed float64) {
-				pct := float64(transferred) / float64(total) * 100.0
-				fmt.Printf("\rDownloading: %5.1f%% (%s / %s) [%s/s]", pct, downloads.FormatBytes(transferred), downloads.FormatBytes(total), downloads.FormatBytes(int64(speed)))
+			bar := progress.NewBar(0, "Downloading")
+			err := downloads.DownloadFile(ctx, link.Href, targetPath, expectedHash, hashAlgo, func(transferred, total int64, speed float64) {
+				bar.Total = total
+				bar.Update(transferred)
 			})
-			fmt.Printf("\n[SUCCESS] File saved successfully to %s\n", targetPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "\n[ERROR] Download failed: %v\n", err)
+			} else {
+				bar.Finish(fmt.Sprintf("File saved successfully to %s", targetPath))
+			}
 		}
 	}
 }
@@ -600,13 +587,24 @@ func handleIHealth(args []string) {
 		if len(args) >= 4 {
 			desc = args[3]
 		}
-		fmt.Printf("Uploading %s to iHealth...\n", filepath.Base(filePath))
-		resp, err := client.UploadQKView(ctx, filePath, caseNum, desc)
+		fileStat, err := os.Stat(filePath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Upload failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Cannot access file %s: %v\n", filePath, err)
 			os.Exit(1)
 		}
-		fmt.Printf("[SUCCESS] QKView uploaded. iHealth ID: %s (Status: %s)\n", resp.ID, resp.Status)
+		var totalSize int64
+		if fileStat != nil {
+			totalSize = fileStat.Size()
+		}
+		bar := progress.NewBar(totalSize, "Uploading")
+		resp, err := client.UploadQKViewWithProgress(ctx, filePath, caseNum, desc, func(transferred, total int64) {
+			bar.Update(transferred)
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\nUpload failed: %v\n", err)
+			os.Exit(1)
+		}
+		bar.Finish(fmt.Sprintf("QKView uploaded. iHealth ID: %s (Status: %s)", resp.ID, resp.Status))
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown ihealth action '%s'\n", action)
 		os.Exit(1)
@@ -694,24 +692,28 @@ func handleBIGIP(args []string) {
 			fmt.Printf("BIG-IP appliance at %s is NOT READY.\n", host)
 		}
 	case "qkview":
-		fmt.Printf("Triggering full non-truncating QKView on %s...\n", host)
-		remoteFile, err := client.GenerateQKView(ctx, "", true)
+		spinner := progress.NewSpinner(fmt.Sprintf("Generating diagnostic QKView on %s", host))
+		spinner.Start()
+		remoteFile, err := client.GenerateQKViewWithStatus(ctx, "", true, func(status string) {
+			spinner.SetMessage(status)
+		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "QKView generation failed: %v\n", err)
+			spinner.Fail(fmt.Sprintf("QKView generation failed: %v", err))
 			os.Exit(1)
 		}
-		fmt.Printf("QKView generation complete: /var/tmp/qkviews/%s\n", remoteFile)
+		spinner.Success(fmt.Sprintf("QKView generated on appliance: /var/tmp/qkviews/%s", remoteFile))
+
 		destPath := filepath.Join(getDefaultDownloadsDir(), remoteFile)
-		fmt.Printf("Downloading QKView directly to %s...\n", destPath)
+		bar := progress.NewBar(0, "Downloading")
 		err = client.DownloadQKView(ctx, remoteFile, destPath, func(transferred, total int64) {
-			pct := float64(transferred) / float64(total) * 100.0
-			fmt.Printf("\rDownloading: %5.1f%% (%s / %s)", pct, downloads.FormatBytes(transferred), downloads.FormatBytes(total))
+			bar.Total = total
+			bar.Update(transferred)
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "\n[ERROR] Failed to download QKView: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("\n[SUCCESS] QKView saved to %s\n", destPath)
+		bar.Finish(fmt.Sprintf("QKView saved to %s", destPath))
 
 	case "download":
 		if len(actionArgs) < 2 {
@@ -720,16 +722,16 @@ func handleBIGIP(args []string) {
 		}
 		remoteFile := actionArgs[1]
 		destPath := filepath.Join(getDefaultDownloadsDir(), remoteFile)
-		fmt.Printf("Downloading %s directly to %s...\n", remoteFile, destPath)
+		bar := progress.NewBar(0, "Downloading")
 		err := client.DownloadQKView(ctx, remoteFile, destPath, func(transferred, total int64) {
-			pct := float64(transferred) / float64(total) * 100.0
-			fmt.Printf("\rDownloading: %5.1f%% (%s / %s)", pct, downloads.FormatBytes(transferred), downloads.FormatBytes(total))
+			bar.Total = total
+			bar.Update(transferred)
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "\n[ERROR] Download failed: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("\n[SUCCESS] File saved to %s\n", destPath)
+		bar.Finish(fmt.Sprintf("File saved to %s", destPath))
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown bigip action '%s'\n", action)
 		os.Exit(1)

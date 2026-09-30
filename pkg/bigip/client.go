@@ -115,8 +115,114 @@ func ValidateQKViewFilename(filename string) error {
 	return nil
 }
 
-// GenerateQKView initiates an asynchronous non-truncating QKView generation job.
+// QKViewTask represents a TMOS autodeploy QKView generation task.
+type QKViewTask struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	QKViewURI    string `json:"qkviewUri,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
+}
+
+// CreateQKViewTask creates an asynchronous QKView generation task on the BIG-IP appliance.
+func (c *Client) CreateQKViewTask(ctx context.Context, filename string) (*QKViewTask, error) {
+	if err := ValidateQKViewFilename(filename); err != nil {
+		return nil, err
+	}
+	payload := map[string]string{"name": filename}
+	jsonBytes, _ := json.Marshal(payload)
+
+	url := fmt.Sprintf("%s/mgmt/cm/autodeploy/qkview", c.BaseURL())
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBytes))
+	if err != nil {
+		return nil, err
+	}
+	c.setAuth(req)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create qkview task: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+		return nil, fmt.Errorf("qkview task creation failed with HTTP %d: %s", resp.StatusCode, string(b))
+	}
+
+	var task QKViewTask
+	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+		return nil, fmt.Errorf("failed to decode qkview task response: %w", err)
+	}
+	return &task, nil
+}
+
+// QueryQKViewTask queries the status of an ongoing autodeploy QKView task.
+func (c *Client) QueryQKViewTask(ctx context.Context, taskID string) (*QKViewTask, error) {
+	url := fmt.Sprintf("%s/mgmt/cm/autodeploy/qkview/%s", c.BaseURL(), taskID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setAuth(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query qkview task %s: %w", taskID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+		return nil, fmt.Errorf("query task failed with HTTP %d: %s", resp.StatusCode, string(b))
+	}
+
+	var task QKViewTask
+	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+		return nil, fmt.Errorf("failed to decode qkview task query: %w", err)
+	}
+	return &task, nil
+}
+
+// WaitForQKViewTask polls an autodeploy QKView task until completion or failure.
+func (c *Client) WaitForQKViewTask(ctx context.Context, taskID string, pollInterval time.Duration, statusCb func(status string)) (*QKViewTask, error) {
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-ticker.C:
+			task, err := c.QueryQKViewTask(ctx, taskID)
+			if err != nil {
+				return nil, err
+			}
+			if statusCb != nil {
+				statusCb(task.Status)
+			}
+			if strings.EqualFold(task.Status, "SUCCEEDED") {
+				return task, nil
+			}
+			if strings.EqualFold(task.Status, "FAILED") {
+				msg := task.ErrorMessage
+				if msg == "" {
+					msg = "task reported FAILED"
+				}
+				return nil, fmt.Errorf("qkview task failed: %s", msg)
+			}
+		}
+	}
+}
+
+// GenerateQKView initiates a QKView generation job.
 func (c *Client) GenerateQKView(ctx context.Context, filename string, complete bool) (string, error) {
+	return c.GenerateQKViewWithStatus(ctx, filename, complete, nil)
+}
+
+// GenerateQKViewWithStatus initiates a QKView generation job and reports progress to statusCb.
+func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, complete bool, statusCb func(status string)) (string, error) {
 	if filename == "" {
 		cleanHost := strings.Map(func(r rune) rune {
 			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
@@ -134,6 +240,26 @@ func (c *Client) GenerateQKView(ctx context.Context, filename string, complete b
 		return "", err
 	}
 
+	if statusCb != nil {
+		statusCb("Connecting to appliance")
+	}
+
+	if !complete {
+		// Use autodeploy async task with status polling
+		task, err := c.CreateQKViewTask(ctx, filename)
+		if err == nil && task != nil && task.ID != "" {
+			if statusCb != nil {
+				statusCb("Task ID: " + task.ID)
+			}
+			completedTask, err := c.WaitForQKViewTask(ctx, task.ID, 2*time.Second, statusCb)
+			if err != nil {
+				return "", err
+			}
+			return completedTask.Name, nil
+		}
+	}
+
+	// Use /mgmt/tm/util/qkview
 	args := fmt.Sprintf("-f /var/tmp/qkviews/%s", filename)
 	if complete {
 		args = "-s0 " + args
@@ -153,18 +279,51 @@ func (c *Client) GenerateQKView(ctx context.Context, filename string, complete b
 	c.setAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("generate qkview request failed: %w", err)
+	type result struct {
+		resp *http.Response
+		err  error
 	}
-	defer resp.Body.Close()
+	resCh := make(chan result, 1)
+	go func() {
+		resp, err := c.HTTPClient.Do(req)
+		resCh <- result{resp: resp, err: err}
+	}()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-		return "", fmt.Errorf("qkview generation failed with HTTP %d: %s", resp.StatusCode, string(b))
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	stages := []string{
+		"Gathering MCP system configuration",
+		"Collecting TMOS network interfaces & routing tables",
+		"Compressing diagnostic logs & audit records",
+		"Compiling system hardware metrics & health states",
+		"Packaging diagnostics into archive",
 	}
+	stageIdx := 0
 
-	return filename, nil
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-ticker.C:
+			if statusCb != nil {
+				statusCb(stages[stageIdx%len(stages)])
+				stageIdx++
+			}
+		case res := <-resCh:
+			if res.err != nil {
+				return "", fmt.Errorf("generate qkview request failed: %w", res.err)
+			}
+			defer res.resp.Body.Close()
+
+			if res.resp.StatusCode < 200 || res.resp.StatusCode >= 300 {
+				b, _ := io.ReadAll(io.LimitReader(res.resp.Body, 1024*1024))
+				return "", fmt.Errorf("qkview generation failed with HTTP %d: %s", res.resp.StatusCode, string(b))
+			}
+
+			return filename, nil
+		}
+	}
 }
 
 // DownloadQKView downloads a completed QKView from /mgmt/cm/autodeploy/qkview-downloads using chunked Content-Range.

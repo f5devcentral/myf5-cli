@@ -3,6 +3,7 @@ package ihealth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -18,6 +19,9 @@ import (
 const (
 	DefaultIHealthFQDN = "ihealth2-api.f5.com"
 )
+
+// UploadProgressCallback reports transferred bytes and total bytes during file upload.
+type UploadProgressCallback func(transferred, total int64)
 
 // Client interacts with the F5 iHealth API.
 type Client struct {
@@ -41,11 +45,21 @@ func NewClient(token string, baseFQDN string) *Client {
 // UploadQKView streams a local QKView file to iHealth using multipart/form-data via io.Pipe
 // to ensure constant O(1) memory consumption regardless of archive size.
 func (c *Client) UploadQKView(ctx context.Context, filePath, caseNumber, description string) (*UploadQKViewResponse, error) {
+	return c.UploadQKViewWithProgress(ctx, filePath, caseNumber, description, nil)
+}
+
+// UploadQKViewWithProgress streams a local QKView file to iHealth with real-time progress callbacks.
+func (c *Client) UploadQKViewWithProgress(ctx context.Context, filePath, caseNumber, description string, progressCb UploadProgressCallback) (*UploadQKViewResponse, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open qkview file %s: %w", filePath, err)
 	}
 	defer file.Close()
+
+	var totalSize int64
+	if stat, err := file.Stat(); err == nil {
+		totalSize = stat.Size()
+	}
 
 	pr, pw := io.Pipe()
 	writer := multipart.NewWriter(pw)
@@ -80,9 +94,26 @@ func (c *Client) UploadQKView(ctx context.Context, filePath, caseNumber, descrip
 		}
 
 		buf := make([]byte, 64*1024)
-		if _, err := io.CopyBuffer(part, file, buf); err != nil {
-			writeErr = err
-			return
+		var transferred int64
+		for {
+			n, rErr := file.Read(buf)
+			if n > 0 {
+				if _, wErr := part.Write(buf[:n]); wErr != nil {
+					writeErr = wErr
+					return
+				}
+				transferred += int64(n)
+				if progressCb != nil {
+					progressCb(transferred, totalSize)
+				}
+			}
+			if rErr != nil {
+				if errors.Is(rErr, io.EOF) {
+					break
+				}
+				writeErr = rErr
+				return
+			}
 		}
 
 		writeErr = writer.Close()
