@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -133,7 +134,7 @@ func (c *Client) GenerateQKView(ctx context.Context, filename string, complete b
 		return "", err
 	}
 
-	args := fmt.Sprintf("-f /var/tmp/%s", filename)
+	args := fmt.Sprintf("-f /var/tmp/qkviews/%s", filename)
 	if complete {
 		args = "-s0 " + args
 	}
@@ -166,40 +167,93 @@ func (c *Client) GenerateQKView(ctx context.Context, filename string, complete b
 	return filename, nil
 }
 
-// DownloadQKView downloads a completed QKView from /mgmt/cm/autodeploy/qkview.
-func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath string) error {
+// DownloadQKView downloads a completed QKView from /mgmt/cm/autodeploy/qkview-downloads using chunked Content-Range.
+func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath string, progressCb func(transferred, total int64)) error {
 	if err := ValidateQKViewFilename(remoteFilename); err != nil {
 		return err
 	}
-	url := fmt.Sprintf("%s/mgmt/cm/autodeploy/qkview/%s", c.BaseURL(), remoteFilename)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	c.setAuth(req)
-
-	resp, err := c.HTTPClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to download qkview: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("download failed with HTTP %d: %s", resp.StatusCode, string(b))
+	localPath = filepath.Clean(localPath)
+	if dir := filepath.Dir(localPath); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0750); err != nil {
+			return fmt.Errorf("failed to create destination directory: %w", err)
+		}
 	}
 
-	out, err := os.Create(localPath)
+	url := fmt.Sprintf("%s/mgmt/cm/autodeploy/qkview-downloads/%s", c.BaseURL(), remoteFilename)
+	partPath := localPath + ".part"
+	out, err := os.Create(partPath)
 	if err != nil {
 		return fmt.Errorf("failed to create local file: %w", err)
 	}
-	defer out.Close()
+	defer func() {
+		_ = out.Close()
+		if _, err := os.Stat(partPath); err == nil {
+			_ = os.Remove(partPath)
+		}
+	}()
 
-	if _, err := io.Copy(out, resp.Body); err != nil {
-		return fmt.Errorf("failed saving qkview stream: %w", err)
+	chunkSize := int64(1024 * 1024) // 1MB chunks
+	var start int64 = 0
+	end := chunkSize - 1
+	var totalSize int64 = 0
+	var currentBytes int64 = 0
+
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		c.setAuth(req)
+		req.Header.Set("Content-Type", "application/octet-stream")
+		req.Header.Set("Content-Range", fmt.Sprintf("%d-%d/%d", start, end, totalSize))
+
+		resp, err := c.HTTPClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("failed to download qkview chunk: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+			_ = resp.Body.Close()
+			return fmt.Errorf("chunk download failed with HTTP %d: %s", resp.StatusCode, string(b))
+		}
+
+		if totalSize == 0 {
+			crange := resp.Header.Get("Content-Range")
+			if crange != "" {
+				parts := strings.Split(crange, "/")
+				if len(parts) == 2 {
+					if total, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+						totalSize = total
+					}
+				}
+			}
+		}
+
+		n, err := io.Copy(out, resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return fmt.Errorf("failed saving chunk: %w", err)
+		}
+		currentBytes += n
+		if progressCb != nil && totalSize > 0 {
+			progressCb(currentBytes, totalSize)
+		}
+
+		if totalSize > 0 && currentBytes >= totalSize {
+			break
+		}
+
+		start += chunkSize
+		if totalSize > 0 && (start+chunkSize) > totalSize {
+			end = totalSize - 1
+		} else {
+			end = start + chunkSize - 1
+		}
 	}
 
-	return nil
+	_ = out.Close()
+	return os.Rename(partPath, localPath)
 }
 
 // DeleteQKView removes the temporary QKView file from the BIG-IP appliance.

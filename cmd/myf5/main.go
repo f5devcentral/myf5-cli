@@ -237,7 +237,7 @@ func handleDownloads(args []string) {
 		family, line, ver, cont, fileName := remaining[0], remaining[1], remaining[2], remaining[3], remaining[4]
 		outPath := outputVal
 		if outPath == "" {
-			outPath = fileName
+			outPath = filepath.Join(getDefaultDownloadsDir(), filepath.Base(fileName))
 		}
 
 		client := getDownloadsClient()
@@ -457,7 +457,8 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 
 		link := links[0]
 		fmt.Printf("Mirror URL (expires %s, Region: %s):\n%s\n\n", link.ExpiresAt, link.GetRegion(), link.Href)
-		fmt.Printf("Download this file directly to ./%s? [y/N]: ", selectedTarget.file.Name)
+		targetPath := filepath.Join(getDefaultDownloadsDir(), filepath.Base(selectedTarget.file.Name))
+		fmt.Printf("Download this file directly to %s? [y/N]: ", targetPath)
 		input, _ = reader.ReadString('\n')
 		if strings.ToLower(strings.TrimSpace(input)) == "y" {
 			var expectedHash, hashAlgo string
@@ -468,13 +469,25 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 					break
 				}
 			}
-			_ = downloads.DownloadFile(ctx, link.Href, selectedTarget.file.Name, expectedHash, hashAlgo, func(transferred, total int64, speed float64) {
+			_ = downloads.DownloadFile(ctx, link.Href, targetPath, expectedHash, hashAlgo, func(transferred, total int64, speed float64) {
 				pct := float64(transferred) / float64(total) * 100.0
 				fmt.Printf("\rDownloading: %5.1f%% (%s / %s) [%s/s]", pct, downloads.FormatBytes(transferred), downloads.FormatBytes(total), downloads.FormatBytes(int64(speed)))
 			})
-			fmt.Println("\n[SUCCESS] File saved successfully.")
+			fmt.Printf("\n[SUCCESS] File saved successfully to %s\n", targetPath)
 		}
 	}
+}
+
+// getDefaultDownloadsDir returns ~/Downloads if it exists, falling back to home dir or current dir.
+func getDefaultDownloadsDir() string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		dl := filepath.Join(home, "Downloads")
+		if info, err := os.Stat(dl); err == nil && info.IsDir() {
+			return dl
+		}
+		return home
+	}
+	return "."
 }
 
 // ----------------------------------------------------------------------------
@@ -687,7 +700,36 @@ func handleBIGIP(args []string) {
 			fmt.Fprintf(os.Stderr, "QKView generation failed: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("QKView generation initiated: /var/tmp/%s\n", remoteFile)
+		fmt.Printf("QKView generation complete: /var/tmp/qkviews/%s\n", remoteFile)
+		destPath := filepath.Join(getDefaultDownloadsDir(), remoteFile)
+		fmt.Printf("Downloading QKView directly to %s...\n", destPath)
+		err = client.DownloadQKView(ctx, remoteFile, destPath, func(transferred, total int64) {
+			pct := float64(transferred) / float64(total) * 100.0
+			fmt.Printf("\rDownloading: %5.1f%% (%s / %s)", pct, downloads.FormatBytes(transferred), downloads.FormatBytes(total))
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\n[ERROR] Failed to download QKView: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("\n[SUCCESS] QKView saved to %s\n", destPath)
+
+	case "download":
+		if len(actionArgs) < 2 {
+			fmt.Fprintln(os.Stderr, "Usage: myf5 bigip download <url> <remote-filename>")
+			os.Exit(1)
+		}
+		remoteFile := actionArgs[1]
+		destPath := filepath.Join(getDefaultDownloadsDir(), remoteFile)
+		fmt.Printf("Downloading %s directly to %s...\n", remoteFile, destPath)
+		err := client.DownloadQKView(ctx, remoteFile, destPath, func(transferred, total int64) {
+			pct := float64(transferred) / float64(total) * 100.0
+			fmt.Printf("\rDownloading: %5.1f%% (%s / %s)", pct, downloads.FormatBytes(transferred), downloads.FormatBytes(total))
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\n[ERROR] Download failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("\n[SUCCESS] File saved to %s\n", destPath)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown bigip action '%s'\n", action)
 		os.Exit(1)
