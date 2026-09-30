@@ -1,0 +1,112 @@
+package auth
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"myf5-api/pkg/client"
+)
+
+const (
+	DefaultAuthFQDN = "idp.identity.f5.com"
+	DefaultAppID    = "aus19gt5bu0jGw9Fi358"
+	DefaultAudience = "api://ciam-api-myf5"
+	DefaultScope    = "myf5_scope"
+)
+
+// TokenResponse represents the OAuth2 token endpoint JSON response.
+type TokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int    `json:"expires_in"`
+	Scope       string `json:"scope"`
+}
+
+// Authenticate obtains an OAuth2 Bearer token from F5 Identity Services.
+func Authenticate(ctx context.Context, authFQDN, appID, clientID, clientSecret, scope string) (string, error) {
+	return AuthenticateWithClient(ctx, nil, authFQDN, appID, clientID, clientSecret, scope)
+}
+
+// AuthenticateWithClient allows passing a custom HTTP client (useful for tests or custom proxy).
+func AuthenticateWithClient(ctx context.Context, httpClient *http.Client, authFQDN, appID, clientID, clientSecret, scope string) (string, error) {
+	if authFQDN == "" {
+		authFQDN = DefaultAuthFQDN
+	}
+	if appID == "" {
+		appID = DefaultAppID
+	}
+	if scope == "" {
+		scope = DefaultScope
+	}
+
+	scheme := "https"
+	if strings.HasPrefix(authFQDN, "http://") {
+		scheme = "http"
+		authFQDN = strings.TrimPrefix(authFQDN, "http://")
+	} else if strings.HasPrefix(authFQDN, "https://") {
+		authFQDN = strings.TrimPrefix(authFQDN, "https://")
+	}
+
+	var tokenURL string
+	if strings.Contains(authFQDN, "account.f5.com") {
+		// Legacy Okta endpoint
+		tokenURL = fmt.Sprintf("%s://%s/oauth2/%s/v1/token", scheme, authFQDN, appID)
+	} else {
+		// Modern Auth0 endpoint
+		tokenURL = fmt.Sprintf("%s://%s/oauth/token", scheme, authFQDN)
+	}
+
+	data := url.Values{}
+	data.Set("grant_type", "client_credentials")
+	data.Set("audience", DefaultAudience)
+	if scope != "" {
+		data.Set("scope", scope)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("failed to create auth request: %w", err)
+	}
+
+	// Basic Auth credentials
+	authHeader := base64.StdEncoding.EncodeToString([]byte(clientID + ":" + clientSecret))
+	req.Header.Set("Authorization", "Basic "+authHeader)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "myf5-api-go/1.0.0")
+
+	if httpClient == nil {
+		httpClient = client.NewSecureHTTPClient(15 * time.Second)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("authentication request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read auth response body: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("authentication failed with HTTP %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var tokenResp TokenResponse
+	if err := json.Unmarshal(bodyBytes, &tokenResp); err != nil {
+		return "", fmt.Errorf("failed to parse auth response json: %w", err)
+	}
+
+	if tokenResp.AccessToken == "" {
+		return "", fmt.Errorf("token endpoint returned empty access_token: %s", string(bodyBytes))
+	}
+
+	return tokenResp.AccessToken, nil
+}

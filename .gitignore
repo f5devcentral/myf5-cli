@@ -1,0 +1,47 @@
+# Binaries
+bin/
+dist/
+/myf5
+/myf5.exe
+
+# F5 Diagnostics & Downloaded Images
+*.qkview
+*.iso
+*.img
+*.ova
+*.ovf
+*.qcow2
+*.qcow2.gz
+*.vhd
+*.vhdx
+*.vmdk
+*.tgz
+*.tar.gz
+*.tar
+*.zip
+*.rpm
+
+# Test and coverage artifacts
+*.out
+*.test
+coverage.txt
+coverage.html
+
+# Credentials and secrets
+.env
+.env.*
+*.key
+*.pem
+.f5api_credentials
+*.f5api_credentials*
+*f5api_credentials*
+.ihealth_credentials
+*ihealth_credentials*
+*credentials*.ini
+*credentials*.json
+
+# OS and IDE files
+.DS_Store
+.idea/
+.vscode/
+scratch/
