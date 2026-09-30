@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -50,6 +51,12 @@ func DownloadFile(
 	}
 
 	totalSize := resp.ContentLength
+	outputPath = filepath.Clean(outputPath)
+	if dir := filepath.Dir(outputPath); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0750); err != nil {
+			return fmt.Errorf("failed to create destination directory %s: %w", dir, err)
+		}
+	}
 	partPath := outputPath + ".part"
 
 	out, err := os.Create(partPath)

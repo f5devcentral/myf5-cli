@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -22,6 +23,18 @@ var ForbiddenSecretFlags = []string{
 	"-pw",
 	"--secret",
 	"-secret",
+	"--token",
+	"-token",
+	"--access-token",
+	"-access-token",
+	"--api-key",
+	"-api-key",
+	"--apikey",
+	"-apikey",
+	"--auth-token",
+	"-auth-token",
+	"--key",
+	"-key",
 }
 
 // CheckNoCLISecrets validates that no forbidden secret arguments exist in argv.
@@ -47,6 +60,19 @@ func CheckNoCLISecrets(args []string) error {
 type Credentials struct {
 	ClientID     string
 	ClientSecret string
+}
+
+// String implements fmt.Stringer to ensure secrets are never leaked into logs or stdout.
+func (c Credentials) String() string {
+	if c.ClientSecret != "" {
+		return fmt.Sprintf("Credentials{ClientID: %q, ClientSecret: [REDACTED]}", c.ClientID)
+	}
+	return fmt.Sprintf("Credentials{ClientID: %q}", c.ClientID)
+}
+
+// GoString implements fmt.GoStringer.
+func (c Credentials) GoString() string {
+	return c.String()
 }
 
 // ResolveCredentials resolves API credentials following the Zero-Secret policy:
@@ -101,6 +127,23 @@ func ResolveCredentials(profile string) (*Credentials, error) {
 
 // readCredentialsFile parses KEY=VALUE or INI format credentials files.
 func readCredentialsFile(filePath, profile string) (*Credentials, error) {
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(filePath)
+		if err == nil {
+			if !info.Mode().IsRegular() {
+				return nil, fmt.Errorf("credential file %s is not a regular file", filePath)
+			}
+			perm := info.Mode().Perm()
+			if perm&0077 != 0 {
+				return nil, fmt.Errorf(
+					"insecure permissions on credential file %s (mode %04o): must be 0600 (owner read/write only).\n"+
+						"To secure your credentials, run: chmod 600 %s",
+					filePath, perm, filePath,
+				)
+			}
+		}
+	}
+
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err

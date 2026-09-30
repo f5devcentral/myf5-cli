@@ -56,3 +56,32 @@ func TestBaseURLAndURLNormalization(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateQKViewFilename(t *testing.T) {
+	valid := []string{
+		"myqkview.qkview",
+		"qkview_10.1.1.4_1600000000.qkview",
+		"backup-2026-09-30.qkview",
+		"my_appliance_qkview",
+	}
+	for _, f := range valid {
+		if err := ValidateQKViewFilename(f); err != nil {
+			t.Errorf("expected valid filename %q, got error: %v", f, err)
+		}
+	}
+
+	invalid := []string{
+		"qkview; rm -rf /; .qkview",
+		"qkview$(reboot).qkview",
+		"qkview`id`.qkview",
+		"../../etc/passwd",
+		"qkview|cat /etc/shadow",
+		"qkview&touch /tmp/pwned",
+		"",
+	}
+	for _, f := range invalid {
+		if err := ValidateQKViewFilename(f); err == nil {
+			t.Errorf("expected rejection for malicious/invalid filename %q, got nil error", f)
+		}
+	}
+}

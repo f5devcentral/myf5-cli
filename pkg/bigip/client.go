@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -96,13 +97,40 @@ func (c *Client) CheckReady(ctx context.Context) (bool, error) {
 	return resp.StatusCode == http.StatusOK, nil
 }
 
+var validQKViewFilenameRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
+
+// ValidateQKViewFilename checks for illegal characters or path traversal sequences
+// to prevent remote command injection and directory traversal on BIG-IP TMOS.
+func ValidateQKViewFilename(filename string) error {
+	if filename == "" {
+		return fmt.Errorf("filename cannot be empty")
+	}
+	if !validQKViewFilenameRegex.MatchString(filename) {
+		return fmt.Errorf("invalid qkview filename %q: contains prohibited characters (only alphanumeric, _, -, and . allowed)", filename)
+	}
+	if strings.Contains(filename, "..") {
+		return fmt.Errorf("invalid qkview filename %q: path traversal ('..') is prohibited", filename)
+	}
+	return nil
+}
+
 // GenerateQKView initiates an asynchronous non-truncating QKView generation job.
 func (c *Client) GenerateQKView(ctx context.Context, filename string, complete bool) (string, error) {
 	if filename == "" {
-		filename = fmt.Sprintf("qkview_%s_%d.qkview", c.Host, time.Now().Unix())
+		cleanHost := strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+				return r
+			}
+			return '_'
+		}, c.Host)
+		filename = fmt.Sprintf("qkview_%s_%d.qkview", cleanHost, time.Now().Unix())
 	}
 	if !strings.HasSuffix(filename, ".qkview") {
 		filename += ".qkview"
+	}
+
+	if err := ValidateQKViewFilename(filename); err != nil {
+		return "", err
 	}
 
 	args := fmt.Sprintf("-f /var/tmp/%s", filename)
@@ -131,7 +159,7 @@ func (c *Client) GenerateQKView(ctx context.Context, filename string, complete b
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 		return "", fmt.Errorf("qkview generation failed with HTTP %d: %s", resp.StatusCode, string(b))
 	}
 
@@ -140,6 +168,9 @@ func (c *Client) GenerateQKView(ctx context.Context, filename string, complete b
 
 // DownloadQKView downloads a completed QKView from /mgmt/cm/autodeploy/qkview.
 func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath string) error {
+	if err := ValidateQKViewFilename(remoteFilename); err != nil {
+		return err
+	}
 	url := fmt.Sprintf("%s/mgmt/cm/autodeploy/qkview/%s", c.BaseURL(), remoteFilename)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -173,6 +204,9 @@ func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath s
 
 // DeleteQKView removes the temporary QKView file from the BIG-IP appliance.
 func (c *Client) DeleteQKView(ctx context.Context, remoteFilename string) error {
+	if err := ValidateQKViewFilename(remoteFilename); err != nil {
+		return err
+	}
 	url := fmt.Sprintf("%s/mgmt/cm/autodeploy/qkview/%s", c.BaseURL(), remoteFilename)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
@@ -187,7 +221,7 @@ func (c *Client) DeleteQKView(ctx context.Context, remoteFilename string) error 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		b, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 		return fmt.Errorf("delete failed with HTTP %d: %s", resp.StatusCode, string(b))
 	}
 

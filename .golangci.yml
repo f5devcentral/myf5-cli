@@ -13,6 +13,7 @@ linters:
     - gosec
     - misspell
     - unconvert
+    - bodyclose
 
 linters-settings:
   govet:
@@ -22,8 +23,6 @@ linters-settings:
   gosec:
     severity: medium
     confidence: medium
-    excludes:
-      - G402 # TLS InsecureSkipVerify is purposefully allowed for lab BIG-IPs in NewInsecureHTTPClient
 
 issues:
   exclude-dirs:

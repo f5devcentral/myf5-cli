@@ -22,7 +22,7 @@ all: fmt vet test build
 build:
 	@mkdir -p $(BIN_DIR)
 	@echo "==> Building $(BINARY_NAME) (v$(VERSION)) for host..."
-	CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) $(CMD_PATH)
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) $(CMD_PATH)
 	@echo "==> Binary created: $(BIN_DIR)/$(BINARY_NAME)"
 
 ## test: Run unit tests with race detection

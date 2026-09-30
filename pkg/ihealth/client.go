@@ -1,7 +1,6 @@
 package ihealth
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -39,7 +38,8 @@ func NewClient(token string, baseFQDN string) *Client {
 	}
 }
 
-// UploadQKView streams a local QKView file to iHealth using multipart/form-data.
+// UploadQKView streams a local QKView file to iHealth using multipart/form-data via io.Pipe
+// to ensure constant O(1) memory consumption regardless of archive size.
 func (c *Client) UploadQKView(ctx context.Context, filePath, caseNumber, description string) (*UploadQKViewResponse, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -47,28 +47,46 @@ func (c *Client) UploadQKView(ctx context.Context, filePath, caseNumber, descrip
 	}
 	defer file.Close()
 
-	bodyBuf := &bytes.Buffer{}
-	writer := multipart.NewWriter(bodyBuf)
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
 
-	part, err := writer.CreateFormFile("qkview", filepath.Base(filePath))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create multipart part: %w", err)
-	}
+	go func() {
+		var writeErr error
+		defer func() {
+			if writeErr != nil {
+				_ = pw.CloseWithError(writeErr)
+			} else {
+				_ = pw.Close()
+			}
+		}()
 
-	if _, err := io.Copy(part, file); err != nil {
-		return nil, fmt.Errorf("failed to copy qkview bytes to multipart buffer: %w", err)
-	}
+		if caseNumber != "" {
+			if err := writer.WriteField("case_number", caseNumber); err != nil {
+				writeErr = err
+				return
+			}
+		}
+		if description != "" {
+			if err := writer.WriteField("description", description); err != nil {
+				writeErr = err
+				return
+			}
+		}
 
-	if caseNumber != "" {
-		_ = writer.WriteField("case_number", caseNumber)
-	}
-	if description != "" {
-		_ = writer.WriteField("description", description)
-	}
+		part, err := writer.CreateFormFile("qkview", filepath.Base(filePath))
+		if err != nil {
+			writeErr = err
+			return
+		}
 
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close multipart writer: %w", err)
-	}
+		buf := make([]byte, 64*1024)
+		if _, err := io.CopyBuffer(part, file, buf); err != nil {
+			writeErr = err
+			return
+		}
+
+		writeErr = writer.Close()
+	}()
 
 	scheme := "https"
 	fqdn := c.BaseFQDN
@@ -80,8 +98,9 @@ func (c *Client) UploadQKView(ctx context.Context, filePath, caseNumber, descrip
 	}
 
 	uploadURL := fmt.Sprintf("%s://%s/qkview-analyzer/api/v1/qkviews", scheme, fqdn)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, bodyBuf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, pr)
 	if err != nil {
+		_ = pr.Close()
 		return nil, fmt.Errorf("failed to create upload request: %w", err)
 	}
 
@@ -96,7 +115,7 @@ func (c *Client) UploadQKView(ctx context.Context, filePath, caseNumber, descrip
 	}
 	defer resp.Body.Close()
 
-	respBytes, err := io.ReadAll(resp.Body)
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read upload response: %w", err)
 	}
