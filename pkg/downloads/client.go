@@ -27,9 +27,9 @@ const (
 
 // Client handles interaction with the MyF5 Software Downloads API.
 type Client struct {
-	HTTPClient  *http.Client
-	BaseFQDN    string
-	Token       string
+	HTTPClient   *http.Client
+	BaseFQDN     string
+	Token        string
 	AutoFallback bool
 }
 
@@ -39,9 +39,9 @@ func NewClient(token string, baseFQDN string) *Client {
 		baseFQDN = DefaultDownloadsFQDN
 	}
 	return &Client{
-		HTTPClient:  client.NewSecureHTTPClient(30 * time.Second),
-		BaseFQDN:    baseFQDN,
-		Token:       token,
+		HTTPClient:   client.NewSecureHTTPClient(30 * time.Second),
+		BaseFQDN:     baseFQDN,
+		Token:        token,
 		AutoFallback: true,
 	}
 }

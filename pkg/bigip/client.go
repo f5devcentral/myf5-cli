@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,12 +28,36 @@ type Client struct {
 }
 
 // NewClient initializes a BIG-IP appliance client.
-func NewClient(host string, port int, username, password string) *Client {
-	if port <= 0 {
-		port = 443
+func NewClient(rawHost string, port int, username, password string) *Client {
+	scheme := "https"
+	host := strings.TrimSpace(rawHost)
+	if strings.HasPrefix(host, "http://") {
+		scheme = "http"
+		host = strings.TrimPrefix(host, "http://")
+	} else if strings.HasPrefix(host, "https://") {
+		scheme = "https"
+		host = strings.TrimPrefix(host, "https://")
 	}
+	host = strings.TrimRight(host, "/")
+
+	// If host contains embedded port (e.g. host:8443)
+	if h, pStr, err := net.SplitHostPort(host); err == nil {
+		host = h
+		if p, err := strconv.Atoi(pStr); err == nil && p > 0 {
+			port = p
+		}
+	}
+
+	if port <= 0 {
+		if scheme == "http" {
+			port = 80
+		} else {
+			port = 443
+		}
+	}
+
 	return &Client{
-		Scheme:     "https",
+		Scheme:     scheme,
 		Host:       host,
 		Port:       port,
 		Username:   username,
@@ -40,16 +66,21 @@ func NewClient(host string, port int, username, password string) *Client {
 	}
 }
 
-func (c *Client) getScheme() string {
-	if c.Scheme != "" {
-		return c.Scheme
+// BaseURL returns the canonical base URL for the appliance.
+func (c *Client) BaseURL() string {
+	scheme := c.Scheme
+	if scheme == "" {
+		scheme = "https"
 	}
-	return "https"
+	if (scheme == "https" && c.Port == 443) || (scheme == "http" && c.Port == 80) {
+		return fmt.Sprintf("%s://%s", scheme, c.Host)
+	}
+	return fmt.Sprintf("%s://%s:%d", scheme, c.Host, c.Port)
 }
 
 // CheckReady queries /mgmt/tm/sys/ready to verify appliance availability.
 func (c *Client) CheckReady(ctx context.Context) (bool, error) {
-	url := fmt.Sprintf("%s://%s:%d/mgmt/tm/sys/ready", c.getScheme(), c.Host, c.Port)
+	url := fmt.Sprintf("%s/mgmt/tm/sys/ready", c.BaseURL())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return false, err
@@ -85,7 +116,7 @@ func (c *Client) GenerateQKView(ctx context.Context, filename string, complete b
 	}
 	jsonBytes, _ := json.Marshal(payload)
 
-	url := fmt.Sprintf("%s://%s:%d/mgmt/tm/util/qkview", c.getScheme(), c.Host, c.Port)
+	url := fmt.Sprintf("%s/mgmt/tm/util/qkview", c.BaseURL())
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBytes))
 	if err != nil {
 		return "", err
@@ -109,7 +140,7 @@ func (c *Client) GenerateQKView(ctx context.Context, filename string, complete b
 
 // DownloadQKView downloads a completed QKView from /mgmt/cm/autodeploy/qkview.
 func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath string) error {
-	url := fmt.Sprintf("%s://%s:%d/mgmt/cm/autodeploy/qkview/%s", c.getScheme(), c.Host, c.Port, remoteFilename)
+	url := fmt.Sprintf("%s/mgmt/cm/autodeploy/qkview/%s", c.BaseURL(), remoteFilename)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -142,7 +173,7 @@ func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath s
 
 // DeleteQKView removes the temporary QKView file from the BIG-IP appliance.
 func (c *Client) DeleteQKView(ctx context.Context, remoteFilename string) error {
-	url := fmt.Sprintf("%s://%s:%d/mgmt/cm/autodeploy/qkview/%s", c.getScheme(), c.Host, c.Port, remoteFilename)
+	url := fmt.Sprintf("%s/mgmt/cm/autodeploy/qkview/%s", c.BaseURL(), remoteFilename)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 	if err != nil {
 		return err

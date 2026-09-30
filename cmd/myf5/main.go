@@ -16,6 +16,8 @@ import (
 	"myf5-api/pkg/cases"
 	"myf5-api/pkg/downloads"
 	"myf5-api/pkg/ihealth"
+
+	"golang.org/x/term"
 )
 
 const Version = "1.0.0"
@@ -59,6 +61,11 @@ func main() {
 func printUsage() {
 	fmt.Printf(`myf5-api - High-Performance F5 Cloud & Appliance Automation CLI (v%s)
 
+IMPORTANT NOTICE:
+    This tool is NOT an officially supported F5 product or service.
+    For issues, bugs, or questions, please email Greg Robinson (g.robinson@f5.com)
+    or file an issue at https://github.com/SalesAmerSP/myf5-api/issues.
+
 USAGE:
     myf5 <command> [subcommand] [arguments...]
 
@@ -66,13 +73,14 @@ COMMANDS:
     downloads    Browse MyF5 catalog and stream multi-GB software images
     cases        View and manage MyF5 support cases
     ihealth      Upload and inspect QKView diagnostic bundles on iHealth
-    bigip        Manage BIG-IP TMOS appliances (QKView generation, download)
+    bigip        Manage BIG-IP TMOS appliances (ready check, QKView generation)
     doctor       Verify API credentials, DNS, and network firewall egress
     version      Print application version
 
 ZERO-SECRET SECURITY POLICY:
     CLI arguments for secrets (--password, --client-secret) are strictly rejected.
     Store credentials in environment variables or ~/.f5api_credentials (or [profile]).
+    For BIG-IP commands without BIGIP_PASSWORD set, interactive masked entry will prompt.
 
 Run 'myf5 <command> --help' for details on specific commands.
 `, Version)
@@ -598,29 +606,66 @@ func handleIHealth(args []string) {
 
 func handleBIGIP(args []string) {
 	if len(args) == 0 {
-		fmt.Println("Usage: myf5 bigip [ready <host> | qkview <host>]")
+		fmt.Println("Usage: myf5 bigip [ready <host> | qkview <host>] [--user <user>] [--port <port>]")
 		os.Exit(1)
 	}
 
 	action := args[0]
-	if len(args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: myf5 bigip %s <host> [--user admin]\n", action)
+	actionArgs := args[1:]
+	if len(actionArgs) < 1 {
+		fmt.Fprintf(os.Stderr, "Usage: myf5 bigip %s <host> [--user <user>] [--port <port>]\n", action)
 		os.Exit(1)
 	}
 
-	host := args[1]
+	host := actionArgs[0]
 	user := os.Getenv("BIGIP_USER")
 	if user == "" {
 		user = "admin"
 	}
+	port := 0
+
+	for i := 1; i < len(actionArgs); i++ {
+		arg := actionArgs[i]
+		if arg == "--user" || arg == "-u" {
+			if i+1 < len(actionArgs) {
+				user = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--user=") {
+			user = strings.TrimPrefix(arg, "--user=")
+		} else if arg == "--port" || arg == "-p" {
+			if i+1 < len(actionArgs) {
+				if p, err := strconv.Atoi(actionArgs[i+1]); err == nil {
+					port = p
+				}
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--port=") {
+			if p, err := strconv.Atoi(strings.TrimPrefix(arg, "--port=")); err == nil {
+				port = p
+			}
+		}
+	}
 
 	pw := os.Getenv("BIGIP_PASSWORD")
 	if pw == "" {
-		fmt.Fprintf(os.Stderr, "[ERROR] BIGIP_PASSWORD environment variable must be set.\n")
+		// Prompt securely from terminal if interactive TTY is available
+		if term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Printf("Enter BIG-IP password for %s@%s: ", user, host)
+			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err == nil {
+				pw = strings.TrimSpace(string(bytePw))
+			}
+		}
+	}
+
+	if pw == "" {
+		fmt.Fprintf(os.Stderr, "[ERROR] BIGIP_PASSWORD environment variable must be set, or entered at prompt.\n")
 		os.Exit(1)
 	}
 
-	client := bigip.NewClient(host, 443, user, pw)
+	client := bigip.NewClient(host, port, user, pw)
 	ctx := context.Background()
 
 	switch action {
@@ -687,7 +732,7 @@ func handleDoctor(args []string) {
 
 	fmt.Println("\n2. Network Egress & DNS Connectivity Audit (TCP 443):")
 	for _, ep := range endpoints {
-		target := fmt.Sprintf("%s:%d", ep.fqdn, ep.port)
+		target := net.JoinHostPort(ep.fqdn, strconv.Itoa(ep.port))
 		conn, err := net.DialTimeout("tcp", target, 3*time.Second)
 		if err != nil {
 			fmt.Printf("   [FAIL] %-25s (%s): %v\n", ep.name, ep.fqdn, err)

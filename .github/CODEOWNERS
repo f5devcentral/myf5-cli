@@ -1,0 +1,18 @@
+# Global repository maintainers
+* @SalesAmerSP/core-maintainers @grobf5
+
+# Security, Authentication, and Credential Resolver
+/pkg/auth/ @grobf5 @SalesAmerSP/security-reviewers
+
+# Client Transport, TLS Configurations, and Appliance Connectors
+/pkg/client/ @grobf5
+/pkg/bigip/ @grobf5
+
+# Downloads & Case Management APIs
+/pkg/downloads/ @grobf5
+/pkg/cases/ @grobf5
+/pkg/ihealth/ @grobf5
+
+# CI/CD Workflows, Automation, and Security Scanners
+/.github/ @grobf5 @SalesAmerSP/devops-maintainers
+/Makefile @grobf5
