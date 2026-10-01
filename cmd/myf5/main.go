@@ -18,6 +18,7 @@ import (
 	"myf5-api/pkg/auth"
 	"myf5-api/pkg/bigip"
 	"myf5-api/pkg/cases"
+	"myf5-api/pkg/completion"
 	"myf5-api/pkg/downloads"
 	"myf5-api/pkg/ihealth"
 	"myf5-api/pkg/progress"
@@ -75,6 +76,8 @@ func main() {
 		handleBIGIP(ctx, args)
 	case "doctor":
 		handleDoctor(ctx, args)
+	case "completion":
+		handleCompletion(args)
 	case "version", "--version", "-v":
 		fmt.Printf("myf5-api version %s (Go 1.27.1 / darwin-arm64)\n", Version)
 	case "help", "--help", "-h":
@@ -102,6 +105,7 @@ COMMANDS:
     ihealth      Upload and inspect QKView diagnostic bundles on iHealth
     bigip        Manage BIG-IP TMOS appliances (ready check, QKView generation)
     doctor       Verify API credentials, DNS, and network firewall egress
+    completion   Generate shell tab completion script (bash, zsh, fish)
     version      Print application version
 
 ZERO-SECRET SECURITY POLICY:
@@ -1187,4 +1191,40 @@ func handleDoctor(ctx context.Context, args []string) {
 	}
 
 	fmt.Println("\nDoctor audit complete.")
+}
+
+// ----------------------------------------------------------------------------
+// Shell Tab Completion Command
+// ----------------------------------------------------------------------------
+
+func handleCompletion(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, `Usage: myf5 completion [bash | zsh | fish]
+
+Generate shell completion scripts to enable tab autocompletion.
+
+EXAMPLES:
+  # Bash (current session)
+  source <(myf5 completion bash)
+
+  # Bash (system-wide installation on Linux)
+  myf5 completion bash | sudo tee /etc/bash_completion.d/myf5 > /dev/null
+
+  # Zsh (current session)
+  source <(myf5 completion zsh)
+
+  # Zsh (persistent installation)
+  myf5 completion zsh > "${fpath[1]}/_myf5"
+
+  # Fish (persistent installation)
+  myf5 completion fish > ~/.config/fish/completions/myf5.fish
+`)
+		os.Exit(1)
+	}
+
+	shell := strings.ToLower(args[0])
+	if err := completion.Generate(shell, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+		os.Exit(1)
+	}
 }

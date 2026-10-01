@@ -179,6 +179,26 @@ export BIGIP_PASSWORD="YourAppliancePassword"
 ./bin/myf5 bigip qkview https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com/
 ```
 
+### 6. Shell Tab Autocompletion (`bash`, `zsh`, `fish`)
+Enable fast tab autocompletion for commands, subcommands, flags, and product families:
+
+```bash
+# Zsh (current session)
+source <(myf5 completion zsh)
+
+# Zsh (persistent setup)
+myf5 completion zsh > "${fpath[1]}/_myf5"
+
+# Bash (current session)
+source <(myf5 completion bash)
+
+# Bash (persistent setup on Linux)
+myf5 completion bash | sudo tee /etc/bash_completion.d/myf5 > /dev/null
+
+# Fish (persistent setup)
+myf5 completion fish > ~/.config/fish/completions/myf5.fish
+```
+
 ---
 
 ## 🛡️ Memory Safety & Zero-Secret Security Architecture
