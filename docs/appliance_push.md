@@ -37,6 +37,7 @@ By embedding both **iControl REST chunked transfer** and **native Go SCP over SS
 | **Default Ports** | TCP 443 (REST) / TCP 22 (SSH) | TCP 443 | TCP 22 |
 | **External Dependencies** | Zero | Zero (Pure Go `net/http`) | Zero (Pure Go `golang.org/x/crypto/ssh`) |
 | **Network Path Compatibility** | All environments (Firewall resilient) | Web proxies, Cloud proxies, F5 UDF | Direct L3 / SSH bastions |
+| **Shell Access Requirement** | Any role / shell (Adaptive fallback) | User with API access (independent of login shell) | User with Advanced Shell (`bash`) access or targeting `/var/tmp` |
 | **Chunk / Buffer Size** | 512 KB REST / 64 KB SCP | 512 KB (`Content-Range` chunking) | 64 KB streaming buffer |
 | **Upload Destination** | Direct write or `/shared/images` | `/var/config/rest/downloads` (promoted) | Direct destination write via `scp -t` |
 | **Download Source** | Any TMOS path (adaptive) | Autodeploy stores (`software-image-downloads`) | Any valid appliance file path via `scp -f` |
@@ -168,8 +169,8 @@ myf5 bigip push 192.0.2.10 /var/tmp/BIGIP-17.1.1-0.0.6.iso \
 #### TMOS Post-Push Software Installation
 Once the file transfer completes, access the appliance via TMSH or SSH to trigger the installation:
 ```bash
-# Verify the image is recognized by TMOS
-tmsh show sys software
+# Verify the image is present in /shared/images
+tmsh list sys software image BIGIP-17.1.1-0.0.6.iso
 
 # Install to a new software volume (e.g., HD1.2)
 tmsh install sys software image BIGIP-17.1.1-0.0.6.iso volume HD1.2 create-volume
@@ -199,25 +200,57 @@ tmsh install sys software hotfix Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso volume HD1.
 
 ---
 
-### 3. Pushing an Updated GeoDB Archive to `/shared/GeoIP/`
+### 3. Pushing an Updated GeoDB Archive & Applying Geolocation Updates
 
-BIG-IP Application Security Manager (ASM), Advanced Firewall Manager (AFM), and Access Policy Manager (APM) utilize GeoLocation databases stored in `/shared/GeoIP/`.
+BIG-IP Application Security Manager (ASM / Advanced WAF), Advanced Firewall Manager (AFM), Access Policy Manager (APM), and DNS/GTM utilize IP geolocation databases supplied by **Digital Envoy** (NetAcuity Edge and Pulse variants, AskF5 K11176 / K78974041).
+
+Active databases reside on the appliance filesystem under `/shared/GeoIP/` (and `/shared/GeoIP/v2/`).
+
+#### Staging the Update Archive
+The packages downloaded from the MyF5 `GeoLocationUpdates` container are delivered as a compressed `.zip` archive (e.g., `ip-geolocation-default.zip` or `ip-geolocation-*.zip`) containing individual `.rpm` packages for region, ISP, and organization data.
+
+Stage the archive in `/var/tmp` or `/shared/tmp`:
 
 ```bash
-# Push GeoDB update archive to /shared/GeoIP/ via iControl REST
+# Push GeoDB update archive to appliance staging directory via iControl REST
 myf5 bigip push 192.0.2.10 /var/tmp/ip-geolocation-default.zip \
     --method icontrol \
-    --dest /shared/GeoIP
+    --dest /var/tmp
 ```
 
-#### TMOS GeoDB Verification & Reload
+#### TMOS GeoDB Extraction, Installation & Verification
+On TMOS, extract the container `.zip` archive and install each component `.rpm` package using the native `geoip_update_data` utility:
+
 ```bash
-# Connect to TMOS bash and update the active GeoIP databases
-ssh admin@192.0.2.10 "geoip_update_data -f /shared/GeoIP/ip-geolocation-default.zip"
+# 1. SSH into TMOS bash (requires Advanced Shell access or root)
+ssh admin@192.0.2.10
 
-# Verify active GeoDB version
-tmsh show sys geoip info
+# 2. Extract the update archive to a temporary staging folder
+mkdir -p /shared/tmp/geoip_update
+unzip -q /var/tmp/ip-geolocation-default.zip -d /shared/tmp/geoip_update
+
+# 3. Apply the individual geolocation database RPM packages
+geoip_update_data -f /shared/tmp/geoip_update/geoip-data-v2-Region2-*.i686.rpm
+geoip_update_data -f /shared/tmp/geoip_update/geoip-data-v2-ISP-*.i686.rpm
+geoip_update_data -f /shared/tmp/geoip_update/geoip-data-v2-Org-*.i686.rpm
+
+# 4. Verify installed RPM versions
+rpm -qa --dbpath /shared/lib/rpm/ | grep geoip
+
+# 5. Verify database lookup resolution and build date
+geoip_lookup 192.0.2.1
+
+# 6. Reload active geolocation databases into TMOS microkernel (if needed)
+tmsh load sys geoip
+
+# 7. Clean up temporary extraction directory
+rm -rf /shared/tmp/geoip_update /var/tmp/ip-geolocation-default.zip
 ```
+
+> [!NOTE]
+> `tmsh show sys geoip` or `tmsh show sys geoip info` is not a valid TMOS command. Verification is performed using `geoip_lookup <ip_address>` in Bash or inspecting installed RPMs via `rpm -qa --dbpath /shared/lib/rpm/ | grep geoip`. Database reload into memory is performed via `tmsh load sys geoip` or `geoip_reload_data`.
+>
+> If deploying the **Digital Envoy Pulse** database, ensure the BIG-IP system has at least 900 MB of available memory provisioned. Pulse does not support the city-level granularity tier (AskF5 K78974041).
 
 ---
 
@@ -284,9 +317,9 @@ Generating a complete QKView diagnostic archive is critical for troubleshooting 
 myf5 bigip qkview 10.1.1.4 --user admin
 ```
 
-1. **Remote Generation**: Calls `/mgmt/tm/cm/device/diagnostic` with live spinner reporting until TMOS finishes compiling `/var/tmp/qkviews/<filename>`.
+1. **Remote Generation**: Calls `/mgmt/tm/util/qkview` with arguments `-s0 -f /var/tmp/qkviews/<filename>` (or initiates an asynchronous task via `/mgmt/cm/autodeploy/qkview`) with live spinner reporting until TMOS finishes compiling the diagnostic bundle.
 2. **Resilient Download**: Attempts chunked REST download from `/mgmt/cm/autodeploy/qkview-downloads/<filename>`.
-3. **Automatic Failover**: If TMOS autodeploy is disabled or returns 404, `myf5` automatically switches to native Go SCP, transferring `/var/tmp/qkviews/<filename>` without aborting the workflow.
+3. **Automatic Failover**: If TMOS autodeploy download is unavailable or returns 404, `myf5` automatically switches to native Go SCP, transferring `/var/tmp/qkviews/<filename>` without aborting the workflow.
 
 ---
 
@@ -394,3 +427,13 @@ Rather than spawning an external OpenSSH subprocess (`/usr/bin/scp`), `myf5` dri
 When `--dest` is omitted in SCP mode, `myf5` applies intelligent heuristics based on filename:
 - Files ending in `.iso`, `.iso.zip`, or containing `hotfix` (case-insensitive) automatically target `/shared/images`.
 - All other files (e.g. `.zip`, `.tar.gz`, `.txt`) default to `/var/tmp`.
+
+#### TMOS User Shells & SCP Path Whitelist Constraints
+On F5 BIG-IP appliances, user terminal access configuration directly affects SCP transfers:
+- **Default User Shell**: By default, the `admin` administrative account is configured with `tmsh` shell access (`Terminal Access: tmsh` or `Disabled`). The `root` account defaults to Advanced Shell (`bash`).
+- **SCP Path Whitelist Restriction**: To mitigate security vulnerabilities (such as CVE-2020-5873 and CVE-2022-26340), TMOS restricts users with `tmsh`-only shell access to a strict directory whitelist—principally `/var/tmp/`. Transferring files directly to arbitrary paths such as `/shared/images/` or `/shared/GeoIP/` as a `tmsh`-restricted user triggers a `path not allowed` error from TMOS.
+- **Remediation & Best Practices**:
+  1. **Configure Advanced Shell**: If organization security policy allows, grant the account Advanced Shell (`bash`) access via `tmsh modify auth user <username> shell bash` followed by `tmsh save sys config`.
+  2. **Authenticate as Root**: Use the appliance `root` user for direct `/shared/images` or system directory transfers via SCP.
+  3. **Stage to `/var/tmp`**: Target `/var/tmp` for the SCP transfer (whitelisted), then move or extract files locally from TMOS.
+  4. **Leverage iControl REST Upload**: Use `--method icontrol` (or the default `--method auto` failover), which uploads files via `/mgmt/shared/file-transfer/uploads/` to `/var/config/rest/downloads/` and promotes them via `/mgmt/tm/util/bash` completely independent of the user's interactive login shell setting.
