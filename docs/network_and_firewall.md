@@ -8,16 +8,23 @@ This document outlines the network egress requirements, DNS endpoints, and upcom
 
 Enterprise jump boxes, CI/CD runners, and edge orchestrators running `myf5` require outbound HTTPS (TCP 443) to the following F5 Cloud FQDNs:
 
-| FQDN | Service Role | Notes |
+| FQDN | Service Role | Notes & Endpoints |
 | :--- | :--- | :--- |
-| `idp.identity.f5.com` | F5 Identity / OAuth2 | Primary Auth0 token issuer (`/oauth/token`) |
-| `identity.account.f5.com` | F5 Identity / Okta | Alternate identity provider issuer |
-| `api.software.downloads.f5.com` | MyF5 Downloads API | Authoritative API base URL (No `k` parameter) |
-| `support.apis.f5.com` | MyF5 Support Case API | Case creation, metadata, comments |
-| `ihealth2-api.f5.com` | F5 iHealth API | Diagnostic QKView upload & analysis |
-| `callhome.f5.com` | F5 Callhome Telemetry | Used by BIG-IP and BIG-IQ appliances |
+| `idp.identity.f5.com` | F5 Identity / OAuth2 | Primary Auth0 token issuer (`POST /oauth/token`) |
+| `identity.account.f5.com` | F5 Identity / Okta CIAM | Dedicated CIAM authorization server (`POST /oauth2/ausp95yxb4ShxMGvW357/v1/token`, audience `api://ciam-api-myf5`, scope `myf5_scope`) |
+| `api.software.downloads.f5.com` | MyF5 Downloads API | Authoritative API base URL (No `k` parameter, October 2 cutover) |
+| `support.apis.f5.com` | MyF5 Support Case API | Support case management (`/case-management/v1/cases`, `/support/case-management/v1/cases`) |
+| `ihealth-api.f5.com` | F5 iHealth API (Primary) | Authoritative diagnostic QKView upload & analysis (`/qkview-analyzer/api/v1/qkviews`) |
+| `ihealth2-api.f5.com` | F5 iHealth API (Alternate) | Alternate / legacy diagnostic QKView gateway |
+| `callhome.f5.com` | F5 Callhome Telemetry | Used by BIG-IP and BIG-IQ appliances for automated telemetry |
+| `api.f5.com` | F5 Cloud Services Gateway | Cloud telemetry and license reporting |
 
-You can verify reachability to all required endpoints using:
+### Appliance Management Firewall Ports (Internal Egress)
+When orchestrating file transfers, QKView generation, or health checks against internal appliances:
+- **TCP 443 (HTTPS)**: iControl REST API chunked transfers (`/mgmt/shared/file-transfer/uploads/`), autodeploy downloads, and bash promotion utility.
+- **TCP 22 (SSH)**: Native Go SCP streaming transfers (`scp -t` / `scp -f`) and remote CLI diagnostics.
+
+You can verify reachability to all required cloud endpoints using:
 ```bash
 ./bin/myf5 doctor
 ```
