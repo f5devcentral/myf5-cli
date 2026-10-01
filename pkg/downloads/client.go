@@ -149,7 +149,8 @@ func (c *Client) doGetWithFallback(ctx context.Context, path string) ([]byte, er
 	resp, err := c.HTTPClient.Do(req)
 	if err == nil {
 		defer resp.Body.Close()
-		body, readErr := io.ReadAll(resp.Body)
+		// Bound JSON catalog API responses to 10 MB maximum to guard runtime heap
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 		if readErr == nil && resp.StatusCode == http.StatusOK {
 			return body, nil
 		}
@@ -190,7 +191,7 @@ func (c *Client) doLegacyFallback(ctx context.Context, path string) ([]byte, err
 			return nil, fmt.Errorf("fallback request to %s failed: %w", redactedURL, err)
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 		resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read fallback response: %w", err)

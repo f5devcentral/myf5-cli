@@ -10,6 +10,15 @@ import (
 	"strings"
 )
 
+// ZeroBytes securely overwrites a byte slice with zeros to clear secrets from RAM.
+// runtime.KeepAlive ensures the compiler does not optimize away the loop as a dead store.
+func ZeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+	runtime.KeepAlive(b)
+}
+
 // ForbiddenSecretFlags lists CLI flags that cannot be passed to prevent secrets
 // from being leaked into process tables (ps aux), shell history, or system logs.
 var ForbiddenSecretFlags = []string{

@@ -17,6 +17,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+
+	"myf5-api/pkg/auth"
 )
 
 // SCPOptions specifies the SSH connection and authentication configuration for SCP file transfers.
@@ -91,6 +93,8 @@ func BuildSSHClientConfig(opts SCPOptions) (*ssh.ClientConfig, error) {
 		} else {
 			signer, err = ssh.ParsePrivateKey(keyBytes)
 		}
+		// Zero private key file buffer immediately from memory after parsing
+		auth.ZeroBytes(keyBytes)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse private key: %w", err)
 		}
@@ -118,7 +122,10 @@ func BuildSSHClientConfig(opts SCPOptions) (*ssh.ClientConfig, error) {
 			var signers []ssh.Signer
 			for _, kpath := range commonKeys {
 				if keyBytes, err := os.ReadFile(kpath); err == nil {
-					if signer, err := ssh.ParsePrivateKey(keyBytes); err == nil {
+					signer, parseErr := ssh.ParsePrivateKey(keyBytes)
+					// Zero unencrypted private key bytes immediately from memory
+					auth.ZeroBytes(keyBytes)
+					if parseErr == nil {
 						signers = append(signers, signer)
 					}
 				}
@@ -177,6 +184,9 @@ func SCPUpload(ctx context.Context, localPath string, destDir string, opts SCPOp
 		} else {
 			destDir = "/var/tmp"
 		}
+	}
+	if err := ValidateRemoteAppliancePath(destDir); err != nil {
+		return "", fmt.Errorf("invalid destination directory: %w", err)
 	}
 
 	host, port := CleanSSHHost(opts.Host)
@@ -309,6 +319,9 @@ func SCPUpload(ctx context.Context, localPath string, destDir string, opts SCPOp
 func SCPDownload(ctx context.Context, remotePath, localDest string, opts SCPOptions, progressCb func(transferred, total int64)) (string, error) {
 	if remotePath == "" {
 		return "", fmt.Errorf("remote path cannot be empty")
+	}
+	if err := ValidateRemoteAppliancePath(remotePath); err != nil {
+		return "", fmt.Errorf("invalid remote path: %w", err)
 	}
 	cleanRemote := path.Clean(remotePath)
 	baseFilename := path.Base(cleanRemote)

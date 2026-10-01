@@ -74,3 +74,13 @@ func TestReadCredentialsFile(t *testing.T) {
 		t.Errorf("unexpected credentials: %+v", credsProd)
 	}
 }
+
+func TestZeroBytes(t *testing.T) {
+	b := []byte("super-secret-password-12345")
+	ZeroBytes(b)
+	for i, v := range b {
+		if v != 0 {
+			t.Errorf("byte at index %d was not zeroed: %d", i, v)
+		}
+	}
+}

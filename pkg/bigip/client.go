@@ -484,6 +484,11 @@ func (c *Client) DownloadFile(ctx context.Context, remotePath, localPath string,
 		return c.DownloadFromURI(ctx, remotePath, localPath, progressCb)
 	}
 
+	// Validate remote appliance path to reject path traversal and malicious filenames
+	if err := ValidateRemoteAppliancePath(remotePath); err != nil {
+		return err
+	}
+
 	cleanRemote := path.Clean(remotePath)
 	baseFilename := path.Base(cleanRemote)
 

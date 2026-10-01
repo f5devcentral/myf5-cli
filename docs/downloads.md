@@ -19,7 +19,7 @@ Product Family (e.g., BIG-IP, NGINX, BIG-IQ)
 ### Container Categories
 `myf5` automatically tags and categorizes download containers based on artifact purpose:
 - **Base ISO / Virtual Edition (`VE`)**: Full appliance installation images (`.iso`, `.ova`, `.qcow2`, `.vhd`).
-- **GeoLocation Updates (`GEODB`)**: MaxMind GeoIP updates for BIG-IP AFM, ASM, and APM.
+- **GeoLocation Updates (`GEODB`)**: Digital Envoy GeoIP updates for BIG-IP AFM, ASM, and APM.
 - **Hotfix (`HOTFIX`)**: Maintenance patches and security point releases.
 - **Supplemental (`SUPPLEMENTAL`)**: MIB files, signature packages, and utilities.
 

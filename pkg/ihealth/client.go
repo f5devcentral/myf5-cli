@@ -206,7 +206,8 @@ func (c *Client) ListQKViews(ctx context.Context) ([]QKViewSummary, error) {
 	}
 	defer resp.Body.Close()
 
-	respBytes, err := io.ReadAll(resp.Body)
+	// Bound diagnostic QKView list JSON responses to 10 MB maximum to guard runtime heap
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}

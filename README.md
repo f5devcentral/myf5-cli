@@ -4,8 +4,8 @@ A high-performance, memory-safe, zero-dependency Go CLI and client library for *
 
 > [!IMPORTANT]
 > **DISCLAIMER:** This project is **NOT** an officially supported F5 product or service.
-> It is an internal and field engineering automation tool maintained by F5 Service Provider Sales Americas.
-> For bugs, issues, or feature requests, please email **Greg Robinson** ([`g.robinson@f5.com`](mailto:g.robinson@f5.com)) or [open a GitHub issue](https://github.com/SalesAmerSP/myf5-api/issues).
+> It is an internal automation tool solely authored and maintained by **Greg Robinson** ([`g.robinson@f5.com`](mailto:g.robinson@f5.com)) for F5 Service Provider Sales Americas.
+> **PERMANENT CLASSIFICATION:** This repository is strictly proprietary and confidential. It can **NEVER** be made public.
 
 ---
 
@@ -57,7 +57,7 @@ myf5-api/
 ├── Makefile                    # Developer build, test, and release automation
 ├── SECURITY.md                 # Security & vulnerability reporting policy
 ├── CONTRIBUTING.md             # Developer workflow & coding standards
-├── LICENSE                     # Apache 2.0 License
+├── LICENSE                     # F5 Proprietary & Confidential Internal License
 ├── go.mod
 └── README.md
 ```

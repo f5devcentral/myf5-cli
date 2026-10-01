@@ -1,6 +1,9 @@
 # Contributing to `myf5-api`
 
-Thank you for contributing to `myf5-api`! This document provides instructions for setting up your development environment, adhering to code standards, running test suites, and submitting pull requests.
+> [!IMPORTANT]
+> **INTERNAL ENTERPRISE TOOL:** `SalesAmerSP/myf5-api` is an internal automation tool solely authored and maintained by **Greg Robinson** ([`g.robinson@f5.com`](mailto:g.robinson@f5.com)) for F5 Service Provider Sales Americas. This repository is strictly proprietary and confidential and can **NEVER** be made public. External contributions are not accepted.
+
+This document outlines environment setup, coding standards, testing requirements, and pull request procedures for internal F5 contributors.
 
 ---
 

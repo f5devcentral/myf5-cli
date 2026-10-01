@@ -31,16 +31,22 @@ func SecureTLSConfig(insecureSkipVerify bool) *tls.Config {
 // NewProductionTransport returns a hardened http.Transport with explicit phase timeouts.
 func NewProductionTransport(tlsConfig *tls.Config) *http.Transport {
 	return &http.Transport{
+		// Restrict TCP connect and DNS dial phases to prevent slowloris hanging
 		DialContext: (&net.Dialer{
 			Timeout:   15 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
-		TLSClientConfig:     tlsConfig,
+		TLSClientConfig: tlsConfig,
+		// Limit TLS negotiation phase duration
 		TLSHandshakeTimeout: 10 * time.Second,
-		ForceAttemptHTTP2:   true,
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
+		// Bound time spent waiting for server response headers after request is written
+		ResponseHeaderTimeout: 30 * time.Second,
+		// Timeout waiting for 100-continue before streaming request body
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
 	}
 }
 

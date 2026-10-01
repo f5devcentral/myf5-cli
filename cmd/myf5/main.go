@@ -1363,6 +1363,8 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			fmt.Println()
 			if err == nil {
 				pw = strings.TrimSpace(string(bytePw))
+				// Zero raw password byte buffer immediately to scrub cleartext secret from memory
+				auth.ZeroBytes(bytePw)
 			}
 		}
 		if pw == "" {
@@ -1416,6 +1418,8 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			fmt.Println()
 			if err == nil {
 				pw = strings.TrimSpace(string(bytePw))
+				// Zero raw password byte buffer immediately to scrub cleartext secret from memory
+				auth.ZeroBytes(bytePw)
 			}
 		}
 		if pw == "" {
@@ -1556,6 +1560,8 @@ func executePushToAppliance(ctx context.Context, host, localPath, method, destPa
 			fmt.Println()
 			if err == nil {
 				pw = strings.TrimSpace(string(bytePw))
+				// Zero raw password byte buffer immediately to scrub cleartext secret from memory
+				auth.ZeroBytes(bytePw)
 			}
 		}
 	}
@@ -1697,6 +1703,8 @@ func executeDownloadFromAppliance(
 			fmt.Println()
 			if err == nil {
 				pw = strings.TrimSpace(string(bytePw))
+				// Zero raw password byte buffer immediately to scrub cleartext secret from memory
+				auth.ZeroBytes(bytePw)
 			}
 		}
 	}

@@ -4,13 +4,37 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
+
+var validRemotePathRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-\./]+$`)
+
+// ValidateRemoteAppliancePath ensures paths on TMOS appliances are clean, absolute,
+// free of path traversal (..), and contain no shell metacharacters.
+func ValidateRemoteAppliancePath(p string) error {
+	if p == "" {
+		return errors.New("remote appliance path cannot be empty")
+	}
+	if strings.Contains(p, "..") {
+		return fmt.Errorf("prohibited remote appliance path %q: path traversal forbidden", p)
+	}
+	clean := path.Clean(p)
+	if !path.IsAbs(clean) {
+		return fmt.Errorf("remote appliance path %q must be an absolute path", p)
+	}
+	if !validRemotePathRegex.MatchString(clean) {
+		return fmt.Errorf("prohibited remote appliance path %q: contains illegal characters", p)
+	}
+	return nil
+}
 
 // DefaultUploadChunkSize is 512KB (524,288 bytes), the standard chunk size for
 // F5 BIG-IP and BIG-IQ iControl REST file transfer endpoints.
@@ -96,6 +120,14 @@ func (c *Client) UploadFile(ctx context.Context, localPath string, remoteFilenam
 // CopyRemoteFile uses the TMOS bash utility (/mgmt/tm/util/bash) to copy a file
 // from one path to another on the appliance (e.g., from /var/config/rest/downloads to /shared/images).
 func (c *Client) CopyRemoteFile(ctx context.Context, srcPath, destDir string) (string, error) {
+	// Defensively validate source and destination paths to prevent path traversal (..) and TMOS shell command injection
+	if err := ValidateRemoteAppliancePath(srcPath); err != nil {
+		return "", fmt.Errorf("invalid source path: %w", err)
+	}
+	if err := ValidateRemoteAppliancePath(destDir); err != nil {
+		return "", fmt.Errorf("invalid destination directory: %w", err)
+	}
+
 	filename := path.Base(srcPath)
 	destPath := path.Join(destDir, filename)
 

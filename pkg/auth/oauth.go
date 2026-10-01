@@ -76,7 +76,11 @@ func AuthenticateWithClient(ctx context.Context, httpClient *http.Client, authFQ
 	}
 
 	// Basic Auth credentials
-	authHeader := base64.StdEncoding.EncodeToString([]byte(clientID + ":" + clientSecret))
+	rawCreds := []byte(clientID + ":" + clientSecret)
+	authHeader := base64.StdEncoding.EncodeToString(rawCreds)
+	// Zero plaintext credential byte buffer immediately after base64 encoding
+	ZeroBytes(rawCreds)
+
 	req.Header.Set("Authorization", "Basic "+authHeader)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", "myf5-api-go/1.0.0")
@@ -90,10 +94,12 @@ func AuthenticateWithClient(ctx context.Context, httpClient *http.Client, authFQ
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	// Enforce 1 MB bound on auth response to prevent memory exhaustion
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return "", fmt.Errorf("failed to read auth response body: %w", err)
 	}
+	defer ZeroBytes(bodyBytes)
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("authentication failed with HTTP %d: %s", resp.StatusCode, string(bodyBytes))

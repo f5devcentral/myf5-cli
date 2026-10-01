@@ -133,3 +133,45 @@ func TestCopyRemoteFile(t *testing.T) {
 		t.Errorf("unexpected bash util payload: %s", receivedCommand)
 	}
 }
+
+func TestValidateRemoteAppliancePath(t *testing.T) {
+	tests := []struct {
+		path    string
+		wantErr bool
+	}{
+		{"/shared/images", false},
+		{"/shared/images/BIGIP-17.1.1.iso", false},
+		{"/var/tmp/qkviews/test.qkview", false},
+		{"/config/bigip.conf", false},
+		{"", true},
+		{"relative/path", true},
+		{"/shared/../etc/passwd", true},
+		{"/shared/images/file;rm -rf /", true},
+		{"/shared/images/file$(whoami)", true},
+		{"/shared/images/file`id`", true},
+		{"/shared/images/file name with spaces", true},
+		{"/shared/images/file'quote", true},
+	}
+
+	for _, tt := range tests {
+		err := ValidateRemoteAppliancePath(tt.path)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("ValidateRemoteAppliancePath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
+		}
+	}
+}
+
+func TestCopyRemoteFileValidation(t *testing.T) {
+	client := NewClient("https://192.0.2.1", 443, "admin", "secret")
+	// Test malicious source path
+	_, err := client.CopyRemoteFile(context.Background(), "/var/tmp/file;reboot", "/shared/images")
+	if err == nil {
+		t.Fatal("expected error on invalid source path, got nil")
+	}
+
+	// Test malicious destination directory
+	_, err = client.CopyRemoteFile(context.Background(), "/var/tmp/good.iso", "/shared/images/$(touch /tmp/pwn)")
+	if err == nil {
+		t.Fatal("expected error on invalid dest dir, got nil")
+	}
+}

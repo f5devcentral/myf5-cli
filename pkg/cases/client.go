@@ -172,8 +172,8 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 		return nil, fmt.Errorf("request to %s failed: %w", redactedURL, err)
 	}
 	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(resp.Body)
+	// Bound Case API responses to 10 MB maximum
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
