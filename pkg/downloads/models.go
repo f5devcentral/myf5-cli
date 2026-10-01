@@ -3,6 +3,7 @@ package downloads
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 )
 
 // HashItem represents a cryptographic hash for a download file.
@@ -59,15 +60,21 @@ func (f *FileItem) UnmarshalJSON(data []byte) error {
 
 // Container represents a category/grouping of files (e.g. "Virtual Edition", "Base ISO").
 type Container struct {
-	Name  string     `json:"name"`
-	Files []FileItem `json:"files,omitempty"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	Type        string     `json:"type,omitempty"`
+	ReleaseDate string     `json:"releaseDate,omitempty"`
+	Files       []FileItem `json:"files,omitempty"`
 }
 
 func (c *Container) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Name      string     `json:"name"`
-		Container string     `json:"container"`
-		Files     []FileItem `json:"files"`
+		Name        string     `json:"name"`
+		Container   string     `json:"container"`
+		Description string     `json:"description"`
+		Type        string     `json:"type"`
+		ReleaseDate string     `json:"releaseDate"`
+		Files       []FileItem `json:"files"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -76,8 +83,38 @@ func (c *Container) UnmarshalJSON(data []byte) error {
 	if c.Name == "" {
 		c.Name = raw.Container
 	}
+	c.Description = raw.Description
+	c.Type = raw.Type
+	c.ReleaseDate = raw.ReleaseDate
 	c.Files = raw.Files
 	return nil
+}
+
+// GetCategory returns a logical high-level category grouping for menu presentation.
+func (c *Container) GetCategory() string {
+	name := strings.ToLower(c.Name)
+	if strings.HasSuffix(name, "-archive") {
+		return "Historical Archives"
+	}
+	if strings.Contains(name, "scanner") || strings.Contains(name, "open-source") || strings.Contains(name, "epsec") || strings.Contains(name, "geolocation") || strings.Contains(name, "servertechnologies") {
+		return "Tools, Telemetry & Diagnostics"
+	}
+	if strings.Contains(name, "signature") || strings.Contains(name, "threat") || strings.Contains(name, "bot") || strings.Contains(name, "protocolinspection") || strings.Contains(name, "dpi") || strings.Contains(name, "asm") || strings.Contains(name, "browserchallenges") {
+		return "Security Signatures & Attack Updates"
+	}
+	if strings.Contains(name, "cloud") || strings.Contains(name, "aws") || strings.Contains(name, "azure") || strings.Contains(name, "google") {
+		return "Public Cloud Images"
+	}
+	if strings.Contains(name, "hotfix") || strings.EqualFold(c.Type, "patches") {
+		return "Hotfixes & Patches"
+	}
+	if strings.Contains(name, "virtual-edition") || strings.Contains(name, "virtual_edition") {
+		return "Virtual Edition (VE)"
+	}
+	if strings.Contains(name, "f5os") || strings.Contains(name, "tenant") {
+		return "F5OS Tenant Images"
+	}
+	return "Base Software & ISO Releases"
 }
 
 // ProductVersion represents a software release version.

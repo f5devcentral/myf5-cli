@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -237,14 +238,14 @@ func handleDownloads(ctx context.Context, args []string) {
 			}
 		}
 
-	case "files", "list-files":
+	case "containers", "list-containers":
 		if len(remaining) < 2 {
-			fmt.Fprintln(os.Stderr, "Usage: myf5 downloads files <product-family> <product-line> [version]")
+			fmt.Fprintln(os.Stderr, "Usage: myf5 downloads containers <product-family> <product-line> [version]")
 			os.Exit(1)
 		}
 		client := getDownloadsClient()
 		resp, err := client.GetProductVersions(ctx, remaining[0], remaining[1])
-		checkErr(ctx, err, "Failed to load files")
+		checkErr(ctx, err, "Failed to load containers")
 		targetVer := ""
 		if len(remaining) >= 3 {
 			targetVer = remaining[2]
@@ -254,11 +255,57 @@ func handleDownloads(ctx context.Context, args []string) {
 			if targetVer != "" && !strings.EqualFold(v.Name, targetVer) {
 				continue
 			}
+			fmt.Printf("\n=== Version %s (Released: %s, %d containers) ===\n", v.Name, v.ReleaseDate, len(v.Containers))
+			for _, c := range v.Containers {
+				typeTag := ""
+				if c.Type != "" {
+					typeTag = fmt.Sprintf("[%s] ", c.Type)
+				}
+				desc := ""
+				if c.Description != "" && c.Description != c.Name {
+					desc = fmt.Sprintf(" - %s", c.Description)
+				}
+				fmt.Printf("  - %-36s %s[%s] (%d files)%s\n", c.Name, typeTag, c.GetCategory(), len(c.Files), desc)
+			}
+		}
+
+	case "files", "list-files":
+		if len(remaining) < 2 {
+			fmt.Fprintln(os.Stderr, "Usage: myf5 downloads files <product-family> <product-line> [version] [container]")
+			os.Exit(1)
+		}
+		client := getDownloadsClient()
+		resp, err := client.GetProductVersions(ctx, remaining[0], remaining[1])
+		checkErr(ctx, err, "Failed to load files")
+		targetVer := ""
+		if len(remaining) >= 3 {
+			targetVer = remaining[2]
+		}
+		targetCont := ""
+		if len(remaining) >= 4 {
+			targetCont = remaining[3]
+		}
+
+		for _, v := range resp.GetVersions() {
+			if targetVer != "" && !strings.EqualFold(v.Name, targetVer) {
+				continue
+			}
 			fmt.Printf("\n=== Version %s (Released: %s) ===\n", v.Name, v.ReleaseDate)
 			for _, c := range v.Containers {
-				fmt.Printf("  Container: %s\n", c.Name)
+				if targetCont != "" && !strings.EqualFold(c.Name, targetCont) && !strings.Contains(strings.ToLower(c.Name), strings.ToLower(targetCont)) {
+					continue
+				}
+				typeTag := ""
+				if c.Type != "" {
+					typeTag = fmt.Sprintf("[%s] ", c.Type)
+				}
+				fmt.Printf("  Container: %s %s[%s] (%d files)\n", c.Name, typeTag, c.GetCategory(), len(c.Files))
 				for _, f := range c.Files {
-					fmt.Printf("    * %-55s  %10s\n", f.Name, downloads.FormatBytes(f.FileSize))
+					desc := ""
+					if f.Description != "" {
+						desc = fmt.Sprintf(" - %s", f.Description)
+					}
+					fmt.Printf("    * %-55s  %10s%s\n", f.Name, downloads.FormatBytes(f.FileSize), desc)
 				}
 			}
 		}
@@ -331,11 +378,12 @@ func printDownloadsUsage() {
 	fmt.Print(`myf5 downloads - Browse & Download Software Images
 
 ACTIONS:
-    browse                                      Interactive menu-driven image browser
+    browse                                      Interactive menu-driven image browser (categories & search)
     families                                    List all F5 product families (BIG-IP, NGINX, BIG-IQ)
     lines <family>                              List product lines for a family
     versions <family> <line>                    List releases, containers, and dates
-    files <family> <line> [version]             List downloadable files with sizes
+    containers <family> <line> [version]        List categories/containers with type tags & categories
+    files <family> <line> [version] [container] List downloadable files with sizes
     get <family> <line> <ver> <container> <file> [-o out.iso]  Download image with live progress & SHA256 check
 
 OPTIONS:
@@ -361,6 +409,7 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 		os.Exit(1)
 	}
 
+familyLoop:
 	for {
 		fmt.Println("\nSelect a Product Family:")
 		for i, f := range meta.Data.ProductFamilies {
@@ -386,176 +435,438 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 		}
 		selectedFamily := meta.Data.ProductFamilies[idx-1]
 
-		// Select Line
-		fmt.Printf("\nSelect a Product Line in %s:\n", selectedFamily.GetTitle())
-		for i, l := range selectedFamily.ProductLines {
-			fmt.Printf("  %2d) %s\n", i+1, l.GetTitle())
-		}
-		fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
-		input, err = reader.ReadString('\n')
-		if err != nil {
-			if ctx.Err() != nil {
-				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
+	lineLoop:
+		for {
+			// Select Line
+			fmt.Printf("\nSelect a Product Line in %s:\n", selectedFamily.GetTitle())
+			for i, l := range selectedFamily.ProductLines {
+				fmt.Printf("  %2d) %s\n", i+1, l.GetTitle())
 			}
-			return
-		}
-		input = strings.TrimSpace(input)
-		if input == "q" || input == "exit" {
-			return
-		}
-		if input == "b" {
-			continue
-		}
-		idx, err = strconv.Atoi(input)
-		if err != nil || idx < 1 || idx > len(selectedFamily.ProductLines) {
-			fmt.Println("Invalid selection.")
-			continue
-		}
-		selectedLine := selectedFamily.ProductLines[idx-1]
-
-		// Fetch versions
-		fmt.Printf("Fetching versions for %s...\n", selectedLine.Name)
-		vResp, err := client.GetProductVersions(ctx, selectedFamily.Name, selectedLine.Name)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
-			}
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			continue
-		}
-		versions := vResp.GetVersions()
-		if len(versions) == 0 {
-			fmt.Println("No versions found.")
-			continue
-		}
-
-		// Select Version
-		fmt.Printf("\nSelect Release Version:\n")
-		for i, v := range versions {
-			fmt.Printf("  %2d) %-12s (Released: %s)\n", i+1, v.Name, v.ReleaseDate)
-		}
-		fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
-		input, err = reader.ReadString('\n')
-		if err != nil {
-			if ctx.Err() != nil {
-				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
-			}
-			return
-		}
-		input = strings.TrimSpace(input)
-		if input == "q" || input == "exit" {
-			return
-		}
-		if input == "b" {
-			continue
-		}
-		idx, err = strconv.Atoi(input)
-		if err != nil || idx < 1 || idx > len(versions) {
-			fmt.Println("Invalid selection.")
-			continue
-		}
-		selectedVersion := versions[idx-1]
-
-		// Flatten files
-		type fileRef struct {
-			containerName string
-			file          downloads.FileItem
-		}
-		var allFiles []fileRef
-		for _, c := range selectedVersion.Containers {
-			for _, f := range c.Files {
-				allFiles = append(allFiles, fileRef{containerName: c.Name, file: f})
-			}
-		}
-
-		if len(allFiles) == 0 {
-			fmt.Println("No files found in version.")
-			continue
-		}
-
-		fmt.Printf("\nSelect a File to Download:\n")
-		for i, item := range allFiles {
-			fmt.Printf("  %2d) [%s] %-50s (%s)\n",
-				i+1, item.containerName, item.file.Name, downloads.FormatBytes(item.file.FileSize))
-		}
-		fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
-		input, err = reader.ReadString('\n')
-		if err != nil {
-			if ctx.Err() != nil {
-				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
-			}
-			return
-		}
-		input = strings.TrimSpace(input)
-		if input == "q" || input == "exit" {
-			return
-		}
-		if input == "b" {
-			continue
-		}
-		idx, err = strconv.Atoi(input)
-		if err != nil || idx < 1 || idx > len(allFiles) {
-			fmt.Println("Invalid selection.")
-			continue
-		}
-		selectedTarget := allFiles[idx-1]
-
-		// Fetch download links
-		fmt.Printf("\nFetching signed CDN link for %s...\n", selectedTarget.file.Name)
-		linkResp, err := client.GetFileLinks(ctx, selectedFamily.Name, selectedLine.Name, selectedVersion.Name, selectedTarget.containerName, selectedTarget.file.Name, "english")
-		if err != nil {
-			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
-			}
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			continue
-		}
-		links := linkResp.GetLinks()
-		if len(links) == 0 {
-			fmt.Println("No download link available.")
-			continue
-		}
-
-		link := links[0]
-		fmt.Printf("Mirror URL (expires %s, Region: %s):\n%s\n\n", link.ExpiresAt, link.GetRegion(), link.Href)
-		targetPath := filepath.Join(getDefaultDownloadsDir(), filepath.Base(selectedTarget.file.Name))
-		fmt.Printf("Download this file directly to %s? [y/N]: ", targetPath)
-		input, err = reader.ReadString('\n')
-		if err != nil {
-			if ctx.Err() != nil {
-				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
-			}
-			return
-		}
-		if strings.ToLower(strings.TrimSpace(input)) == "y" {
-			var expectedHash, hashAlgo string
-			for _, h := range linkResp.GetAllHashes() {
-				if strings.EqualFold(h.Algorithm, "sha256") || strings.EqualFold(h.Algorithm, "sha-256") {
-					expectedHash = h.Value
-					hashAlgo = "sha256"
-					break
-				}
-			}
-			bar := progress.NewBar(0, "Downloading")
-			err := downloads.DownloadFile(ctx, link.Href, targetPath, expectedHash, hashAlgo, func(transferred, total int64, speed float64) {
-				bar.Total = total
-				bar.Update(transferred)
-			})
+			fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
+			input, err = reader.ReadString('\n')
 			if err != nil {
-				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-					bar.Abort("Download cancelled by user.")
+				if ctx.Err() != nil {
 					fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
 					os.Exit(130)
 				}
-				fmt.Fprintf(os.Stderr, "\n[ERROR] Download failed: %v\n", err)
-			} else {
-				bar.Finish(fmt.Sprintf("File saved successfully to %s", targetPath))
+				return
+			}
+			input = strings.TrimSpace(input)
+			if input == "q" || input == "exit" {
+				return
+			}
+			if input == "b" {
+				continue familyLoop
+			}
+			idx, err = strconv.Atoi(input)
+			if err != nil || idx < 1 || idx > len(selectedFamily.ProductLines) {
+				fmt.Println("Invalid selection.")
+				continue
+			}
+			selectedLine := selectedFamily.ProductLines[idx-1]
+
+			// Fetch versions
+			fmt.Printf("Fetching versions for %s...\n", selectedLine.Name)
+			vResp, err := client.GetProductVersions(ctx, selectedFamily.Name, selectedLine.Name)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+					fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+					os.Exit(130)
+				}
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				continue
+			}
+			versions := vResp.GetVersions()
+			if len(versions) == 0 {
+				fmt.Println("No versions found.")
+				continue
+			}
+
+		versionLoop:
+			for {
+				// Select Version
+				fmt.Printf("\nSelect Release Version in %s:\n", selectedLine.GetTitle())
+				for i, v := range versions {
+					fmt.Printf("  %2d) %-12s (Released: %s, %d containers)\n", i+1, v.Name, v.ReleaseDate, len(v.Containers))
+				}
+				fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
+				input, err = reader.ReadString('\n')
+				if err != nil {
+					if ctx.Err() != nil {
+						fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+						os.Exit(130)
+					}
+					return
+				}
+				input = strings.TrimSpace(input)
+				if input == "q" || input == "exit" {
+					return
+				}
+				if input == "b" {
+					continue lineLoop
+				}
+				idx, err = strconv.Atoi(input)
+				if err != nil || idx < 1 || idx > len(versions) {
+					fmt.Println("Invalid selection.")
+					continue
+				}
+				selectedVersion := versions[idx-1]
+
+			categoryLoop:
+				for {
+					// Group containers by category
+					categorySections := []string{
+						"Base Software & ISO Releases",
+						"Virtual Edition (VE)",
+						"F5OS Tenant Images",
+						"Public Cloud Images",
+						"Hotfixes & Patches",
+						"Security Signatures & Attack Updates",
+						"Tools, Telemetry & Diagnostics",
+						"Historical Archives",
+					}
+					grouped := make(map[string][]downloads.Container)
+					for _, c := range selectedVersion.Containers {
+						cat := c.GetCategory()
+						grouped[cat] = append(grouped[cat], c)
+					}
+
+					type catGroup struct {
+						name       string
+						containers []downloads.Container
+						totalFiles int
+					}
+					var activeCats []catGroup
+					for _, sec := range categorySections {
+						conts := grouped[sec]
+						if len(conts) == 0 {
+							continue
+						}
+						totalFiles := 0
+						for _, c := range conts {
+							totalFiles += len(c.Files)
+						}
+						activeCats = append(activeCats, catGroup{
+							name:       sec,
+							containers: conts,
+							totalFiles: totalFiles,
+						})
+					}
+
+					// Also catch any unmapped categories if any
+					var otherConts []downloads.Container
+					for _, c := range selectedVersion.Containers {
+						cat := c.GetCategory()
+						matched := false
+						for _, sec := range categorySections {
+							if sec == cat {
+								matched = true
+								break
+							}
+						}
+						if !matched {
+							otherConts = append(otherConts, c)
+						}
+					}
+					if len(otherConts) > 0 {
+						totalFiles := 0
+						for _, c := range otherConts {
+							totalFiles += len(c.Files)
+						}
+						activeCats = append(activeCats, catGroup{
+							name:       "Other",
+							containers: otherConts,
+							totalFiles: totalFiles,
+						})
+					}
+
+					totalVersionFiles := 0
+					for _, c := range selectedVersion.Containers {
+						totalVersionFiles += len(c.Files)
+					}
+
+					fmt.Printf("\n=== %s / %s (Version %s) ===\n", selectedFamily.Name, selectedLine.GetTitle(), selectedVersion.Name)
+					fmt.Printf("Select a Category:\n")
+					for i, cat := range activeCats {
+						containerPlural := "containers"
+						if len(cat.containers) == 1 {
+							containerPlural = "container"
+						}
+						fmt.Printf("  %2d) %-38s (%d %s, %d files)\n",
+							i+1, cat.name, len(cat.containers), containerPlural, cat.totalFiles)
+					}
+					fmt.Printf("\n  [Tip: Type 'all' to browse all %d files]\n", totalVersionFiles)
+					fmt.Print("Enter category number (or 'b' to go back, 'q' to quit): ")
+					input, err = reader.ReadString('\n')
+					if err != nil {
+						if ctx.Err() != nil {
+							fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+							os.Exit(130)
+						}
+						return
+					}
+					input = strings.TrimSpace(input)
+					if input == "q" || input == "exit" {
+						return
+					}
+					if input == "b" {
+						continue versionLoop
+					}
+
+					var targetContainers []downloads.Container
+					var categoryTitle string
+
+					if strings.EqualFold(input, "all") {
+						targetContainers = selectedVersion.Containers
+						categoryTitle = fmt.Sprintf("All Containers (%d files)", totalVersionFiles)
+					} else {
+						catIdx, err := strconv.Atoi(input)
+						if err != nil || catIdx < 1 || catIdx > len(activeCats) {
+							fmt.Println("Invalid category selection.")
+							continue
+						}
+						chosenCat := activeCats[catIdx-1]
+						targetContainers = make([]downloads.Container, len(chosenCat.containers))
+						copy(targetContainers, chosenCat.containers)
+						categoryTitle = chosenCat.name
+
+						// Sort containers within the category: base release first, then others descending
+						sort.SliceStable(targetContainers, func(i, j int) bool {
+							nameI := strings.ToLower(targetContainers[i].Name)
+							nameJ := strings.ToLower(targetContainers[j].Name)
+							baseName := strings.ToLower(selectedVersion.Name)
+							isBaseI := nameI == baseName || nameI == baseName+"_virtual-edition" || nameI == baseName+"_tenant_f5os"
+							isBaseJ := nameJ == baseName || nameJ == baseName+"_virtual-edition" || nameJ == baseName+"_tenant_f5os"
+							if isBaseI && !isBaseJ {
+								return true
+							}
+							if !isBaseI && isBaseJ {
+								return false
+							}
+							return nameI > nameJ
+						})
+					}
+
+				containerLoop:
+					for {
+						type fileRef struct {
+							containerName string
+							file          downloads.FileItem
+						}
+						var activeFiles []fileRef
+						var containerHeader string
+
+						// If there's only 1 container in the category, show files directly
+						if len(targetContainers) == 1 {
+							chosen := targetContainers[0]
+							for _, f := range chosen.Files {
+								activeFiles = append(activeFiles, fileRef{containerName: chosen.Name, file: f})
+							}
+							containerHeader = fmt.Sprintf("%s (%d files)", chosen.Name, len(chosen.Files))
+						} else if strings.EqualFold(input, "all") {
+							for _, c := range targetContainers {
+								for _, f := range c.Files {
+									activeFiles = append(activeFiles, fileRef{containerName: c.Name, file: f})
+								}
+							}
+							containerHeader = categoryTitle
+						} else {
+							fmt.Printf("\n=== %s / %s ===\n", selectedVersion.Name, categoryTitle)
+							fmt.Printf("Select a Container:\n")
+							for i, c := range targetContainers {
+								typeTag := ""
+								if c.Type != "" {
+									typeTag = fmt.Sprintf("[%s] ", c.Type)
+								}
+								desc := ""
+								if c.Description != "" && c.Description != c.Name {
+									desc = fmt.Sprintf(" - %s", c.Description)
+								}
+								fmt.Printf("  %2d) %-35s %s(%d files)%s\n", i+1, c.Name, typeTag, len(c.Files), desc)
+							}
+							fmt.Printf("\n  [Tip: Type 'all' to show all files in this category]\n")
+							fmt.Print("Enter container number (or 'b' to go back, 'q' to quit): ")
+							contInput, err := reader.ReadString('\n')
+							if err != nil {
+								if ctx.Err() != nil {
+									fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+									os.Exit(130)
+								}
+								return
+							}
+							contInput = strings.TrimSpace(contInput)
+							if contInput == "q" || contInput == "exit" {
+								return
+							}
+							if contInput == "b" {
+								continue categoryLoop
+							}
+
+							if strings.EqualFold(contInput, "all") {
+								for _, c := range targetContainers {
+									for _, f := range c.Files {
+										activeFiles = append(activeFiles, fileRef{containerName: c.Name, file: f})
+									}
+								}
+								containerHeader = fmt.Sprintf("%s - All (%d files)", categoryTitle, len(activeFiles))
+							} else {
+								cIdx, err := strconv.Atoi(contInput)
+								if err != nil || cIdx < 1 || cIdx > len(targetContainers) {
+									fmt.Println("Invalid container selection.")
+									continue
+								}
+								chosen := targetContainers[cIdx-1]
+								for _, f := range chosen.Files {
+									activeFiles = append(activeFiles, fileRef{containerName: chosen.Name, file: f})
+								}
+								containerHeader = fmt.Sprintf("%s (%d files)", chosen.Name, len(chosen.Files))
+							}
+						}
+
+						if len(activeFiles) == 0 {
+							fmt.Println("No files found in selection.")
+							if len(targetContainers) == 1 {
+								continue categoryLoop
+							}
+							continue
+						}
+
+						searchTerm := ""
+						for {
+							var displayFiles []fileRef
+							if searchTerm != "" {
+								for _, item := range activeFiles {
+									if strings.Contains(strings.ToLower(item.file.Name), strings.ToLower(searchTerm)) ||
+										strings.Contains(strings.ToLower(item.file.Description), strings.ToLower(searchTerm)) {
+										displayFiles = append(displayFiles, item)
+									}
+								}
+							} else {
+								displayFiles = activeFiles
+							}
+
+							fmt.Printf("\n=== %s ===\n", containerHeader)
+							if searchTerm != "" {
+								fmt.Printf("[Filter: '%s' - %d matching files (type '/clear' to view all)]\n", searchTerm, len(displayFiles))
+							}
+							fmt.Printf("Select a File to Download:\n")
+							for i, item := range displayFiles {
+								desc := ""
+								if item.file.Description != "" {
+									desc = fmt.Sprintf(" - %s", item.file.Description)
+								}
+								contLabel := ""
+								if len(targetContainers) > 1 && strings.Contains(containerHeader, "All") {
+									contLabel = fmt.Sprintf("[%s] ", item.containerName)
+								}
+								fmt.Printf("  %2d) %s%-52s (%s)%s\n",
+									i+1, contLabel, item.file.Name, downloads.FormatBytes(item.file.FileSize), desc)
+							}
+
+							fmt.Print("\nEnter file number, or '/<keyword>' to filter (or 'b' to go back, 'q' to quit): ")
+							fileInput, err := reader.ReadString('\n')
+							if err != nil {
+								if ctx.Err() != nil {
+									fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+									os.Exit(130)
+								}
+								return
+							}
+							fileInput = strings.TrimSpace(fileInput)
+							if fileInput == "q" || fileInput == "exit" {
+								return
+							}
+							if fileInput == "b" {
+								if searchTerm != "" {
+									searchTerm = ""
+									continue
+								}
+								if len(targetContainers) == 1 {
+									continue categoryLoop
+								}
+								continue containerLoop
+							}
+							if fileInput == "/clear" || fileInput == "/all" {
+								searchTerm = ""
+								continue
+							}
+							if strings.HasPrefix(fileInput, "/") {
+								searchTerm = strings.TrimPrefix(fileInput, "/")
+								continue
+							}
+
+							fIdx, err := strconv.Atoi(fileInput)
+							if err != nil || fIdx < 1 || fIdx > len(displayFiles) {
+								if !strings.ContainsAny(fileInput, "0123456789") && len(fileInput) >= 2 {
+									searchTerm = fileInput
+									continue
+								}
+								fmt.Println("Invalid file selection.")
+								continue
+							}
+
+							selectedTarget := displayFiles[fIdx-1]
+
+							// Fetch download links
+							fmt.Printf("\nFetching signed CDN link for %s...\n", selectedTarget.file.Name)
+							linkResp, err := client.GetFileLinks(ctx, selectedFamily.Name, selectedLine.Name, selectedVersion.Name, selectedTarget.containerName, selectedTarget.file.Name, "english")
+							if err != nil {
+								if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+									fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+									os.Exit(130)
+								}
+								fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+								continue
+							}
+							links := linkResp.GetLinks()
+							if len(links) == 0 {
+								fmt.Println("No download link available.")
+								continue
+							}
+
+							link := links[0]
+							fmt.Printf("Mirror URL (expires %s, Region: %s):\n%s\n\n", link.ExpiresAt, link.GetRegion(), link.Href)
+							targetPath := filepath.Join(getDefaultDownloadsDir(), filepath.Base(selectedTarget.file.Name))
+							fmt.Printf("Download this file directly to %s? [y/N]: ", targetPath)
+							confirmInput, err := reader.ReadString('\n')
+							if err != nil {
+								if ctx.Err() != nil {
+									fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+									os.Exit(130)
+								}
+								return
+							}
+							if strings.ToLower(strings.TrimSpace(confirmInput)) == "y" {
+								var expectedHash, hashAlgo string
+								for _, h := range linkResp.GetAllHashes() {
+									if strings.EqualFold(h.Algorithm, "sha256") || strings.EqualFold(h.Algorithm, "sha-256") {
+										expectedHash = h.Value
+										hashAlgo = "sha256"
+										break
+									}
+								}
+								bar := progress.NewBar(0, "Downloading")
+								err := downloads.DownloadFile(ctx, link.Href, targetPath, expectedHash, hashAlgo, func(transferred, total int64, speed float64) {
+									bar.Total = total
+									bar.Update(transferred)
+								})
+								if err != nil {
+									if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+										bar.Abort("Download cancelled by user.")
+										fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+										os.Exit(130)
+									}
+									fmt.Fprintf(os.Stderr, "\n[ERROR] Download failed: %v\n", err)
+								} else {
+									bar.Finish(fmt.Sprintf("File saved successfully to %s", targetPath))
+								}
+							}
+						}
+						if len(targetContainers) == 1 {
+							continue categoryLoop
+						}
+					}
+				}
 			}
 		}
 	}
