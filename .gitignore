@@ -46,5 +46,14 @@ coverage.html
 .vscode/
 scratch/
 
-# AI Agent Workspace & Handoff Context
+# AI assistant workspaces, handoff context, and tool configuration.
+# Never commit AI tooling or generated context to this repository.
 agents/
+.claude/
+.cursor/
+.aider*
+.github/copilot-instructions.md
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+.mcp.json
