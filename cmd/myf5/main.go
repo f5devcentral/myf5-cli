@@ -862,9 +862,6 @@ familyLoop:
 								}
 							}
 						}
-						if len(targetContainers) == 1 {
-							continue categoryLoop
-						}
 					}
 				}
 			}
