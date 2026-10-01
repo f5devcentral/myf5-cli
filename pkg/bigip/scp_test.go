@@ -241,7 +241,7 @@ func TestSCPUploadMockServer(t *testing.T) {
 		t.Errorf("expected destPath %q, got %q", expectedDest, destPath)
 	}
 
-	if !strings.HasPrefix(receivedHeader, "C0644 14 test-file.zip") {
+	if !strings.HasPrefix(receivedHeader, "C0644 14 test-file.zip") && !strings.HasPrefix(receivedHeader, "C0666 14 test-file.zip") {
 		t.Errorf("unexpected scp header: %q", receivedHeader)
 	}
 

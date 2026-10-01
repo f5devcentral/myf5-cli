@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -164,7 +165,7 @@ func SCPUpload(ctx context.Context, localPath string, destDir string, opts SCPOp
 	fileSize := stat.Size()
 	baseFilename := filepath.Base(localPath)
 	filePerm := stat.Mode().Perm()
-	if filePerm == 0 {
+	if filePerm == 0 || runtime.GOOS == "windows" {
 		filePerm = 0644
 	}
 
