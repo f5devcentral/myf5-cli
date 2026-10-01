@@ -34,12 +34,12 @@ _myf5_completions() {
     local cur prev words cword
     _init_completion -n : || return
 
-    local commands="downloads cases ihealth bigip bigiq push doctor completion version help"
+    local commands="downloads cases ihealth bigip bigiq push pull doctor completion version help"
     local downloads_actions="browse families lines versions containers files get"
     local cases_actions="list metadata comment"
     local ihealth_actions="list upload"
     local bigip_actions="ready qkview push download"
-    local bigiq_actions="ready push"
+    local bigiq_actions="ready push download"
     local completion_shells="bash zsh fish"
     local product_families="BIG-IP NGINX BIG-IQ"
 
@@ -89,7 +89,7 @@ _myf5_completions() {
                 return 0
             fi
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "-u --user -p --port -m --method -d --dest -k --key" -- "$cur") )
+                COMPREPLY=( $(compgen -W "-u --user -p --port -m --method -d --dest -o --output -i --identity" -- "$cur") )
                 return 0
             fi
             ;;
@@ -99,13 +99,19 @@ _myf5_completions() {
                 return 0
             fi
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "-u --user -p --port -m --method -d --dest -k --key" -- "$cur") )
+                COMPREPLY=( $(compgen -W "-u --user -p --port -m --method -d --dest -o --output -i --identity" -- "$cur") )
                 return 0
             fi
             ;;
         push)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "-m --method -d --dest -t --target -u --user -p --port -k --key" -- "$cur") )
+                COMPREPLY=( $(compgen -W "-m --method -d --dest -t --target -u --user -p --port -i --identity" -- "$cur") )
+                return 0
+            fi
+            ;;
+        pull|fetch)
+            if [[ "$cur" == -* ]]; then
+                COMPREPLY=( $(compgen -W "-m --method -o --output -t --target -u --user -p --port -i --identity" -- "$cur") )
                 return 0
             fi
             ;;
@@ -134,9 +140,10 @@ _myf5() {
         'downloads:Browse MyF5 catalog and stream software images'
         'cases:View and manage MyF5 support cases'
         'ihealth:Upload and inspect QKView diagnostic bundles on iHealth'
-        'bigip:Manage BIG-IP TMOS appliances (ready check, QKView generation, push)'
-        'bigiq:Manage BIG-IQ appliances (ready check, push images/files)'
-        'push:Push software downloads or files to BIG-IP / BIG-IQ via iControl or SCP'
+        'bigip:Manage BIG-IP TMOS appliances (ready check, QKView generation, push, download)'
+        'bigiq:Manage BIG-IQ appliances (ready check, push, download)'
+        'push:Push software downloads or files to BIG-IP / BIG-IQ (auto failover)'
+        'pull:Download files from BIG-IP / BIG-IQ (auto failover)'
         'doctor:Verify API credentials, DNS, and network firewall egress'
         'completion:Generate shell tab completion script (bash, zsh, fish)'
         'version:Print application version'
@@ -168,7 +175,7 @@ _myf5() {
                         '(-o --output)'{-o,--output}'[Destination file path]:file:_files' \
                         '--profile[Credentials profile]:profile:(default)' \
                         '--push[Appliance host to push to after download]:host:_hosts' \
-                        '--push-method[Transfer method]:method:(icontrol scp)' \
+                        '--push-method[Transfer method]:method:(auto icontrol scp)' \
                         '--push-dest[Destination directory on appliance]:dest:' \
                         '--push-user[Appliance username]:user:' \
                         '--push-target[Appliance type]:target:(BIG-IP BIG-IQ)' \
@@ -235,14 +242,16 @@ _myf5() {
                     bigip_actions=(
                         'ready:Check TMOS management plane readiness'
                         'qkview:Generate and download a diagnostic QKView bundle'
-                        'push:Upload software image or file via iControl REST or SCP'
+                        'push:Upload software image or file (auto failover)'
+                        'download:Download file from appliance (auto failover)'
                     )
                     _arguments -C \
                         '(-u --user)'{-u,--user}'[BIG-IP administrative user]:user:' \
                         '(-p --port)'{-p,--port}'[Management HTTPS / SSH port]:port:' \
-                        '(-m --method)'{-m,--method}'[Transfer method]:method:(icontrol scp)' \
+                        '(-m --method)'{-m,--method}'[Transfer method]:method:(auto icontrol scp)' \
                         '(-d --dest)'{-d,--dest}'[Remote destination path]:dest:' \
-                        '(-k --key)'{-k,--key}'[SSH private key path]:file:_files' \
+                        '(-o --output)'{-o,--output}'[Local destination file path]:file:_files' \
+                        '(-i --identity)'{-i,--identity}'[SSH private key path]:file:_files' \
                         '1: :->b_action' \
                         '2:host:_hosts'
 
@@ -256,14 +265,16 @@ _myf5() {
                     local -a bigiq_actions
                     bigiq_actions=(
                         'ready:Check BIG-IQ management plane readiness'
-                        'push:Upload software image or file via iControl REST or SCP'
+                        'push:Upload software image or file (auto failover)'
+                        'download:Download file from appliance (auto failover)'
                     )
                     _arguments -C \
                         '(-u --user)'{-u,--user}'[BIG-IQ administrative user]:user:' \
                         '(-p --port)'{-p,--port}'[Management HTTPS / SSH port]:port:' \
-                        '(-m --method)'{-m,--method}'[Transfer method]:method:(icontrol scp)' \
+                        '(-m --method)'{-m,--method}'[Transfer method]:method:(auto icontrol scp)' \
                         '(-d --dest)'{-d,--dest}'[Remote destination path]:dest:' \
-                        '(-k --key)'{-k,--key}'[SSH private key path]:file:_files' \
+                        '(-o --output)'{-o,--output}'[Local destination file path]:file:_files' \
+                        '(-i --identity)'{-i,--identity}'[SSH private key path]:file:_files' \
                         '1: :->biq_action' \
                         '2:host:_hosts'
 
@@ -275,14 +286,25 @@ _myf5() {
                     ;;
                 push)
                     _arguments -C \
-                        '(-m --method)'{-m,--method}'[Transfer method]:method:(icontrol scp)' \
+                        '(-m --method)'{-m,--method}'[Transfer method]:method:(auto icontrol scp)' \
                         '(-d --dest)'{-d,--dest}'[Remote destination directory]:dest:' \
                         '(-t --target)'{-t,--target}'[Target appliance type]:target:(BIG-IP BIG-IQ)' \
                         '(-u --user)'{-u,--user}'[Administrative user]:user:' \
                         '(-p --port)'{-p,--port}'[Port]:port:' \
-                        '(-k --key)'{-k,--key}'[SSH private key path]:file:_files' \
+                        '(-i --identity)'{-i,--identity}'[SSH private key path]:file:_files' \
                         '1:host:_hosts' \
                         '2:file:_files'
+                    ;;
+                pull|fetch)
+                    _arguments -C \
+                        '(-m --method)'{-m,--method}'[Transfer method]:method:(auto icontrol scp)' \
+                        '(-o --output)'{-o,--output}'[Local destination file path]:file:_files' \
+                        '(-t --target)'{-t,--target}'[Target appliance type]:target:(BIG-IP BIG-IQ)' \
+                        '(-u --user)'{-u,--user}'[Administrative user]:user:' \
+                        '(-p --port)'{-p,--port}'[Port]:port:' \
+                        '(-i --identity)'{-i,--identity}'[SSH private key path]:file:_files' \
+                        '1:host:_hosts' \
+                        '2:remote_file:'
                     ;;
                 completion)
                     local -a shells
@@ -313,7 +335,8 @@ complete -c myf5 -n "__fish_use_subcommand" -a cases -d "View and manage MyF5 su
 complete -c myf5 -n "__fish_use_subcommand" -a ihealth -d "Upload and inspect QKView diagnostic bundles on iHealth"
 complete -c myf5 -n "__fish_use_subcommand" -a bigip -d "Manage BIG-IP TMOS appliances"
 complete -c myf5 -n "__fish_use_subcommand" -a bigiq -d "Manage BIG-IQ appliances"
-complete -c myf5 -n "__fish_use_subcommand" -a push -d "Push downloads or files to BIG-IP/BIG-IQ"
+complete -c myf5 -n "__fish_use_subcommand" -a push -d "Push downloads or files to BIG-IP/BIG-IQ (auto failover)"
+complete -c myf5 -n "__fish_use_subcommand" -a pull -d "Download files from BIG-IP/BIG-IQ (auto failover)"
 complete -c myf5 -n "__fish_use_subcommand" -a doctor -d "Verify API credentials, DNS, and network reachability"
 complete -c myf5 -n "__fish_use_subcommand" -a version -d "Print application version"
 complete -c myf5 -n "__fish_use_subcommand" -a completion -d "Generate shell tab completion script"
@@ -342,22 +365,35 @@ complete -c myf5 -n "__fish_seen_subcommand_from ihealth; and not __fish_seen_su
 complete -c myf5 -n "__fish_seen_subcommand_from ihealth; and __fish_seen_subcommand_from upload" -F
 
 # BIG-IP subcommands
-complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready qkview push" -a ready -d "Check TMOS readiness"
-complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready qkview push" -a qkview -d "Generate diagnostic QKView"
-complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready qkview push" -a push -d "Push file via iControl or SCP"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready qkview push download" -a ready -d "Check TMOS readiness"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready qkview push download" -a qkview -d "Generate diagnostic QKView"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready qkview push download" -a push -d "Push file via iControl or SCP (auto failover)"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready qkview push download" -a download -d "Download file via iControl or SCP (auto failover)"
 complete -c myf5 -n "__fish_seen_subcommand_from bigip" -s u -l user -d "BIG-IP admin username"
 complete -c myf5 -n "__fish_seen_subcommand_from bigip" -s p -l port -d "Management HTTPS/SSH port"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip" -s o -l output -F -d "Local destination file path"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip" -s i -l identity -F -d "SSH private key path"
 
 # BIG-IQ subcommands
-complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready push" -a ready -d "Check BIG-IQ readiness"
-complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready push" -a push -d "Push file via iControl or SCP"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready push download" -a ready -d "Check BIG-IQ readiness"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready push download" -a push -d "Push file via iControl or SCP (auto failover)"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready push download" -a download -d "Download file via iControl or SCP (auto failover)"
 complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -s u -l user -d "BIG-IQ admin username"
 complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -s p -l port -d "Management HTTPS/SSH port"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -s o -l output -F -d "Local destination file path"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -s i -l identity -F -d "SSH private key path"
 
 # Push command
-complete -c myf5 -n "__fish_seen_subcommand_from push" -s m -l method -d "Transfer method (icontrol or scp)"
+complete -c myf5 -n "__fish_seen_subcommand_from push" -s m -l method -d "Transfer method (auto, icontrol, scp)"
 complete -c myf5 -n "__fish_seen_subcommand_from push" -s t -l target -d "Target appliance (BIG-IP or BIG-IQ)"
 complete -c myf5 -n "__fish_seen_subcommand_from push" -s d -l dest -d "Remote destination directory"
+complete -c myf5 -n "__fish_seen_subcommand_from push" -s i -l identity -F -d "SSH private key path"
+
+# Pull command
+complete -c myf5 -n "__fish_seen_subcommand_from pull" -s m -l method -d "Transfer method (auto, icontrol, scp)"
+complete -c myf5 -n "__fish_seen_subcommand_from pull" -s t -l target -d "Target appliance (BIG-IP or BIG-IQ)"
+complete -c myf5 -n "__fish_seen_subcommand_from pull" -s o -l output -F -d "Local destination file path"
+complete -c myf5 -n "__fish_seen_subcommand_from pull" -s i -l identity -F -d "SSH private key path"
 
 # Completion shells
 complete -c myf5 -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"

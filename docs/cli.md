@@ -173,31 +173,36 @@ Generates a complete, non-truncating (`-s0`) diagnostic QKView archive on the BI
 myf5 bigip qkview 10.1.1.4 --user admin
 ```
 
-#### `push <host> <file> [--method icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [--key <key>]`
-Pushes a local software image, engineering hotfix, or GeoDB archive to the BIG-IP appliance.
+#### `push <host> <file> [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>]`
+Pushes a local software image, engineering hotfix, or GeoDB archive to the BIG-IP appliance with automatic seamless failover between iControl REST and SCP.
 ```bash
-# Push ISO to /shared/images via iControl REST
-myf5 bigip push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --method icontrol --dest /shared/images
+# Push ISO to /shared/images with automatic failover (default)
+myf5 bigip push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --dest /shared/images
 
-# Push hotfix via native SCP (defaults to /shared/images for ISO/hotfix files)
-myf5 bigip push 10.1.1.4 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso --method scp
+# Push hotfix explicitly via native Go SCP
+myf5 bigip push 10.1.1.4 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso --method scp -i ~/.ssh/f5_key
 
-# Push GeoDB update to /shared/GeoIP/
-myf5 bigip push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --dest /shared/GeoIP
+# Push GeoDB update to /shared/GeoIP/ via iControl REST
+myf5 bigip push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --dest /shared/GeoIP --method icontrol
 ```
 
-#### `download <host> <remote-filename>`
-Downloads an existing diagnostic file or QKView from the appliance autodeploy store (`/mgmt/cm/autodeploy/qkview-downloads/`).
+#### `download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--user <user>] [--port <port>] [-i <key>]`
+Downloads a remote file or diagnostic bundle from the BIG-IP appliance with automatic failover between iControl REST and SCP.
 ```bash
-myf5 bigip download 10.1.1.4 qkview_10.1.1.4_1727760000.qkview
+# Download software image from /shared/images/ (auto-attempts REST, falls back to SCP)
+myf5 bigip download 10.1.1.4 /shared/images/BIGIP-17.1.1.iso -o ./BIGIP-17.1.1.iso
+
+# Download configuration file via SCP
+myf5 bigip download 10.1.1.4 /config/bigip.conf -o ./bigip.conf --method scp -u root -i ~/.ssh/id_ed25519
 ```
 
 ### Options
-- `-u, --user <username>`: Administrative user (default: `$BIGIP_USER` or `"admin"`).
+- `-u, --user <username>`: Administrative user (default: `$BIGIP_USER` or `"admin"` for REST, `"root"`/`"admin"` for SCP).
 - `-p, --port <port>`: HTTPS port for iControl (default: 443) or SSH port for SCP (default: 22).
-- `-m, --method <icontrol|scp>`: Transfer protocol (default: `icontrol`).
-- `-d, --dest <path>`: Destination directory on appliance (e.g., `/shared/images` or `/shared/GeoIP`).
-- `-k, --key <path>`: Private key path for SSH authentication during SCP transfers.
+- `-m, --method <auto|icontrol|scp>`: Transfer protocol with automatic failover (default: `auto`).
+- `-d, --dest <path>`: Destination directory on appliance for uploads (e.g., `/shared/images` or `/shared/GeoIP`).
+- `-o, --output <path>`: Local destination path for downloads (default: current directory or default downloads dir).
+- `-i, --identity <path>`: Private key path for SSH authentication during SCP transfers.
 - **Authentication**: Set via `BIGIP_PASSWORD` environment variable, SSH key / agent, or enter interactively at the masked terminal prompt.
 
 ---
@@ -214,50 +219,80 @@ Checks BIG-IQ management plane availability against `/mgmt/tm/sys/ready` or `/mg
 myf5 bigiq ready 192.0.2.50
 ```
 
-#### `push <host> <file> [--method icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [--key <key>]`
-Uploads software images, hotfixes, or files to BIG-IQ central software repositories.
+#### `push <host> <file> [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>]`
+Uploads software images, hotfixes, or files to BIG-IQ central software repositories with automatic failover.
 ```bash
-# Push to BIG-IQ central image repository via SCP
-myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --method scp --dest /shared/images
+# Push to BIG-IQ central image repository via auto failover
+myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --dest /shared/images
 
-# Push via iControl REST
-myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --method icontrol --dest /shared/images
+# Push via native SCP with identity key
+myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --method scp -i ~/.ssh/id_rsa
+```
+
+#### `download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--user <user>] [--port <port>] [-i <key>]`
+Downloads software images or files from BIG-IQ with automatic failover.
+```bash
+myf5 bigiq download 192.0.2.50 /shared/images/BIGIP-17.1.1.iso -o ./BIGIP-17.1.1.iso
 ```
 
 ### Options
 - `-u, --user <username>`: Administrative user (default: `$BIGIQ_USER`, `$BIGIP_USER`, or `"admin"`).
 - `-p, --port <port>`: Management HTTPS / SSH port.
-- `-m, --method <icontrol|scp>`: Transfer protocol (default: `icontrol`).
+- `-m, --method <auto|icontrol|scp>`: Transfer protocol with automatic failover (default: `auto`).
 - `-d, --dest <path>`: Remote directory on appliance.
-- `-k, --key <path>`: SSH private key for SCP transfer.
+- `-o, --output <path>`: Local destination file path.
+- `-i, --identity <path>`: SSH private key for SCP transfer.
 - **Authentication**: Set via `BIGIQ_PASSWORD` (or `BIGIP_PASSWORD`), SSH key / agent, or enter interactively at the masked terminal prompt.
 
 ---
 
 ## 6. `myf5 push`
 
-Unified command to push software downloads, hotfixes, or packages to any BIG-IP or BIG-IQ instance.
+Unified command to push software downloads, hotfixes, or packages to any BIG-IP or BIG-IQ instance with automatic failover.
 
 ### Syntax
 ```bash
-myf5 push <host> <file> [--method icontrol|scp] [--dest <path>] [--target bigip|bigiq] [--user <user>] [--port <port>] [--key <key>]
+myf5 push <host> <file> [--method auto|icontrol|scp] [--dest <path>] [--target bigip|bigiq] [--user <user>] [--port <port>] [-i <key>]
 ```
 
 ### Examples
 ```bash
-# Push software image to BIG-IP via iControl REST
+# Push software image to BIG-IP with automatic failover
 myf5 push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --target bigip --dest /shared/images
 
 # Push software image to BIG-IQ repository via SCP
 myf5 push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --target bigiq --method scp --dest /shared/images
 
 # Push using specific SSH key
-myf5 push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --method scp --dest /shared/GeoIP --key ~/.ssh/f5_deploy
+myf5 push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --dest /shared/GeoIP -i ~/.ssh/f5_deploy
 ```
 
 ---
 
-## 7. `myf5 doctor`
+## 7. `myf5 pull`
+
+Unified command to download files, diagnostics, or software images from any BIG-IP or BIG-IQ appliance with automatic failover.
+
+### Syntax
+```bash
+myf5 pull <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--target bigip|bigiq] [--user <user>] [--port <port>] [-i <key>]
+```
+
+### Examples
+```bash
+# Pull software image from BIG-IP (attempts REST, falls back to SCP)
+myf5 pull 10.1.1.4 /shared/images/BIGIP-17.1.1.iso -o ./BIGIP-17.1.1.iso
+
+# Pull system log file from BIG-IP via SCP
+myf5 pull 10.1.1.4 /var/log/ltm -o ./ltm.log --method scp -u root -i ~/.ssh/id_ed25519
+
+# Pull image from BIG-IQ central repository
+myf5 pull 192.0.2.50 /shared/images/BIGIP-17.1.1.iso --target bigiq
+```
+
+---
+
+## 8. `myf5 doctor`
 
 Pre-flight diagnostic audit that verifies local credentials, DNS resolution, and TCP port 443 egress to all authoritative F5 cloud endpoints.
 
@@ -271,7 +306,7 @@ Output audits:
 
 ---
 
-## 8. `myf5 completion`
+## 9. `myf5 completion`
 
 Generates tab autocompletion scripts for the specified shell.
 
@@ -300,7 +335,7 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
 
 ---
 
-## 9. `myf5 version`
+## 10. `myf5 version`
 
 Prints the compiled application version and target architecture.
 ```bash
@@ -309,7 +344,7 @@ myf5 version
 
 ---
 
-## 10. Process Exit Codes
+## 11. Process Exit Codes
 
 `myf5` returns standard POSIX exit codes to support reliable shell script branching and CI/CD pipelines:
 

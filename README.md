@@ -13,7 +13,7 @@ A high-performance, memory-safe, zero-dependency Go CLI and client library for *
 
 - **Memory-Safe & Statically Compiled**: Compiles to a single static binary with zero external runtime dependencies (`CGO_ENABLED=0`).
 - **Wire-Speed Multi-GB Streaming**: Streams 2.5 GB – 10+ GB BIG-IP ISOs, OVAs, and qcow2 images directly to disk using `io.TeeReader` with simultaneous SHA-256 verification and minimal RAM footprint (< 10 MB).
-- **Direct Appliance Push Engine**: Pushes software ISOs, engineering hotfixes, and GeoDB updates directly to BIG-IP and BIG-IQ appliances using either **iControl REST chunked transfer** (HTTPS) or **native Go SCP streaming** (SSH).
+- **Direct Appliance Push & Pull Engine**: Transfers software ISOs, engineering hotfixes, diagnostic QKViews, and configuration files directly between local systems and BIG-IP / BIG-IQ appliances with **automatic seamless failover** between **iControl REST chunked transfer** (HTTPS) and **native Go SCP streaming** (SSH).
 - **End-to-End Download & Deploy**: Downloads an image from MyF5, cryptographically verifies its SHA-256 checksum, and immediately pushes it to target appliances in a single atomic pipeline (`myf5 downloads get ... --push <host>`).
 - **MyF5 Downloads Migration Ready**: Defaults to the new October 2, 2026 endpoint (`api.software.downloads.f5.com`) without the legacy `k` query parameter, with automatic pre-cutover fallback and HTTP 429 rate-limit backoff.
 - **Strict Zero-Secret CLI Security**: Rejects plaintext secret arguments (`--password`, `--client-secret`) with exit code `2` to protect against process table (`ps aux`) and shell history leaks.
@@ -36,10 +36,11 @@ myf5-api/
 │   ├── downloads/              # Downloads API catalog client and streaming downloader
 │   ├── cases/                  # MyF5 Support Case API client
 │   ├── ihealth/                # F5 iHealth QKView multipart upload and status client
-│   ├── bigip/                  # BIG-IP & BIG-IQ client (iControl REST chunking, bash promotion, native SCP)
-│   │   ├── client.go           # Appliance HTTP client, readiness, QKView automation
+│   ├── bigip/                  # BIG-IP & BIG-IQ client (iControl REST chunking, bash promotion, native SCP, failover)
+│   │   ├── client.go           # Appliance HTTP client, readiness, QKView automation, REST download
 │   │   ├── upload.go           # iControl REST chunked file transfer & bash promotion
-│   │   └── scp.go              # Native Go SCP sink streaming over SSH
+│   │   ├── scp.go              # Native Go SCP streaming (upload & download) over SSH
+│   │   └── failover.go         # Dual-protocol automatic failover engine
 │   └── completion/             # Zero-dependency shell tab completion generator (bash, zsh, fish)
 ├── .github/
 │   ├── workflows/              # GitHub Actions CI, Release, and Security workflows
@@ -182,8 +183,8 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
 ./bin/myf5 ihealth upload /path/to/appliance.qkview "C1000234" "Initial triage bundle"
 ```
 
-### 5. BIG-IP Appliance Management & Image Push
-Works with local management IPs, lab appliances, or cloud/UDF external access proxies.
+### 5. BIG-IP Appliance Management & Image Transfer (Auto Failover)
+Works with local management IPs, lab appliances, or cloud/UDF external access proxies with automatic failover between iControl REST and SCP.
 
 ```bash
 # Check TMOS readiness (via local IP)
@@ -192,29 +193,38 @@ Works with local management IPs, lab appliances, or cloud/UDF external access pr
 # Check TMOS readiness (via UDF or Cloud Access Proxy)
 ./bin/myf5 bigip ready https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com/
 
-# Trigger full, non-truncating QKView generation (-s0)
+# Trigger full, non-truncating QKView generation (-s0) with resilient download
 ./bin/myf5 bigip qkview 10.1.1.4 --user admin
 
-# Push software ISO to BIG-IP /shared/images via iControl REST
-./bin/myf5 bigip push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --method icontrol --dest /shared/images
+# Push software ISO to BIG-IP /shared/images with automatic failover (default)
+./bin/myf5 bigip push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --dest /shared/images
 
 # Push engineering hotfix via native Go SCP over SSH
-./bin/myf5 bigip push 10.1.1.4 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso --method scp
+./bin/myf5 bigip push 10.1.1.4 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso --method scp -i ~/.ssh/f5_key
+
+# Download software image from BIG-IP appliance
+./bin/myf5 bigip download 10.1.1.4 /shared/images/BIGIP-17.1.1.iso -o ./BIGIP-17.1.1.iso
 ```
 
-### 6. BIG-IQ Centralized Management & Image Push
+### 6. BIG-IQ Centralized Management & Image Transfer
 ```bash
 # Check BIG-IQ management plane readiness
 ./bin/myf5 bigiq ready 192.0.2.50
 
-# Push software ISO to BIG-IQ central repository
-./bin/myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --method scp --dest /shared/images
+# Push software ISO to BIG-IQ central repository (auto failover)
+./bin/myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --dest /shared/images
+
+# Download file from BIG-IQ repository
+./bin/myf5 bigiq download 192.0.2.50 /shared/images/BIGIP-17.1.1.iso -o ./BIGIP-17.1.1.iso
 ```
 
-### 7. Unified Appliance Push
+### 7. Unified Appliance Push & Pull (Auto Failover)
 ```bash
-# Push file to any appliance with target selection
+# Push file to any appliance with target selection and auto failover
 ./bin/myf5 push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --target bigip --dest /shared/GeoIP
+
+# Pull file from any appliance with auto failover
+./bin/myf5 pull 10.1.1.4 /var/log/ltm -o ./ltm.log --method scp -u root -i ~/.ssh/id_ed25519
 ```
 
 ### 8. Shell Tab Autocompletion (`bash`, `zsh`, `fish`)

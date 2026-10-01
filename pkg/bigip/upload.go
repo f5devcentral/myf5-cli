@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 )
 
@@ -95,8 +96,8 @@ func (c *Client) UploadFile(ctx context.Context, localPath string, remoteFilenam
 // CopyRemoteFile uses the TMOS bash utility (/mgmt/tm/util/bash) to copy a file
 // from one path to another on the appliance (e.g., from /var/config/rest/downloads to /shared/images).
 func (c *Client) CopyRemoteFile(ctx context.Context, srcPath, destDir string) (string, error) {
-	filename := filepath.Base(srcPath)
-	destPath := filepath.Join(destDir, filename)
+	filename := path.Base(srcPath)
+	destPath := path.Join(destDir, filename)
 
 	cmdStr := fmt.Sprintf("cp -f %s %s", srcPath, destPath)
 	payload := map[string]string{

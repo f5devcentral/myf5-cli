@@ -1,43 +1,47 @@
-# Appliance Push Guide: BIG-IP & BIG-IQ Software, Hotfix, and GeoDB Deployment
+# Appliance Transfer Guide: BIG-IP & BIG-IQ Dual Push, Pull, and Automatic Failover Engine
 
-The `myf5` appliance push engine enables direct, wire-speed streaming of software images, engineering hotfixes, and GeoDB packages to **F5 BIG-IP TMOS** and **BIG-IQ Centralized Management** appliances.
+The `myf5` appliance transfer engine enables direct, wire-speed bidirectional streaming of software images, engineering hotfixes, diagnostic QKViews, configuration files, and GeoDB packages between local systems and **F5 BIG-IP TMOS** or **BIG-IQ Centralized Management** appliances.
 
-By embedding both **iControl REST chunked transfer** and **native Go SCP over SSH**, `myf5` eliminates external scripting dependencies (such as external `scp`, `sshpass`, or Python paramiko wrappers) while maintaining strict **Zero-Secret CLI Security**.
+By embedding both **iControl REST chunked transfer** and **native Go SCP over SSH** with an **automatic seamless failover engine**, `myf5` guarantees file transfers succeed even when one transport protocol is blocked, misconfigured, or restricted by firewall policies.
 
 ---
 
-## Architectural Overview
+## Architectural Overview & Automatic Failover Engine
 
-`myf5` provides two independent transport mechanisms for pushing files to appliances:
+`myf5` provides two independent transport mechanisms for both pushing (uploading) and pulling (downloading) files:
 
-1. **iControl REST Chunked Transfer** (Default: `--method icontrol`)
+1. **Automatic Failover Mode** (Default: `--method auto`)
+   - **Upload (`push`)**: Attempts iControl REST first when password authentication is available. If the REST API endpoint fails, times out, or returns an HTTP error, `myf5` displays a `[FAILOVER]` alert and immediately re-executes the upload via native Go SCP over SSH. Conversely, if an SSH key is explicitly provided, SCP is attempted first with automatic REST fallback.
+   - **Download (`pull` / `download`)**: Evaluates the requested remote path. For files located in `/shared/images/` or `/var/tmp/qkviews/` (such as ISO software images or QKViews), `myf5` attempts chunked iControl REST download first. If the file is not found via REST (HTTP 404) or REST is unavailable, it immediately falls back to native Go SCP. For arbitrary Linux filesystem paths (e.g., `/config/bigip.conf`), it attempts SCP first, falling back to REST bash staging.
+   - **Diagnostic QKView Downloads**: `myf5 bigip qkview <host>` leverages automatic failover so that if the appliance's TMOS autodeploy download endpoint is disabled or missing, the generated QKView archive (`/var/tmp/qkviews/<filename>`) is downloaded via SCP without user intervention.
+
+2. **iControl REST Chunked Transfer** (`--method icontrol`)
    - Operates over HTTPS (port 443 or custom management port).
-   - Breaks payloads into 512 KB chunks transferred sequentially to `/mgmt/shared/file-transfer/uploads/<filename>`.
-   - Stages uploads in `/var/config/rest/downloads/<filename>` on the appliance.
-   - Automatically promotes files to the requested destination (e.g., `/shared/images/` or `/shared/GeoIP/`) using the TMOS bash utility (`/mgmt/tm/util/bash`).
+   - **Upload**: Breaks payloads into 512 KB chunks transferred sequentially to `/mgmt/shared/file-transfer/uploads/<filename>`. Stages uploads in `/var/config/rest/downloads/<filename>` on the appliance, and automatically promotes files to the requested destination (e.g., `/shared/images/` or `/shared/GeoIP/`) using `/mgmt/tm/util/bash`.
+   - **Download**: Streams files via HTTP range requests from `/mgmt/cm/autodeploy/software-image-downloads/` or `/mgmt/cm/autodeploy/qkview-downloads/` directly to local disk.
    - Ideal when SSH access is restricted by firewall policies, or when working through HTTPS reverse proxies and cloud access environments (e.g., F5 Unified Demonstration Framework / UDF).
 
-2. **Native Go SCP over SSH** (`--method scp`)
+3. **Native Go SCP over SSH** (`--method scp`)
    - Operates over SSH (port 22 or custom port).
-   - Implements the standard remote SCP sink protocol directly in pure Go (`golang.org/x/crypto/ssh`), requiring no external OpenSSH binaries.
-   - Streams payloads directly into the target filesystem location (such as `/shared/images`) in a single network pass, without intermediate staging in `/var/config/rest/downloads/`.
+   - Implements both remote SCP sink (receive/upload) and SCP source (transmit/download) protocols directly in pure Go (`golang.org/x/crypto/ssh`), requiring zero external OpenSSH binaries.
+   - Streams payloads directly to and from arbitrary appliance filesystem locations in a single network pass.
    - Supports SSH key authentication, SSH agent forwarding (`SSH_AUTH_SOCK`), and password / keyboard-interactive (PAM / TACACS+ / RADIUS) authentication.
-   - Ideal for multi-gigabyte ISO transfers in datacenter LANs and high-speed management networks.
+   - Ideal for multi-gigabyte transfers in datacenter LANs and high-speed management networks.
 
 ### Architecture Comparison Matrix
 
-| Feature / Property | iControl REST (`icontrol`) | Native SCP over SSH (`scp`) |
-| :--- | :--- | :--- |
-| **Transport Protocol** | HTTPS (TLS 1.2 / 1.3) | SSHv2 |
-| **Default Port** | TCP 443 | TCP 22 |
-| **External Dependencies** | Zero (Pure Go `net/http`) | Zero (Pure Go `golang.org/x/crypto/ssh`) |
-| **Network Path Compatibility** | Web proxies, Cloud proxies, F5 UDF | Direct L3 / SSH bastions |
-| **Chunk / Buffer Size** | 512 KB (`Content-Range` chunking) | 64 KB streaming buffer |
-| **Initial Staging Path** | `/var/config/rest/downloads/<file>` | Direct write to destination directory |
-| **Promotion Mechanism** | TMOS Bash utility (`/mgmt/tm/util/bash`) | Direct destination write via `scp -t` |
-| **Authentication Methods** | HTTP Basic Auth (admin user & password) | SSH Key, SSH Agent, Password, Keyboard-Interactive |
-| **Default Image Destination** | Staged in rest downloads; promoted via `--dest` | `/shared/images` for ISO/hotfix; `/var/tmp` for others |
-| **Appliance Compatibility** | BIG-IP TMOS (v12+), BIG-IQ (v7+) | Any BIG-IP TMOS or BIG-IQ instance with SSH access |
+| Feature / Property | Automatic Failover (`auto`) | iControl REST (`icontrol`) | Native SCP over SSH (`scp`) |
+| :--- | :--- | :--- | :--- |
+| **Default Selection** | **Yes (Default)** | Explicit `--method icontrol` | Explicit `--method scp` |
+| **Transport Protocol** | HTTPS or SSHv2 (Adaptive) | HTTPS (TLS 1.2 / 1.3) | SSHv2 |
+| **Default Ports** | TCP 443 (REST) / TCP 22 (SSH) | TCP 443 | TCP 22 |
+| **External Dependencies** | Zero | Zero (Pure Go `net/http`) | Zero (Pure Go `golang.org/x/crypto/ssh`) |
+| **Network Path Compatibility** | All environments (Firewall resilient) | Web proxies, Cloud proxies, F5 UDF | Direct L3 / SSH bastions |
+| **Chunk / Buffer Size** | 512 KB REST / 64 KB SCP | 512 KB (`Content-Range` chunking) | 64 KB streaming buffer |
+| **Upload Destination** | Direct write or `/shared/images` | `/var/config/rest/downloads` (promoted) | Direct destination write via `scp -t` |
+| **Download Source** | Any TMOS path (adaptive) | Autodeploy stores (`software-image-downloads`) | Any valid appliance file path via `scp -f` |
+| **Authentication Methods** | Password, SSH Key, SSH Agent | HTTP Basic Auth (admin user & password) | SSH Key, SSH Agent, Password, PAM |
+| **Appliance Compatibility** | BIG-IP TMOS (v12+), BIG-IQ (v7+) | BIG-IP TMOS (v12+), BIG-IQ (v7+) | Any BIG-IP TMOS or BIG-IQ instance |
 
 ---
 
@@ -243,6 +247,46 @@ myf5 push 192.0.2.50 /var/tmp/BIGIP-17.1.1-0.0.6.iso \
     --method icontrol \
     --dest /shared/images
 ```
+
+---
+
+### 5. Downloading Files from Appliances (`pull` / `download` with Automatic Failover)
+
+`myf5` supports bidirectional file transfer. Files can be fetched from any BIG-IP or BIG-IQ appliance using `myf5 bigip download`, `myf5 bigiq download`, or the top-level `myf5 pull`:
+
+```bash
+# Download a software image from /shared/images/ (attempts REST first, auto-fails over to SCP)
+myf5 bigip download 10.1.1.4 /shared/images/BIGIP-17.1.1-0.0.6.iso -o ./BIGIP-17.1.1.iso
+
+# Download a system configuration file via native SCP
+myf5 bigip download 10.1.1.4 /config/bigip.conf -o ./bigip.conf --method scp
+
+# Unified pull command with specific SSH identity key
+myf5 pull 10.1.1.4 /var/log/ltm -o ./ltm.log -i ~/.ssh/id_ed25519
+
+# Download from BIG-IQ central repository
+myf5 bigiq download 192.0.2.50 /shared/images/BIGIP-17.1.1-0.0.6.iso -o ./BIGIP-17.1.1.iso
+```
+
+#### Automatic Download Failover Mechanics
+When `--method auto` is used:
+1. `myf5` determines whether the file is an autodeploy artifact (under `/shared/images/` or `/var/tmp/qkviews/`).
+2. If so, it initiates a streaming download via iControl REST.
+3. If the REST API endpoint responds with HTTP 404 (file not staged in autodeploy) or returns a connection error, `myf5` alerts the operator with `[FAILOVER]` and immediately establishes a native Go SCP session, downloading the file directly from the appliance filesystem.
+
+---
+
+### 6. Resilient Diagnostic QKView Generation and Download
+
+Generating a complete QKView diagnostic archive is critical for troubleshooting with F5 Technical Support. `myf5` runs a complete non-truncating (`-s0`) QKView generation on the appliance and retrieves it:
+
+```bash
+myf5 bigip qkview 10.1.1.4 --user admin
+```
+
+1. **Remote Generation**: Calls `/mgmt/tm/cm/device/diagnostic` with live spinner reporting until TMOS finishes compiling `/var/tmp/qkviews/<filename>`.
+2. **Resilient Download**: Attempts chunked REST download from `/mgmt/cm/autodeploy/qkview-downloads/<filename>`.
+3. **Automatic Failover**: If TMOS autodeploy is disabled or returns 404, `myf5` automatically switches to native Go SCP, transferring `/var/tmp/qkviews/<filename>` without aborting the workflow.
 
 ---
 

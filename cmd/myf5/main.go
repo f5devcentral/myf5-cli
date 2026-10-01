@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -78,6 +79,8 @@ func main() {
 		handleBIGIQ(ctx, args)
 	case "push":
 		handlePush(ctx, args)
+	case "pull", "fetch":
+		handlePull(ctx, args)
 	case "doctor":
 		handleDoctor(ctx, args)
 	case "completion":
@@ -107,9 +110,10 @@ COMMANDS:
     downloads    Browse MyF5 catalog and stream multi-GB software images
     cases        View and manage MyF5 support cases
     ihealth      Upload and inspect QKView diagnostic bundles on iHealth
-    bigip        Manage BIG-IP TMOS appliances (ready check, QKView generation, push)
-    bigiq        Manage BIG-IQ appliances (ready check, push software images/files)
-    push         Push software downloads or files to BIG-IP / BIG-IQ via iControl or SCP
+    bigip        Manage BIG-IP TMOS appliances (ready check, QKView generation, push, download)
+    bigiq        Manage BIG-IQ appliances (ready check, push, download)
+    push         Push software downloads or files to BIG-IP / BIG-IQ (auto failover)
+    pull         Download files from BIG-IP / BIG-IQ (auto failover)
     doctor       Verify API credentials, DNS, and network firewall egress
     completion   Generate shell tab completion script (bash, zsh, fish)
     version      Print application version
@@ -156,7 +160,7 @@ func handleDownloads(ctx context.Context, args []string) {
 	outputVal := ""
 	profileVal := "default"
 	pushHost := ""
-	pushMethod := "icontrol"
+	pushMethod := "auto"
 	pushDest := ""
 	pushUser := ""
 	pushPort := 0
@@ -1088,14 +1092,14 @@ func handleBIGIQ(ctx context.Context, args []string) {
 
 func handlePush(ctx context.Context, args []string) {
 	if len(args) < 2 {
-		fmt.Println("Usage: myf5 push <host> <file> [--method icontrol|scp] [--dest <path>] [--target bigip|bigiq] [--user <user>] [--port <port>] [--key <key>]")
+		fmt.Println("Usage: myf5 push <host> <file> [--method auto|icontrol|scp] [--dest <path>] [--target bigip|bigiq] [--user <user>] [--port <port>] [-i <key>]")
 		os.Exit(1)
 	}
 
 	var positional []string
 	user := ""
 	port := 0
-	method := "icontrol"
+	method := "auto"
 	destPath := ""
 	keyPath := ""
 	targetKind := "BIG-IP"
@@ -1160,13 +1164,98 @@ func handlePush(ctx context.Context, args []string) {
 	}
 
 	if len(positional) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: myf5 push <host> <file> [--method icontrol|scp] [--dest <dest>] [--target bigip|bigiq] ...\n")
+		fmt.Fprintf(os.Stderr, "Usage: myf5 push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--target bigip|bigiq] ...\n")
 		os.Exit(1)
 	}
 
 	host := positional[0]
 	localFile := positional[1]
 	executePushToAppliance(ctx, host, localFile, method, destPath, user, port, keyPath, targetKind)
+}
+
+func handlePull(ctx context.Context, args []string) {
+	if len(args) < 2 {
+		fmt.Println("Usage: myf5 pull <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--target bigip|bigiq] [--user <user>] [--port <port>] [-i <key>]")
+		os.Exit(1)
+	}
+
+	var positional []string
+	user := ""
+	port := 0
+	method := "auto"
+	localDest := ""
+	keyPath := ""
+	targetKind := "BIG-IP"
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--user" || arg == "-u" {
+			if i+1 < len(args) {
+				user = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--user=") {
+			user = strings.TrimPrefix(arg, "--user=")
+		} else if arg == "--port" || arg == "-p" {
+			if i+1 < len(args) {
+				if p, err := strconv.Atoi(args[i+1]); err == nil {
+					port = p
+				}
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--port=") {
+			if p, err := strconv.Atoi(strings.TrimPrefix(arg, "--port=")); err == nil {
+				port = p
+			}
+		} else if arg == "--method" || arg == "-m" {
+			if i+1 < len(args) {
+				method = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--method=") {
+			method = strings.TrimPrefix(arg, "--method=")
+		} else if arg == "--output" || arg == "-o" || arg == "--dest" || arg == "-d" {
+			if i+1 < len(args) {
+				localDest = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--output=") {
+			localDest = strings.TrimPrefix(arg, "--output=")
+		} else if strings.HasPrefix(arg, "--dest=") {
+			localDest = strings.TrimPrefix(arg, "--dest=")
+		} else if arg == "--identity" || arg == "-i" {
+			if i+1 < len(args) {
+				keyPath = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--identity=") {
+			keyPath = strings.TrimPrefix(arg, "--identity=")
+		} else if arg == "--target" || arg == "-t" {
+			if i+1 < len(args) {
+				targ := args[i+1]
+				if strings.EqualFold(targ, "bigiq") || strings.EqualFold(targ, "big-iq") {
+					targetKind = "BIG-IQ"
+				}
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--target=") {
+			targ := strings.TrimPrefix(arg, "--target=")
+			if strings.EqualFold(targ, "bigiq") || strings.EqualFold(targ, "big-iq") {
+				targetKind = "BIG-IQ"
+			}
+		} else if !strings.HasPrefix(arg, "-") {
+			positional = append(positional, arg)
+		}
+	}
+
+	if len(positional) < 2 {
+		fmt.Fprintf(os.Stderr, "Usage: myf5 pull <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--target bigip|bigiq] ...\n")
+		os.Exit(1)
+	}
+
+	host := positional[0]
+	remoteFile := positional[1]
+	executeDownloadFromAppliance(ctx, host, remoteFile, localDest, method, user, port, keyPath, targetKind)
 }
 
 func handleAppliance(ctx context.Context, targetKind string, args []string) {
@@ -1177,9 +1266,9 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	if len(args) == 0 {
 		if strings.EqualFold(targetKind, "BIG-IQ") {
-			fmt.Printf("Usage: myf5 %s [ready <host> | push <host> <file>] [--method icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [--key <key>]\n", cmdName)
+			fmt.Printf("Usage: myf5 %s [ready <host> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
 		} else {
-			fmt.Printf("Usage: myf5 %s [ready <host> | qkview <host> | push <host> <file>] [--method icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [--key <key>]\n", cmdName)
+			fmt.Printf("Usage: myf5 %s [ready <host> | qkview <host> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
 		}
 		os.Exit(1)
 	}
@@ -1190,7 +1279,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	var positional []string
 	user := ""
 	port := 0
-	method := "icontrol"
+	method := "auto"
 	destPath := ""
 	keyPath := ""
 
@@ -1221,11 +1310,13 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			}
 		} else if strings.HasPrefix(arg, "--method=") {
 			method = strings.TrimPrefix(arg, "--method=")
-		} else if arg == "--dest" || arg == "-d" {
+		} else if arg == "--output" || arg == "-o" || arg == "--dest" || arg == "-d" {
 			if i+1 < len(actionArgs) {
 				destPath = actionArgs[i+1]
 				i++
 			}
+		} else if strings.HasPrefix(arg, "--output=") {
+			destPath = strings.TrimPrefix(arg, "--output=")
 		} else if strings.HasPrefix(arg, "--dest=") {
 			destPath = strings.TrimPrefix(arg, "--dest=")
 		} else if arg == "--identity" || arg == "-i" {
@@ -1290,16 +1381,25 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	case "push", "upload":
 		if len(positional) < 2 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s push <host> <file> [--method icontrol|scp] [--dest <dest>] [--user <user>] [--port <port>] [--key <key>]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
 			os.Exit(1)
 		}
 		host := positional[0]
 		localFile := positional[1]
 		executePushToAppliance(ctx, host, localFile, method, destPath, user, port, keyPath, targetKind)
 
+	case "download", "pull", "fetch":
+		if len(positional) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
+			os.Exit(1)
+		}
+		host := positional[0]
+		remoteFile := positional[1]
+		executeDownloadFromAppliance(ctx, host, remoteFile, destPath, method, user, port, keyPath, targetKind)
+
 	case "qkview":
 		if len(positional) < 1 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s qkview <host> [--user <user>] [--port <port>]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s qkview <host> [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
 			os.Exit(1)
 		}
 		host := positional[0]
@@ -1341,8 +1441,22 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		spinner.Success(fmt.Sprintf("QKView generated on appliance: /var/tmp/qkviews/%s", remoteFile))
 
 		destFile := filepath.Join(getDefaultDownloadsDir(), remoteFile)
-		bar := progress.NewBar(0, "Downloading")
-		err = client.DownloadQKView(ctx, remoteFile, destFile, func(transferred, total int64) {
+		bar := progress.NewBar(0, "Downloading diagnostic QKView")
+		qkOpts := bigip.TransferOptions{
+			TargetType:   targetKind,
+			Method:       bigip.MethodAuto,
+			Username:     user,
+			Password:     pw,
+			Port:         port,
+			IdentityFile: keyPath,
+			Timeout:      30 * time.Second,
+		}
+		logFn := func(format string, args ...any) {
+			bar.Abort("REST download failed")
+			fmt.Printf("\n[FAILOVER] "+format+"\n", args...)
+			bar = progress.NewBar(0, "Downloading via SCP fallback")
+		}
+		savedFile, methodUsed, err := bigip.DownloadFileWithFailover(ctx, host, "/var/tmp/qkviews/"+remoteFile, destFile, qkOpts, logFn, func(transferred, total int64) {
 			bar.Total = total
 			bar.Update(transferred)
 		})
@@ -1352,48 +1466,10 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
 				os.Exit(130)
 			}
-			fmt.Fprintf(os.Stderr, "\n[ERROR] Failed to download QKView: %v\n", err)
+			bar.Abort(fmt.Sprintf("Download failed: %v", err))
 			os.Exit(1)
 		}
-		bar.Finish(fmt.Sprintf("QKView saved to %s", destFile))
-
-	case "download":
-		if len(positional) < 2 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s download <host> <remote-filename>\n", cmdName)
-			os.Exit(1)
-		}
-		host := positional[0]
-		remoteFile := positional[1]
-		if user == "" {
-			user = os.Getenv("BIGIP_USER")
-			if user == "" {
-				user = "admin"
-			}
-		}
-		pw := os.Getenv("BIGIP_PASSWORD")
-		if pw == "" && term.IsTerminal(int(os.Stdin.Fd())) {
-			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
-			bytePw, _ := term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Println()
-			pw = strings.TrimSpace(string(bytePw))
-		}
-		client := bigip.NewClient(host, port, user, pw)
-		destFile := filepath.Join(getDefaultDownloadsDir(), remoteFile)
-		bar := progress.NewBar(0, "Downloading")
-		err := client.DownloadQKView(ctx, remoteFile, destFile, func(transferred, total int64) {
-			bar.Total = total
-			bar.Update(transferred)
-		})
-		if err != nil {
-			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-				bar.Abort("Download cancelled by user.")
-				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
-			}
-			fmt.Fprintf(os.Stderr, "\n[ERROR] Download failed: %v\n", err)
-			os.Exit(1)
-		}
-		bar.Finish(fmt.Sprintf("File saved to %s", destFile))
+		bar.Finish(fmt.Sprintf("Diagnostic QKView saved (%s) to %s", strings.ToUpper(string(methodUsed)), savedFile))
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown %s action '%s'\n", cmdName, action)
@@ -1402,18 +1478,21 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 }
 
 // executePushToAppliance handles streaming upload of a local file to a BIG-IP or BIG-IQ appliance
-// via either iControl REST chunked transfer or SCP over SSH.
+// via either iControl REST chunked transfer or SCP over SSH, with automatic seamless failover.
 func executePushToAppliance(ctx context.Context, host, localPath, method, destPath, user string, port int, keyPath, targetKind string) {
 	if targetKind == "" {
 		targetKind = "BIG-IP"
 	}
 	if method == "" {
-		method = "icontrol"
+		method = "auto"
 	}
 	method = strings.ToLower(strings.TrimSpace(method))
-	if method != "icontrol" && method != "scp" && method != "ssh" {
-		fmt.Fprintf(os.Stderr, "[ERROR] Invalid push method %q. Valid methods: 'icontrol', 'scp'\n", method)
+	if method != "auto" && method != "icontrol" && method != "scp" && method != "ssh" {
+		fmt.Fprintf(os.Stderr, "[ERROR] Invalid push method %q. Valid methods: 'auto', 'icontrol', 'scp'\n", method)
 		os.Exit(1)
+	}
+	if method == "ssh" {
+		method = "scp"
 	}
 
 	stat, err := os.Stat(localPath)
@@ -1432,7 +1511,11 @@ func executePushToAppliance(ctx context.Context, host, localPath, method, destPa
 			user = os.Getenv("BIGIP_USER")
 		}
 		if user == "" {
-			user = "admin"
+			if method == "scp" {
+				user = "root"
+			} else {
+				user = "admin"
+			}
 		}
 	}
 
@@ -1444,110 +1527,229 @@ func executePushToAppliance(ctx context.Context, host, localPath, method, destPa
 		pw = os.Getenv("BIGIP_PASSWORD")
 	}
 
+	if keyPath == "" {
+		if k := os.Getenv("BIGIP_SSH_KEY"); k != "" {
+			keyPath = k
+		} else if k := os.Getenv("SSH_KEY_PATH"); k != "" {
+			keyPath = k
+		}
+	}
+
+	if pw == "" && keyPath == "" {
+		home, _ := os.UserHomeDir()
+		hasKey := false
+		if home != "" {
+			for _, k := range []string{filepath.Join(home, ".ssh", "id_ed25519"), filepath.Join(home, ".ssh", "id_rsa")} {
+				if _, err := os.Stat(k); err == nil {
+					hasKey = true
+					break
+				}
+			}
+		}
+		if os.Getenv("SSH_AUTH_SOCK") != "" {
+			hasKey = true
+		}
+
+		if !hasKey && term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
+			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err == nil {
+				pw = strings.TrimSpace(string(bytePw))
+			}
+		}
+	}
+
+	opts := bigip.TransferOptions{
+		TargetType:   targetKind,
+		Method:       bigip.TransferMethod(method),
+		Username:     user,
+		Password:     pw,
+		Port:         port,
+		IdentityFile: keyPath,
+		DestDir:      destPath,
+		Timeout:      30 * time.Second,
+	}
+
 	fmt.Printf("Pushing %s (%s) to %s (%s) via %s...\n", baseName, downloads.FormatBytes(fileSize), targetKind, host, strings.ToUpper(method))
 
-	if method == "icontrol" {
-		if pw == "" {
-			if term.IsTerminal(int(os.Stdin.Fd())) {
-				fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
-				bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
-				fmt.Println()
-				if err == nil {
-					pw = strings.TrimSpace(string(bytePw))
-				}
-			}
+	var bar *progress.Bar
+	renderProgress := func(transferred, total int64) {
+		if bar == nil {
+			bar = progress.NewBar(0, fmt.Sprintf("Uploading to %s", targetKind))
 		}
-		if pw == "" {
-			fmt.Fprintf(os.Stderr, "[ERROR] Password required for iControl REST. Set BIGIP_PASSWORD / BIGIQ_PASSWORD or enter at prompt.\n")
-			os.Exit(1)
-		}
+		bar.Total = total
+		bar.Update(transferred)
+	}
 
-		client := bigip.NewClient(host, port, user, pw)
-		bar := progress.NewBar(0, fmt.Sprintf("Uploading via iControl REST"))
-		remotePath, err := client.UploadFile(ctx, localPath, baseName, func(transferred, total int64) {
-			bar.Total = total
-			bar.Update(transferred)
-		})
-		if err != nil {
-			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+	logFn := func(format string, args ...any) {
+		if bar != nil {
+			bar.Abort("Primary upload method failed")
+			bar = nil
+		}
+		fmt.Printf("\n[FAILOVER] "+format+"\n", args...)
+	}
+
+	finalPath, methodUsed, err := bigip.PushFileWithFailover(ctx, host, localPath, opts, logFn, renderProgress)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			if bar != nil {
 				bar.Abort("Upload cancelled by user.")
-				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
 			}
+			fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+			os.Exit(130)
+		}
+		if bar != nil {
 			bar.Abort(fmt.Sprintf("Upload failed: %v", err))
-			os.Exit(1)
+		} else {
+			fmt.Fprintf(os.Stderr, "[ERROR] Upload failed: %v\n", err)
 		}
-		bar.Finish(fmt.Sprintf("File uploaded to appliance at %s", remotePath))
-
-		// If a custom destination directory was requested, promote the file
-		if destPath != "" && destPath != "/var/config/rest/downloads" && destPath != "/var/config/rest/downloads/" {
-			spinner := progress.NewSpinner(fmt.Sprintf("Promoting to %s", destPath))
-			spinner.Start()
-			finalPath, copyErr := client.CopyRemoteFile(ctx, remotePath, destPath)
-			if copyErr != nil {
-				spinner.Fail(fmt.Sprintf("Upload succeeded to %s, but copy to %s failed (appliance bash utility may be restricted): %v", remotePath, destPath, copyErr))
-			} else {
-				spinner.Success(fmt.Sprintf("File promoted on appliance: %s", finalPath))
-			}
-		}
+		os.Exit(1)
+	}
+	if bar != nil {
+		bar.Finish(fmt.Sprintf("File successfully pushed to %s (%s) at %s", targetKind, strings.ToUpper(string(methodUsed)), finalPath))
 	} else {
-		// SCP / SSH method
-		if keyPath == "" {
-			if k := os.Getenv("BIGIP_SSH_KEY"); k != "" {
-				keyPath = k
-			} else if k := os.Getenv("SSH_KEY_PATH"); k != "" {
-				keyPath = k
+		fmt.Printf("File successfully pushed to %s (%s) at %s\n", targetKind, strings.ToUpper(string(methodUsed)), finalPath)
+	}
+}
+
+// executeDownloadFromAppliance handles streaming download of a remote file from a BIG-IP or BIG-IQ appliance
+// via either iControl REST or SCP over SSH, with automatic seamless failover.
+func executeDownloadFromAppliance(
+	ctx context.Context,
+	host, remotePath, localDest, method, user string,
+	port int,
+	keyPath, targetKind string,
+) {
+	if targetKind == "" {
+		targetKind = "BIG-IP"
+	}
+	if method == "" {
+		method = "auto"
+	}
+	method = strings.ToLower(strings.TrimSpace(method))
+	if method != "auto" && method != "icontrol" && method != "scp" && method != "ssh" {
+		fmt.Fprintf(os.Stderr, "[ERROR] Invalid download method %q. Valid methods: 'auto', 'icontrol', 'scp'\n", method)
+		os.Exit(1)
+	}
+	if method == "ssh" {
+		method = "scp"
+	}
+
+	if localDest == "" {
+		base := path.Base(path.Clean(remotePath))
+		if base == "" || base == "." || base == "/" {
+			base = "appliance_download"
+		}
+		localDest = filepath.Join(getDefaultDownloadsDir(), base)
+	}
+
+	if user == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			user = os.Getenv("BIGIQ_USER")
+		}
+		if user == "" {
+			user = os.Getenv("BIGIP_USER")
+		}
+		if user == "" {
+			if method == "scp" {
+				user = "root"
+			} else {
+				user = "admin"
 			}
 		}
+	}
 
-		if pw == "" && keyPath == "" {
-			home, _ := os.UserHomeDir()
-			hasKey := false
-			if home != "" {
-				for _, k := range []string{filepath.Join(home, ".ssh", "id_ed25519"), filepath.Join(home, ".ssh", "id_rsa")} {
-					if _, err := os.Stat(k); err == nil {
-						hasKey = true
-						break
-					}
+	pw := ""
+	if strings.EqualFold(targetKind, "BIG-IQ") {
+		pw = os.Getenv("BIGIQ_PASSWORD")
+	}
+	if pw == "" {
+		pw = os.Getenv("BIGIP_PASSWORD")
+	}
+
+	if keyPath == "" {
+		if k := os.Getenv("BIGIP_SSH_KEY"); k != "" {
+			keyPath = k
+		} else if k := os.Getenv("SSH_KEY_PATH"); k != "" {
+			keyPath = k
+		}
+	}
+
+	if pw == "" && keyPath == "" {
+		home, _ := os.UserHomeDir()
+		hasKey := false
+		if home != "" {
+			for _, k := range []string{filepath.Join(home, ".ssh", "id_ed25519"), filepath.Join(home, ".ssh", "id_rsa")} {
+				if _, err := os.Stat(k); err == nil {
+					hasKey = true
+					break
 				}
 			}
-			if os.Getenv("SSH_AUTH_SOCK") != "" {
-				hasKey = true
-			}
-
-			if !hasKey && term.IsTerminal(int(os.Stdin.Fd())) {
-				fmt.Printf("Enter %s SSH password for %s@%s: ", targetKind, user, host)
-				bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
-				fmt.Println()
-				if err == nil {
-					pw = strings.TrimSpace(string(bytePw))
-				}
-			}
+		}
+		if os.Getenv("SSH_AUTH_SOCK") != "" {
+			hasKey = true
 		}
 
-		opts := bigip.SCPOptions{
-			Host:     host,
-			Port:     port,
-			Username: user,
-			Password: pw,
-			KeyPath:  keyPath,
-		}
-
-		bar := progress.NewBar(0, fmt.Sprintf("Uploading via SCP"))
-		finalPath, err := bigip.SCPUpload(ctx, localPath, destPath, opts, func(transferred, total int64) {
-			bar.Total = total
-			bar.Update(transferred)
-		})
-		if err != nil {
-			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-				bar.Abort("SCP transfer cancelled by user.")
-				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
+		if !hasKey && term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
+			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err == nil {
+				pw = strings.TrimSpace(string(bytePw))
 			}
-			bar.Abort(fmt.Sprintf("SCP transfer failed: %v", err))
-			os.Exit(1)
 		}
-		bar.Finish(fmt.Sprintf("File transferred to appliance at %s", finalPath))
+	}
+
+	opts := bigip.TransferOptions{
+		TargetType:   targetKind,
+		Method:       bigip.TransferMethod(method),
+		Username:     user,
+		Password:     pw,
+		Port:         port,
+		IdentityFile: keyPath,
+		Timeout:      30 * time.Second,
+	}
+
+	fmt.Printf("Downloading %s from %s (%s) via %s...\n", remotePath, targetKind, host, strings.ToUpper(method))
+
+	var bar *progress.Bar
+	renderProgress := func(transferred, total int64) {
+		if bar == nil {
+			bar = progress.NewBar(0, fmt.Sprintf("Downloading from %s", targetKind))
+		}
+		bar.Total = total
+		bar.Update(transferred)
+	}
+
+	logFn := func(format string, args ...any) {
+		if bar != nil {
+			bar.Abort("Primary download method failed")
+			bar = nil
+		}
+		fmt.Printf("\n[FAILOVER] "+format+"\n", args...)
+	}
+
+	savedPath, methodUsed, err := bigip.DownloadFileWithFailover(ctx, host, remotePath, localDest, opts, logFn, renderProgress)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			if bar != nil {
+				bar.Abort("Download cancelled by user.")
+			}
+			fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+			os.Exit(130)
+		}
+		if bar != nil {
+			bar.Abort(fmt.Sprintf("Download failed: %v", err))
+		} else {
+			fmt.Fprintf(os.Stderr, "[ERROR] Download failed: %v\n", err)
+		}
+		os.Exit(1)
+	}
+	if bar != nil {
+		bar.Finish(fmt.Sprintf("File successfully downloaded from %s (%s) to %s", targetKind, strings.ToUpper(string(methodUsed)), savedPath))
+	} else {
+		fmt.Printf("File successfully downloaded from %s (%s) to %s\n", targetKind, strings.ToUpper(string(methodUsed)), savedPath)
 	}
 }
 

@@ -2,9 +2,12 @@ package bigip
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 )
@@ -83,5 +86,45 @@ func TestValidateQKViewFilename(t *testing.T) {
 		if err := ValidateQKViewFilename(f); err == nil {
 			t.Errorf("expected rejection for malicious/invalid filename %q, got nil error", f)
 		}
+	}
+}
+
+func TestDownloadFromURI(t *testing.T) {
+	testData := []byte("f5-mock-download-content-54321")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Range", fmt.Sprintf("0-%d/%d", len(testData)-1, len(testData)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(testData)
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	tempDir := t.TempDir()
+	destFile := filepath.Join(tempDir, "downloaded.iso")
+
+	var progressCalled bool
+	err := c.DownloadFromURI(context.Background(), "/mgmt/cm/autodeploy/software-image-downloads/BIGIP-17.1.1.iso", destFile, func(transferred, total int64) {
+		progressCalled = true
+	})
+	if err != nil {
+		t.Fatalf("DownloadFromURI failed: %v", err)
+	}
+
+	content, err := os.ReadFile(destFile)
+	if err != nil {
+		t.Fatalf("failed to read destFile: %v", err)
+	}
+	if string(content) != string(testData) {
+		t.Errorf("expected content %q, got %q", string(testData), string(content))
+	}
+	if !progressCalled {
+		t.Errorf("expected progress callback to be called")
 	}
 }

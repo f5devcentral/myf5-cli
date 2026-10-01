@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -297,8 +298,211 @@ func SCPUpload(ctx context.Context, localPath string, destDir string, opts SCPOp
 		}
 	}
 
-	destPath := filepath.Join(destDir, baseFilename)
+	destPath := path.Join(destDir, baseFilename)
 	return destPath, nil
+}
+
+// SCPDownload downloads a remote file from a BIG-IP or BIG-IQ appliance to localDest
+// using the native Go SCP source protocol (scp -f) over SSH.
+// Progress updates are reported via progressCb if non-nil.
+func SCPDownload(ctx context.Context, remotePath, localDest string, opts SCPOptions, progressCb func(transferred, total int64)) (string, error) {
+	if remotePath == "" {
+		return "", fmt.Errorf("remote path cannot be empty")
+	}
+	cleanRemote := path.Clean(remotePath)
+	baseFilename := path.Base(cleanRemote)
+	if baseFilename == "" || baseFilename == "." || baseFilename == "/" {
+		return "", fmt.Errorf("invalid remote file path: %q", remotePath)
+	}
+
+	cleanLocal := filepath.Clean(localDest)
+	fi, err := os.Stat(cleanLocal)
+	if err == nil && fi.IsDir() {
+		cleanLocal = filepath.Join(cleanLocal, baseFilename)
+	} else if strings.HasSuffix(localDest, string(filepath.Separator)) || strings.HasSuffix(localDest, "/") {
+		cleanLocal = filepath.Join(cleanLocal, baseFilename)
+	}
+	if dir := filepath.Dir(cleanLocal); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0750); err != nil {
+			return "", fmt.Errorf("failed to create destination directory: %w", err)
+		}
+	}
+
+	host, port := CleanSSHHost(opts.Host)
+	if opts.Port > 0 {
+		port = opts.Port
+	}
+	opts.Host = host
+	opts.Port = port
+
+	clientConfig, err := BuildSSHClientConfig(opts)
+	if err != nil {
+		return "", err
+	}
+
+	addr := net.JoinHostPort(opts.Host, strconv.Itoa(opts.Port))
+
+	var d net.Dialer
+	dialTimeout := opts.Timeout
+	if dialTimeout <= 0 {
+		dialTimeout = DefaultSCPTimeout
+	}
+	dialCtx, dialCancel := context.WithTimeout(ctx, dialTimeout)
+	defer dialCancel()
+
+	conn, err := d.DialContext(dialCtx, "tcp", addr)
+	if err != nil {
+		return "", fmt.Errorf("SSH connection to %s failed: %w", addr, err)
+	}
+	defer conn.Close()
+
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, clientConfig)
+	if err != nil {
+		return "", fmt.Errorf("SSH handshake failed with %s: %w", addr, err)
+	}
+	sshClient := ssh.NewClient(sshConn, chans, reqs)
+	defer sshClient.Close()
+
+	session, err := sshClient.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("failed to open SSH session: %w", err)
+	}
+	defer session.Close()
+
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to open session stdin: %w", err)
+	}
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to open session stdout: %w", err)
+	}
+
+	go func() {
+		<-ctx.Done()
+		_ = session.Close()
+		_ = sshClient.Close()
+	}()
+
+	cmd := fmt.Sprintf("scp -f %s", cleanRemote)
+	if err := session.Start(cmd); err != nil {
+		return "", fmt.Errorf("failed to start scp on remote appliance: %w", err)
+	}
+
+	// Step 1: Send initial null byte to tell server ready to receive
+	if _, err := stdin.Write([]byte{0}); err != nil {
+		return "", fmt.Errorf("failed to initiate scp handshake: %w", err)
+	}
+
+	rd := bufio.NewReader(stdout)
+
+	// Step 2: Read control header line from server
+	headerLine, err := rd.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed reading scp header: %w", err)
+	}
+	headerLine = strings.TrimRight(headerLine, "\r\n")
+
+	// Check if server sent an error (starts with \x01 or \x02)
+	if len(headerLine) > 0 && (headerLine[0] == 1 || headerLine[0] == 2) {
+		return "", fmt.Errorf("remote scp error: %s", headerLine[1:])
+	}
+
+	if !strings.HasPrefix(headerLine, "C") {
+		return "", fmt.Errorf("unexpected scp response: %q", headerLine)
+	}
+
+	parts := strings.SplitN(headerLine, " ", 3)
+	if len(parts) < 3 {
+		return "", fmt.Errorf("malformed scp file header: %q", headerLine)
+	}
+
+	fileSize, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || fileSize < 0 {
+		return "", fmt.Errorf("invalid file size in scp header: %q", parts[1])
+	}
+
+	// Step 3: Send acknowledgement to begin file transfer
+	if _, err := stdin.Write([]byte{0}); err != nil {
+		return "", fmt.Errorf("failed sending scp ready ack: %w", err)
+	}
+
+	partFile := cleanLocal + ".part"
+	outFile, err := os.OpenFile(partFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return "", fmt.Errorf("failed creating local file %s: %w", partFile, err)
+	}
+
+	buf := make([]byte, 64*1024)
+	var transferred int64
+	var writeErr error
+
+	for transferred < fileSize {
+		if ctx.Err() != nil {
+			_ = outFile.Close()
+			_ = os.Remove(partFile)
+			return "", ctx.Err()
+		}
+
+		toRead := int64(len(buf))
+		if remaining := fileSize - transferred; remaining < toRead {
+			toRead = remaining
+		}
+
+		n, rErr := rd.Read(buf[:toRead])
+		if n > 0 {
+			if _, wErr := outFile.Write(buf[:n]); wErr != nil {
+				writeErr = wErr
+				break
+			}
+			transferred += int64(n)
+			if progressCb != nil {
+				progressCb(transferred, fileSize)
+			}
+		}
+		if rErr != nil {
+			if rErr == io.EOF && transferred == fileSize {
+				break
+			}
+			writeErr = fmt.Errorf("failed reading scp payload: %w", rErr)
+			break
+		}
+	}
+
+	_ = outFile.Close()
+	if writeErr != nil {
+		_ = os.Remove(partFile)
+		return "", writeErr
+	}
+
+	// Step 4: Verify server EOF acknowledgement byte (\x00)
+	ackByte, err := rd.ReadByte()
+	if err != nil && err != io.EOF {
+		_ = os.Remove(partFile)
+		return "", fmt.Errorf("failed reading scp completion byte: %w", err)
+	}
+	if ackByte != 0 && err == nil {
+		_ = os.Remove(partFile)
+		return "", fmt.Errorf("server sent unexpected scp completion status: %d", ackByte)
+	}
+
+	// Step 5: Send final client acknowledgement
+	_, _ = stdin.Write([]byte{0})
+	_ = stdin.Close()
+
+	if err := session.Wait(); err != nil {
+		var exitMissing *ssh.ExitMissingError
+		if !errors.As(err, &exitMissing) {
+			_ = os.Remove(partFile)
+			return "", fmt.Errorf("scp session completed with error: %w", err)
+		}
+	}
+
+	if err := os.Rename(partFile, cleanLocal); err != nil {
+		return "", fmt.Errorf("failed finalizing downloaded file: %w", err)
+	}
+
+	return cleanLocal, nil
 }
 
 // checkAck reads an acknowledgement byte from the SCP sink stream.

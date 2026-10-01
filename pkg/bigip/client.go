@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -372,11 +373,9 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 	}
 }
 
-// DownloadQKView downloads a completed QKView from /mgmt/cm/autodeploy/qkview-downloads using chunked Content-Range.
-func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath string, progressCb func(transferred, total int64)) error {
-	if err := ValidateQKViewFilename(remoteFilename); err != nil {
-		return err
-	}
+// DownloadFromURI streams a file from an iControl REST endpoint URI (e.g. /mgmt/cm/autodeploy/software-image-downloads/<filename>)
+// to a local file using Content-Range chunking and reports progress via progressCb.
+func (c *Client) DownloadFromURI(ctx context.Context, endpointURI, localPath string, progressCb func(transferred, total int64)) error {
 	localPath = filepath.Clean(localPath)
 	if dir := filepath.Dir(localPath); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0750); err != nil {
@@ -384,7 +383,11 @@ func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath s
 		}
 	}
 
-	url := fmt.Sprintf("%s/mgmt/cm/autodeploy/qkview-downloads/%s", c.BaseURL(), remoteFilename)
+	url := fmt.Sprintf("%s%s", c.BaseURL(), endpointURI)
+	if !strings.HasPrefix(endpointURI, "/") {
+		url = fmt.Sprintf("%s/%s", c.BaseURL(), endpointURI)
+	}
+
 	partPath := localPath + ".part"
 	out, err := os.Create(partPath)
 	if err != nil {
@@ -414,7 +417,7 @@ func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath s
 
 		resp, err := c.HTTPClient.Do(req)
 		if err != nil {
-			return fmt.Errorf("failed to download qkview chunk: %w", err)
+			return fmt.Errorf("failed to download chunk from %s: %w", endpointURI, err)
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -459,6 +462,70 @@ func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath s
 
 	_ = out.Close()
 	return os.Rename(partPath, localPath)
+}
+
+// DownloadQKView downloads a completed QKView from /mgmt/cm/autodeploy/qkview-downloads using chunked Content-Range.
+func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath string, progressCb func(transferred, total int64)) error {
+	if err := ValidateQKViewFilename(remoteFilename); err != nil {
+		return err
+	}
+	endpoint := fmt.Sprintf("/mgmt/cm/autodeploy/qkview-downloads/%s", remoteFilename)
+	return c.DownloadFromURI(ctx, endpoint, localPath, progressCb)
+}
+
+// DownloadFile downloads a file from the BIG-IP or BIG-IQ appliance via iControl REST.
+// If remotePath is an autodeploy URI or starts with /mgmt/, it downloads directly.
+// For files in /shared/images/, it queries /mgmt/cm/autodeploy/software-image-downloads/.
+// For files in /var/tmp/qkviews/, it queries /mgmt/cm/autodeploy/qkview-downloads/.
+// For other paths, it attempts software-image-downloads first, then qkview-downloads,
+// and can stage via TMOS bash utility.
+func (c *Client) DownloadFile(ctx context.Context, remotePath, localPath string, progressCb func(transferred, total int64)) error {
+	if strings.HasPrefix(remotePath, "/mgmt/") {
+		return c.DownloadFromURI(ctx, remotePath, localPath, progressCb)
+	}
+
+	cleanRemote := path.Clean(remotePath)
+	baseFilename := path.Base(cleanRemote)
+
+	if strings.HasPrefix(cleanRemote, "/shared/images/") || strings.HasSuffix(baseFilename, ".iso") {
+		return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/software-image-downloads/%s", baseFilename), localPath, progressCb)
+	}
+	if strings.HasPrefix(cleanRemote, "/var/tmp/qkviews/") || strings.HasSuffix(baseFilename, ".qkview") {
+		return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/qkview-downloads/%s", baseFilename), localPath, progressCb)
+	}
+
+	// Try software-image-downloads first
+	err := c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/software-image-downloads/%s", baseFilename), localPath, progressCb)
+	if err == nil {
+		return nil
+	}
+
+	// Try qkview-downloads next
+	err = c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/qkview-downloads/%s", baseFilename), localPath, progressCb)
+	if err == nil {
+		return nil
+	}
+
+	// Staging attempt via TMOS bash utility to /shared/images
+	stagedPath, copyErr := c.CopyRemoteFile(ctx, cleanRemote, "/shared/images")
+	if copyErr == nil {
+		stagedBase := path.Base(stagedPath)
+		defer func() {
+			// clean up staged copy in /shared/images
+			payload := map[string]string{
+				"command":     "run",
+				"utilCmdArgs": fmt.Sprintf("-c 'rm -f %s'", stagedPath),
+			}
+			jb, _ := json.Marshal(payload)
+			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, fmt.Sprintf("%s/mgmt/tm/util/bash", c.BaseURL()), bytes.NewReader(jb))
+			c.setAuth(req)
+			req.Header.Set("Content-Type", "application/json")
+			_, _ = c.HTTPClient.Do(req)
+		}()
+		return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/software-image-downloads/%s", stagedBase), localPath, progressCb)
+	}
+
+	return fmt.Errorf("iControl REST download failed for %s: %w", remotePath, err)
 }
 
 // DeleteQKView removes the temporary QKView file from the BIG-IP appliance.
