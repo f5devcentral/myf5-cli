@@ -1,4 +1,4 @@
-module myf5-api
+module myf5-cli
 
 go 1.26.0
 

@@ -87,7 +87,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "myf5-api ${{ github.ref_name }} — Release"
+          name: "myf5-cli ${{ github.ref_name }} — Release"
           draft: false
           prerelease: false
           generate_release_notes: true

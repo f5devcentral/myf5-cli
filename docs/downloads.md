@@ -171,7 +171,7 @@ The MyF5 Downloads API generates signed CDN download URLs distributed across glo
 > **Action Required**: The MyF5 Downloads API base URL changes October 2. Update your integrations to use `https://api.software.downloads.f5.com` and remove the `"k"` value from API calls to help prevent service disruptions.
 
 ### How `myf5` Implements This Change
-- **Authoritative Endpoint**: `myf5-api` connects to `https://api.software.downloads.f5.com` by default.
+- **Authoritative Endpoint**: `myf5-cli` connects to `https://api.software.downloads.f5.com` by default.
 - **Excised Query Parameters**: The deprecated rate-limiting query parameter `k` has been completely removed from all download API HTTP requests.
 - **OAuth 2.0 CIAM Alignment**:
   - Primary token issuer (Auth0): `https://idp.identity.f5.com/oauth/token`

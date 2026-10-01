@@ -21,7 +21,7 @@ Because this repository is strictly internal and private to F5 Service Provider 
 
 ## 2. Zero-Secret CLI Security Architecture
 
-`myf5-api` strictly adheres to an enterprise **Zero-Secret CLI Policy** designed to eliminate credential leakage vectors in automated, multi-tenant, and interactive environments.
+`myf5-cli` strictly adheres to an enterprise **Zero-Secret CLI Policy** designed to eliminate credential leakage vectors in automated, multi-tenant, and interactive environments.
 
 ### Why Secret Flags Are Forbidden
 Passing sensitive credentials (passwords, OAuth2 client secrets, private tokens) via command-line arguments creates severe security exposures:

@@ -1,6 +1,6 @@
 # Network, DNS & Firewall Architecture
 
-This document outlines the network egress requirements, DNS endpoints, and upcoming infrastructure changes for integrations utilizing the `myf5-api` client.
+This document outlines the network egress requirements, DNS endpoints, and upcoming infrastructure changes for integrations utilizing the `myf5-cli` client.
 
 ---
 
@@ -36,10 +36,10 @@ You can verify reachability to all required cloud endpoints using:
 ### A. MyF5 Downloads API Base URL Cutover (October 2, 2026)
 > **Action Required**: The MyF5 Downloads API base URL changes October 2. Update your integrations to use `https://api.software.downloads.f5.com` and remove the `"k"` value from API calls to help prevent service disruptions.
 
-- **Implementation in `myf5-api`**:
-  - `myf5-api` targets `https://api.software.downloads.f5.com` as its primary endpoint by default.
+- **Implementation in `myf5-cli`**:
+  - `myf5-cli` targets `https://api.software.downloads.f5.com` as its primary endpoint by default.
   - The legacy `k` query parameter has been completely removed from Downloads API calls.
-  - Prior to the cutover, if `api.software.downloads.f5.com` returns HTTP 403 or 404 (CloudFront distribution provisioning), `myf5-api` automatically and transparently falls back to `support.apis.f5.com` with rate-limit retry backoff.
+  - Prior to the cutover, if `api.software.downloads.f5.com` returns HTTP 403 or 404 (CloudFront distribution provisioning), `myf5-cli` automatically and transparently falls back to `support.apis.f5.com` with rate-limit retry backoff.
 
 ### B. XC DNS & Traffic Cutover for `callhome.f5.com` and `api.f5.com` (September 25, 2026)
 > On Friday, September 25, starting at 9 AM PT for 2 hours, the following changes will be made to `callhome.f5.com` and `api.f5.com`:

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"myf5-api/pkg/client"
+	"myf5-cli/pkg/client"
 )
 
 const (
@@ -89,7 +89,7 @@ func AuthenticateWithClient(ctx context.Context, httpClient *http.Client, authFQ
 
 	req.Header.Set("Authorization", "Basic "+authHeader)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", "myf5-api-go/1.0.0")
+	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
 
 	if httpClient == nil {
 		httpClient = client.NewSecureHTTPClient(15 * time.Second)

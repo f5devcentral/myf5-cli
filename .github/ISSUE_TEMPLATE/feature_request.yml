@@ -1,12 +1,12 @@
 name: "Feature Request"
-description: "Suggest an idea or enhancement for myf5-api"
+description: "Suggest an idea or enhancement for myf5-cli"
 title: "[FEATURE]: "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thank you for proposing an enhancement to `myf5-api`. Please explain the enterprise use case and expected benefit.
+        Thank you for proposing an enhancement to `myf5-cli`. Please explain the enterprise use case and expected benefit.
 
   - type: textarea
     id: problem

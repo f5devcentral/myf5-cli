@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"myf5-api/pkg/client"
+	"myf5-cli/pkg/client"
 )
 
 const (
@@ -144,7 +144,7 @@ func (c *Client) doGetWithFallback(ctx context.Context, path string) ([]byte, er
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "myf5-api-go/1.0.0")
+	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err == nil {
@@ -184,7 +184,7 @@ func (c *Client) doLegacyFallback(ctx context.Context, path string) ([]byte, err
 		}
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 		req.Header.Set("Accept", "application/json")
-		req.Header.Set("User-Agent", "myf5-api-go/1.0.0 (Pre-Cutover Fallback)")
+		req.Header.Set("User-Agent", "myf5-cli-go/1.0.0 (Pre-Cutover Fallback)")
 
 		resp, err := c.HTTPClient.Do(req)
 		if err != nil {

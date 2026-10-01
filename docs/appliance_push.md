@@ -382,7 +382,7 @@ F5 iControl REST handles file transfers via a multipart/chunked endpoint managed
   Authorization: Basic YWRtaW46UGFzc3dvcmQ=
   Content-Type: application/octet-stream
   Content-Range: 0-524287/2516582400
-  User-Agent: myf5-api-go/1.0.0
+  User-Agent: myf5-cli-go/1.0.0
   ```
 
 #### Chunk Header Mathematics

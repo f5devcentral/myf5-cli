@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"myf5-api/pkg/client"
+	"myf5-cli/pkg/client"
 )
 
 // ProgressCallback is called periodically during download with bytes transferred and total size.
@@ -36,7 +36,7 @@ func DownloadFile(
 	if err != nil {
 		return fmt.Errorf("failed to create download request: %w", err)
 	}
-	req.Header.Set("User-Agent", "myf5-api-go-downloader/1.0.0")
+	req.Header.Set("User-Agent", "myf5-cli-go-downloader/1.0.0")
 
 	// Long timeout for large image downloads (e.g. 10 GB ISOs)
 	httpClient := client.NewSecureHTTPClient(6 * time.Hour)

@@ -18,7 +18,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 
-	"myf5-api/pkg/auth"
+	"myf5-cli/pkg/auth"
 )
 
 // SCPOptions specifies the SSH connection and authentication configuration for SCP file transfers.

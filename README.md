@@ -1,4 +1,4 @@
-# myf5-api
+# myf5-cli
 
 A high-performance, memory-safe, zero-dependency Go CLI and client library for **MyF5 Cloud APIs**, **Software Downloads**, **iHealth Diagnostics**, **BIG-IP TMOS Appliances**, and **BIG-IQ Centralized Management**.
 
@@ -26,7 +26,7 @@ A high-performance, memory-safe, zero-dependency Go CLI and client library for *
 ## Architecture & Directory Layout
 
 ```
-myf5-api/
+myf5-cli/
 ├── cmd/
 │   └── myf5/
 │       └── main.go             # Unified CLI entrypoint & Zero-Secret validator
@@ -67,13 +67,13 @@ myf5-api/
 ## Installation & Building
 
 ### Pre-Compiled Binaries
-Download pre-built standalone binaries for Linux, macOS, and Windows from the [GitHub Releases page](https://github.com/SalesAmerSP/myf5-api/releases).
+Download pre-built standalone binaries for Linux, macOS, and Windows from the [GitHub Releases page](https://github.com/SalesAmerSP/myf5-cli/releases).
 
 ### Developer Build with GNU Make
 ```bash
 # Clone the repository
-git clone https://github.com/SalesAmerSP/myf5-api.git
-cd myf5-api
+git clone https://github.com/SalesAmerSP/myf5-cli.git
+cd myf5-cli
 
 # Build for host OS & architecture
 make build

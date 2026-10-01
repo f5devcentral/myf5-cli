@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"myf5-api/pkg/client"
+	"myf5-cli/pkg/client"
 )
 
 const (
@@ -158,7 +158,7 @@ func (c *Client) UploadQKViewWithProgress(ctx context.Context, filePath, caseNum
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "myf5-api-go/1.0.0")
+	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -201,7 +201,7 @@ func (c *Client) ListQKViews(ctx context.Context) ([]QKViewSummary, error) {
 
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "myf5-api-go/1.0.0")
+	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {

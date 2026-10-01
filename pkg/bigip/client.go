@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"myf5-api/pkg/client"
+	"myf5-cli/pkg/client"
 )
 
 // Client interacts with BIG-IP iControl REST APIs.
@@ -562,5 +562,5 @@ func (c *Client) DeleteQKView(ctx context.Context, remoteFilename string) error 
 func (c *Client) setAuth(req *http.Request) {
 	auth := base64.StdEncoding.EncodeToString([]byte(c.Username + ":" + c.Password))
 	req.Header.Set("Authorization", "Basic "+auth)
-	req.Header.Set("User-Agent", "myf5-api-go/1.0.0")
+	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
 }

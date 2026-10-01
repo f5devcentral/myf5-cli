@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"myf5-api/pkg/client"
+	"myf5-cli/pkg/client"
 )
 
 const (
@@ -165,7 +165,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 	if len(body) > 0 {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("User-Agent", "myf5-api-go/1.0.0")
+	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {

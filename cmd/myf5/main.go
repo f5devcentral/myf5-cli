@@ -16,13 +16,13 @@ import (
 	"syscall"
 	"time"
 
-	"myf5-api/pkg/auth"
-	"myf5-api/pkg/bigip"
-	"myf5-api/pkg/cases"
-	"myf5-api/pkg/completion"
-	"myf5-api/pkg/downloads"
-	"myf5-api/pkg/ihealth"
-	"myf5-api/pkg/progress"
+	"myf5-cli/pkg/auth"
+	"myf5-cli/pkg/bigip"
+	"myf5-cli/pkg/cases"
+	"myf5-cli/pkg/completion"
+	"myf5-cli/pkg/downloads"
+	"myf5-cli/pkg/ihealth"
+	"myf5-cli/pkg/progress"
 
 	"golang.org/x/term"
 )
@@ -86,7 +86,7 @@ func main() {
 	case "completion":
 		handleCompletion(args)
 	case "version", "--version", "-v":
-		fmt.Printf("myf5-api version %s (Go 1.27.1 / darwin-arm64)\n", Version)
+		fmt.Printf("myf5-cli version %s (Go 1.27.1 / darwin-arm64)\n", Version)
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -96,12 +96,12 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Printf(`myf5-api - High-Performance F5 Cloud & Appliance Automation CLI (v%s)
+	fmt.Printf(`myf5-cli - High-Performance F5 Cloud & Appliance Automation CLI (v%s)
 
 IMPORTANT NOTICE:
     This tool is NOT an officially supported F5 product or service.
     For issues, bugs, or questions, please email Greg Robinson (g.robinson@f5.com)
-    or file an issue at https://github.com/SalesAmerSP/myf5-api/issues.
+    or file an issue at https://github.com/SalesAmerSP/myf5-cli/issues.
 
 USAGE:
     myf5 <command> [subcommand] [arguments...]
