@@ -221,7 +221,7 @@ Works with local management IPs, lab appliances, or cloud/UDF external access pr
 ### 7. Unified Appliance Push & Pull (Auto Failover)
 ```bash
 # Push file to any appliance with target selection and auto failover
-./bin/myf5 push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --target bigip --dest /shared/GeoIP
+./bin/myf5 push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --target bigip --dest /var/tmp
 
 # Pull file from any appliance with auto failover
 ./bin/myf5 pull 10.1.1.4 /var/log/ltm -o ./ltm.log --method scp -u root -i ~/.ssh/id_ed25519
