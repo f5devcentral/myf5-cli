@@ -52,4 +52,4 @@ jobs:
 
       - name: Run Gitleaks Secret Detection
         run: |
-          gitleaks detect --source . --verbose --redact
+          gitleaks detect --source . --config .gitleaks.toml --verbose --redact

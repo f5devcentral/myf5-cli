@@ -33,6 +33,23 @@ type Client struct {
 	AutoFallback bool
 }
 
+// String implements fmt.Stringer to ensure bearer tokens are never leaked in logs.
+func (c *Client) String() string {
+	if c == nil {
+		return "<nil>"
+	}
+	tok := "[REDACTED]"
+	if c.Token == "" {
+		tok = "[EMPTY]"
+	}
+	return fmt.Sprintf("downloads.Client{BaseFQDN: %q, Token: %s, AutoFallback: %v}", c.BaseFQDN, tok, c.AutoFallback)
+}
+
+// GoString implements fmt.GoStringer.
+func (c *Client) GoString() string {
+	return c.String()
+}
+
 // NewClient initializes a MyF5 Downloads API client.
 func NewClient(token string, baseFQDN string) *Client {
 	if baseFQDN == "" {
@@ -157,6 +174,7 @@ func (c *Client) doGetWithFallback(ctx context.Context, path string) ([]byte, er
 
 func (c *Client) doLegacyFallback(ctx context.Context, path string) ([]byte, error) {
 	fallbackURL := fmt.Sprintf("https://%s%s?k=%s", LegacySupportFQDN, path, LegacyKParam)
+	redactedURL := fmt.Sprintf("https://%s%s?k=[REDACTED]", LegacySupportFQDN, path)
 
 	for attempt := 0; attempt < 3; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fallbackURL, nil)
@@ -169,7 +187,7 @@ func (c *Client) doLegacyFallback(ctx context.Context, path string) ([]byte, err
 
 		resp, err := c.HTTPClient.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("fallback request to %s failed: %w", fallbackURL, err)
+			return nil, fmt.Errorf("fallback request to %s failed: %w", redactedURL, err)
 		}
 
 		body, err := io.ReadAll(resp.Body)
@@ -187,8 +205,8 @@ func (c *Client) doLegacyFallback(ctx context.Context, path string) ([]byte, err
 			continue
 		}
 
-		return nil, fmt.Errorf("fallback to %s failed with status %d: %s", fallbackURL, resp.StatusCode, string(body))
+		return nil, fmt.Errorf("fallback to %s failed with status %d: %s", redactedURL, resp.StatusCode, string(body))
 	}
 
-	return nil, fmt.Errorf("fallback request to %s failed after rate limit retries", fallbackURL)
+	return nil, fmt.Errorf("fallback request to %s failed after rate limit retries", redactedURL)
 }

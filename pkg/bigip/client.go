@@ -29,8 +29,30 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
-// NewClient initializes a BIG-IP appliance client.
+// String implements fmt.Stringer to ensure appliance credentials are never leaked in logs.
+func (c *Client) String() string {
+	if c == nil {
+		return "<nil>"
+	}
+	pw := "[REDACTED]"
+	if c.Password == "" {
+		pw = "[EMPTY]"
+	}
+	return fmt.Sprintf("bigip.Client{Host: %q, Port: %d, Scheme: %q, Username: %q, Password: %s}", c.Host, c.Port, c.Scheme, c.Username, pw)
+}
+
+// GoString implements fmt.GoStringer.
+func (c *Client) GoString() string {
+	return c.String()
+}
+
+// NewClient initializes a BIG-IP appliance client with insecure TLS bypass enabled by default for lab/self-signed appliances.
 func NewClient(rawHost string, port int, username, password string) *Client {
+	return NewClientWithTLS(rawHost, port, username, password, true)
+}
+
+// NewClientWithTLS initializes a BIG-IP appliance client with selectable TLS verification.
+func NewClientWithTLS(rawHost string, port int, username, password string, skipTLSVerify bool) *Client {
 	scheme := "https"
 	host := strings.TrimSpace(rawHost)
 	if strings.HasPrefix(host, "http://") {
@@ -58,13 +80,20 @@ func NewClient(rawHost string, port int, username, password string) *Client {
 		}
 	}
 
+	var httpClient *http.Client
+	if skipTLSVerify {
+		httpClient = client.NewInsecureHTTPClient(60 * time.Minute)
+	} else {
+		httpClient = client.NewSecureHTTPClient(60 * time.Minute)
+	}
+
 	return &Client{
 		Scheme:     scheme,
 		Host:       host,
 		Port:       port,
 		Username:   username,
 		Password:   password,
-		HTTPClient: client.NewInsecureHTTPClient(60 * time.Minute),
+		HTTPClient: httpClient,
 	}
 }
 

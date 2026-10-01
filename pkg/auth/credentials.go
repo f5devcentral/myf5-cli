@@ -142,6 +142,9 @@ func readCredentialsFile(filePath, profile string) (*Credentials, error) {
 					filePath, perm, filePath,
 				)
 			}
+			if perm&0004 != 0 {
+				fmt.Fprintf(os.Stderr, "Warning: credential file %s is world-readable (mode %04o). Recommended: chmod 600 %s (or chmod 640 %s)\n", filePath, perm, filePath, filePath)
+			}
 		}
 	}
 

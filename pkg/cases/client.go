@@ -27,6 +27,23 @@ type Client struct {
 	KParam     string
 }
 
+// String implements fmt.Stringer to ensure bearer tokens and keys are never leaked in logs.
+func (c *Client) String() string {
+	if c == nil {
+		return "<nil>"
+	}
+	tok := "[REDACTED]"
+	if c.Token == "" {
+		tok = "[EMPTY]"
+	}
+	return fmt.Sprintf("cases.Client{BaseFQDN: %q, Token: %s, KParam: [REDACTED]}", c.BaseFQDN, tok)
+}
+
+// GoString implements fmt.GoStringer.
+func (c *Client) GoString() string {
+	return c.String()
+}
+
 // NewClient initializes a new MyF5 Support Case client.
 func NewClient(token string, baseFQDN string) *Client {
 	if baseFQDN == "" {
@@ -131,6 +148,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 		sep = "&"
 	}
 	fullURL := fmt.Sprintf("%s://%s%s%sk=%s", scheme, fqdn, path, sep, c.KParam)
+	redactedURL := fmt.Sprintf("%s://%s%s%sk=[REDACTED]", scheme, fqdn, path, sep)
 
 	var reader io.Reader
 	if len(body) > 0 {
@@ -151,7 +169,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("request to %s failed: %w", fullURL, err)
+		return nil, fmt.Errorf("request to %s failed: %w", redactedURL, err)
 	}
 	defer resp.Body.Close()
 
@@ -161,7 +179,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("request to %s failed with status %d: %s", fullURL, resp.StatusCode, string(respBytes))
+		return nil, fmt.Errorf("request to %s failed with status %d: %s", redactedURL, resp.StatusCode, string(respBytes))
 	}
 
 	return respBytes, nil

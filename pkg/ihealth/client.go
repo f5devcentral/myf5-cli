@@ -30,6 +30,23 @@ type Client struct {
 	Token      string
 }
 
+// String implements fmt.Stringer to ensure bearer tokens are never leaked in logs.
+func (c *Client) String() string {
+	if c == nil {
+		return "<nil>"
+	}
+	tok := "[REDACTED]"
+	if c.Token == "" {
+		tok = "[EMPTY]"
+	}
+	return fmt.Sprintf("ihealth.Client{BaseFQDN: %q, Token: %s}", c.BaseFQDN, tok)
+}
+
+// GoString implements fmt.GoStringer.
+func (c *Client) GoString() string {
+	return c.String()
+}
+
 // NewClient initializes a new iHealth API client.
 func NewClient(token string, baseFQDN string) *Client {
 	if baseFQDN == "" {
