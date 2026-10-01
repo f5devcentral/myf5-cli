@@ -69,6 +69,11 @@ export F5_CLIENT_SECRET="your_oauth2_client_secret"
 
 When set, environment variables take precedence over profile files.
 
+#### OAuth 2.0 Token Server Resolution
+`myf5` supports both modern F5 CIAM token issuing infrastructures:
+- **Auth0 (Primary)**: `https://idp.identity.f5.com/oauth/token` (standard client credentials grant).
+- **Okta CIAM (Dedicated Server)**: `https://identity.account.f5.com/oauth2/ausp95yxb4ShxMGvW357/v1/token` with audience `api://ciam-api-myf5` and scope `myf5_scope`.
+
 ---
 
 ### 3. BIG-IP & BIG-IQ Appliance Credentials
@@ -97,6 +102,9 @@ When managing BIG-IP TMOS or BIG-IQ Centralized Management appliances via `myf5 
   2. **SSH Agent**: Connects automatically to `$SSH_AUTH_SOCK` if active.
   3. **Default Key Fallback**: Inspects standard user keys (`~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`).
   4. **Password / PAM Fallback**: Uses password or interactive prompt if no keys are found.
+
+> [!IMPORTANT]
+> **TMOS User Shell Requirements for SCP**: On BIG-IP TMOS, the `admin` user is configured with `tmsh` shell by default (`Terminal Access: tmsh`), which restricts SCP operations to whitelisted directories (`/var/tmp/`). To transfer files directly to `/shared/images/` or system directories via SCP, either authenticate as `root` (which defaults to `bash`), grant the user Advanced Shell (`bash`) terminal access (`tmsh modify auth user <username> shell bash`), or utilize `--method icontrol` which operates independent of the user's interactive shell.
 
 ---
 
