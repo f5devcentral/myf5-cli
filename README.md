@@ -34,13 +34,18 @@ myf5-api/
 │   ├── downloads/              # Downloads API catalog client and streaming downloader
 │   ├── cases/                  # MyF5 Support Case API client
 │   ├── ihealth/                # F5 iHealth QKView multipart upload and status client
-│   └── bigip/                  # BIG-IP TMOS iControl REST appliance client (with URL & proxy support)
+│   ├── bigip/                  # BIG-IP TMOS iControl REST appliance client (with URL & proxy support)
+│   └── completion/             # Zero-dependency shell tab completion generator (bash, zsh, fish)
 ├── .github/
 │   ├── workflows/              # GitHub Actions CI, Release, and Security workflows
 │   ├── ISSUE_TEMPLATE/         # Structured Bug Report & Feature Request templates
 │   ├── CODEOWNERS              # Repository ownership mappings
 │   └── pull_request_template.md
 ├── docs/
+│   ├── cli.md                  # Comprehensive CLI reference manual
+│   ├── downloads.md            # Downloads catalog taxonomy & GeoDB automation guide
+│   ├── credentials.md          # Zero-Secret policy & credential management
+│   ├── shell_completion.md     # Shell tab autocompletion guide (zsh, bash, fish)
 │   └── network_and_firewall.md # Egress firewall rules and DNS cutover documentation
 ├── Makefile                    # Developer build, test, and release automation
 ├── SECURITY.md                 # Security & vulnerability reporting policy
@@ -229,6 +234,18 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
   3. Interactive Masked Terminal Prompt (Echo suppressed via term.ReadPassword)
   ```
 - **Masked Diagnostics:** Diagnostic utilities (`myf5 doctor`) mask all secret strings, displaying only non-sensitive metadata (e.g. `Client ID: 9x8*************************`).
+
+---
+
+## 📚 Documentation & Technical Guides
+
+| Guide | Description |
+| :--- | :--- |
+| **[CLI Reference Manual](docs/cli.md)** | Full reference for all commands, subcommands, arguments, and exit codes. |
+| **[MyF5 Downloads & GeoDB Guide](docs/downloads.md)** | Catalog hierarchy, automated GeoDB updates, and streaming architecture. |
+| **[Zero-Secret Security Architecture](docs/credentials.md)** | Process isolation, credentials file permissions, and environment setup. |
+| **[Shell Tab Autocompletion](docs/shell_completion.md)** | Setup instructions and completion features for Zsh, Bash, and Fish. |
+| **[Network, DNS & Firewall Architecture](docs/network_and_firewall.md)** | Egress firewall requirements (TCP 443) and F5 infrastructure cutover notices. |
 
 ---
 
