@@ -107,7 +107,7 @@ myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 "Base Software & ISO Releases" BIG
 
 ## 2. `myf5 cases`
 
-Manage and inspect MyF5 technical support cases via the Support Case API (`support.apis.f5.com`).
+Manage and inspect MyF5 technical support cases via the Support Case API (`support.apis.f5.com`, endpoints: `/case-management/v1/cases` and `/support/case-management/v1/cases`).
 
 ### Actions
 
@@ -133,7 +133,7 @@ myf5 cases comment C1000234 "Uploaded new diagnostic packet captures."
 
 ## 3. `myf5 ihealth`
 
-Interact with the F5 iHealth API (`ihealth2-api.f5.com`) for diagnostic QKView bundle processing.
+Interact with the F5 iHealth API (`ihealth-api.f5.com` / `ihealth2-api.f5.com`) for diagnostic QKView bundle processing.
 
 ### Actions
 
@@ -168,7 +168,7 @@ myf5 bigip ready https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com/
 ```
 
 #### `qkview <host> [--user <user>] [--port <port>]`
-Generates a complete, non-truncating (`-s0`) diagnostic QKView archive on the BIG-IP appliance with live spinner status updates, then downloads it directly to local disk.
+Generates a complete, non-truncating (`-s0`) diagnostic QKView archive on the BIG-IP appliance via `/mgmt/tm/util/qkview` or `/mgmt/cm/autodeploy/qkview` with live spinner status updates, then downloads it directly to local disk (falling back to native Go SCP if autodeploy download is unavailable).
 ```bash
 myf5 bigip qkview 10.1.1.4 --user admin
 ```
@@ -182,8 +182,8 @@ myf5 bigip push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --dest /shared/images
 # Push hotfix explicitly via native Go SCP
 myf5 bigip push 10.1.1.4 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso --method scp -i ~/.ssh/f5_key
 
-# Push GeoDB update to /shared/GeoIP/ via iControl REST
-myf5 bigip push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --dest /shared/GeoIP --method icontrol
+# Push GeoDB update archive to /var/tmp staging directory via iControl REST
+myf5 bigip push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --dest /var/tmp --method icontrol
 ```
 
 #### `download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--user <user>] [--port <port>] [-i <key>]`
@@ -197,10 +197,10 @@ myf5 bigip download 10.1.1.4 /config/bigip.conf -o ./bigip.conf --method scp -u 
 ```
 
 ### Options
-- `-u, --user <username>`: Administrative user (default: `$BIGIP_USER` or `"admin"` for REST, `"root"`/`"admin"` for SCP).
+- `-u, --user <username>`: Administrative user (default: `$BIGIP_USER` or `"admin"` for REST, `"root"`/`"admin"` for SCP). Note: on TMOS, accounts restricted to `tmsh` shell can only SCP to whitelisted paths (`/var/tmp`); direct SCP to `/shared/images` requires Advanced Shell (`bash`) access or `root`.
 - `-p, --port <port>`: HTTPS port for iControl (default: 443) or SSH port for SCP (default: 22).
 - `-m, --method <auto|icontrol|scp>`: Transfer protocol with automatic failover (default: `auto`).
-- `-d, --dest <path>`: Destination directory on appliance for uploads (e.g., `/shared/images` or `/shared/GeoIP`).
+- `-d, --dest <path>`: Destination directory on appliance for uploads (e.g., `/shared/images` or `/var/tmp`).
 - `-o, --output <path>`: Local destination path for downloads (default: current directory or default downloads dir).
 - `-i, --identity <path>`: Private key path for SSH authentication during SCP transfers.
 - **Authentication**: Set via `BIGIP_PASSWORD` environment variable, SSH key / agent, or enter interactively at the masked terminal prompt.
