@@ -25,7 +25,7 @@ import (
 	"golang.org/x/term"
 )
 
-const Version = "1.0.0"
+const Version = "1.1.0"
 
 func main() {
 	// Set up graceful SIGINT / SIGTERM context
