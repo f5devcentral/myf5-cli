@@ -129,4 +129,3 @@ func TestContainerCategories(t *testing.T) {
 		}
 	}
 }
-
