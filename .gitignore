@@ -45,3 +45,6 @@ coverage.html
 .idea/
 .vscode/
 scratch/
+
+# AI Agent Workspace & Handoff Context
+agents/
