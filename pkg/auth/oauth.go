@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	DefaultAuthFQDN = "idp.identity.f5.com"
-	DefaultAppID    = "aus19gt5bu0jGw9Fi358"
-	DefaultAudience = "api://ciam-api-myf5"
-	DefaultScope    = "myf5_scope"
+	DefaultAuthFQDN  = "idp.identity.f5.com"
+	DefaultAppID     = "aus19gt5bu0jGw9Fi358"
+	OktaAuthServerID = "ausp95yxb4ShxMGvW357" // Authoritative Okta CIAM Authorization Server ID for identity.account.f5.com
+	DefaultAudience  = "api://ciam-api-myf5"
+	DefaultScope     = "myf5_scope"
 )
 
 // TokenResponse represents the OAuth2 token endpoint JSON response.
@@ -56,10 +57,15 @@ func AuthenticateWithClient(ctx context.Context, httpClient *http.Client, authFQ
 
 	var tokenURL string
 	if strings.Contains(authFQDN, "account.f5.com") {
-		// Legacy Okta endpoint
-		tokenURL = fmt.Sprintf("%s://%s/oauth2/%s/v1/token", scheme, authFQDN, appID)
+		// Route to Okta CIAM authorization server endpoint on identity.account.f5.com.
+		// If caller provided generic default appID, use the authoritative Okta authorization server ID ausp95yxb4ShxMGvW357.
+		authServerID := appID
+		if authServerID == "" || authServerID == DefaultAppID {
+			authServerID = OktaAuthServerID
+		}
+		tokenURL = fmt.Sprintf("%s://%s/oauth2/%s/v1/token", scheme, authFQDN, authServerID)
 	} else {
-		// Modern Auth0 endpoint
+		// Route to modern Auth0 endpoint on idp.identity.f5.com
 		tokenURL = fmt.Sprintf("%s://%s/oauth/token", scheme, authFQDN)
 	}
 

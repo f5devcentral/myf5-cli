@@ -1784,6 +1784,8 @@ func handleDoctor(ctx context.Context, args []string) {
 	}
 
 	// 2. DNS & Egress Reachability
+	// We audit connectivity to all production cloud services across authentication,
+	// software downloads, case management, diagnostic analysis, and telemetry.
 	endpoints := []struct {
 		name string
 		fqdn string
@@ -1793,8 +1795,10 @@ func handleDoctor(ctx context.Context, args []string) {
 		{"F5 Identity (Okta)", "identity.account.f5.com", 443},
 		{"MyF5 Downloads API", "api.software.downloads.f5.com", 443},
 		{"MyF5 Support API", "support.apis.f5.com", 443},
+		{"iHealth Primary API", "ihealth-api.f5.com", 443},
 		{"iHealth Upload API", "ihealth2-api.f5.com", 443},
 		{"Callhome Service", "callhome.f5.com", 443},
+		{"F5 Cloud Gateway", "api.f5.com", 443},
 	}
 
 	fmt.Println("\n2. Network Egress & DNS Connectivity Audit (TCP 443):")

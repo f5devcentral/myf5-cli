@@ -17,7 +17,10 @@ import (
 )
 
 const (
+	// DefaultIHealthFQDN represents the standard iHealth API gateway hostname.
 	DefaultIHealthFQDN = "ihealth2-api.f5.com"
+	// PrimaryIHealthFQDN represents the primary authoritative iHealth API gateway hostname.
+	PrimaryIHealthFQDN = "ihealth-api.f5.com"
 )
 
 // UploadProgressCallback reports transferred bytes and total bytes during file upload.
