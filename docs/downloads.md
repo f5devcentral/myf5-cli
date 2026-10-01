@@ -19,7 +19,7 @@ Product Family (e.g., BIG-IP, NGINX, BIG-IQ)
 ### Container Categories
 `myf5` automatically tags and categorizes download containers based on artifact purpose:
 - **Base ISO / Virtual Edition (`VE`)**: Full appliance installation images (`.iso`, `.ova`, `.qcow2`, `.vhd`).
-- **GeoLocation Updates (`GEODB`)**: Digital Envoy GeoIP updates for BIG-IP AFM, ASM, and APM.
+- **GeoLocation Updates (`GEODB`)**: Digital Envoy NetAcuity GeoIP packages (Edge and Pulse variants, AskF5 K11176 / K78974041) for BIG-IP AFM, ASM/Advanced WAF, APM, and DNS.
 - **Hotfix (`HOTFIX`)**: Maintenance patches and security point releases.
 - **Supplemental (`SUPPLEMENTAL`)**: MIB files, signature packages, and utilities.
 
@@ -54,12 +54,14 @@ TARGET_DIR="/var/downloads/geodb"
 mkdir -p "${TARGET_DIR}"
 
 echo "==> Fetching latest GeoLocation update package..."
+# The container zip archive bundles Digital Envoy RPM components (Region, ISP, Org)
 myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 \
     "GeoLocationUpdates" \
     "ip-geolocation-default.zip" \
     -o "${TARGET_DIR}/ip-geolocation-default.zip"
 
 echo "==> GeoDB downloaded and verified: ${TARGET_DIR}/ip-geolocation-default.zip"
+# Note: On the appliance, unpack the archive in /shared/tmp and apply RPMs using geoip_update_data -f
 ```
 
 ---
@@ -108,14 +110,16 @@ myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 \
 ```
 
 #### 2. Automated Download & Push of Updated GeoDB Package
+Stage the update archive in `/var/tmp` on the appliance (supported by both iControl REST and SCP whitelist):
 ```bash
 myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 \
     "GeoLocationUpdates" "ip-geolocation-default.zip" \
     -o /var/tmp/ip-geolocation-default.zip \
     --push 10.1.1.4 \
     --push-method scp \
-    --push-dest /shared/GeoIP
+    --push-dest /var/tmp
 ```
+*Post-transfer on BIG-IP*: Unpack the `.zip` archive in `/shared/tmp/` and execute `geoip_update_data -f <rpm_path>` for each component RPM, then verify via `geoip_lookup <ip>` and `tmsh load sys geoip` (see [Appliance Push Guide](appliance_push.md)).
 
 #### 3. Download Engineering Hotfix and Push to BIG-IQ Software Repository
 ```bash
@@ -167,6 +171,9 @@ The MyF5 Downloads API generates signed CDN download URLs distributed across glo
 > **Action Required**: The MyF5 Downloads API base URL changes October 2. Update your integrations to use `https://api.software.downloads.f5.com` and remove the `"k"` value from API calls to help prevent service disruptions.
 
 ### How `myf5` Implements This Change
-- `myf5-api` connects to `https://api.software.downloads.f5.com` by default.
-- The deprecated rate-limiting query parameter `k` has been completely excised from all HTTP requests.
-- Automatic fallback to `support.apis.f5.com` is retained during pre-cutover testing if CloudFront distributions are provisioning.
+- **Authoritative Endpoint**: `myf5-api` connects to `https://api.software.downloads.f5.com` by default.
+- **Excised Query Parameters**: The deprecated rate-limiting query parameter `k` has been completely removed from all download API HTTP requests.
+- **OAuth 2.0 CIAM Alignment**:
+  - Primary token issuer (Auth0): `https://idp.identity.f5.com/oauth/token`
+  - Dedicated Okta CIAM authorization server: `https://identity.account.f5.com/oauth2/ausp95yxb4ShxMGvW357/v1/token` with scope `myf5_scope` and audience `api://ciam-api-myf5`.
+- **Transitional Resilience**: Automatic fallback to `support.apis.f5.com` is retained during pre-cutover testing if CloudFront distributions are provisioning.
