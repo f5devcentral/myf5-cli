@@ -73,14 +73,14 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
 
 | Scope | Autocompletion Behavior |
 | :--- | :--- |
-| **Primary Commands** | Tab completes `downloads`, `cases`, `ihealth`, `bigip`, `bigiq`, `push`, `doctor`, `completion`, `version`, `help` with contextual descriptions. |
+| **Primary Commands** | Tab completes `downloads`, `cases`, `ihealth`, `bigip`, `bigiq`, `push`, `pull`, `doctor`, `completion`, `version`, `help` with contextual descriptions. |
 | **Download Actions** | Tab completes `browse`, `families`, `lines`, `versions`, `containers`, `files`, `get`. |
 | **Product Families** | Suggests common F5 product families: `BIG-IP`, `NGINX`, `BIG-IQ`. |
 | **Case Actions** | Tab completes `list`, `metadata`, `comment`. |
 | **iHealth Actions** | Tab completes `list`, `upload`. |
 | **BIG-IP Actions** | Tab completes `ready`, `qkview`, `push`, `download`. |
-| **BIG-IQ Actions** | Tab completes `ready`, `push`. |
+| **BIG-IQ Actions** | Tab completes `ready`, `push`, `download`. |
 | **File Filtering** | When running `myf5 ihealth upload <TAB>`, autocompletion automatically filters directory listings to `*.qkview`, `*.tar.gz`, `*.tgz` files. |
-| **Appliance Push Flags** | Suggests `-m`, `--method` (`icontrol`, `scp`), `-d`, `--dest`, `-t`, `--target` (`BIG-IP`, `BIG-IQ`), `-u`, `--user`, `-p`, `--port`, `-k`, `--key`. |
-| **Download Push Flags** | Suggests `--push`, `--push-method`, `--push-dest`, `--push-target`, `--push-user`, `--push-port`, `--push-key`. |
+| **Appliance Push Flags** | Suggests `-m`, `--method` (`auto`, `icontrol`, `scp`), `-d`, `--dest`, `-t`, `--target` (`BIG-IP`, `BIG-IQ`), `-u`, `--user`, `-p`, `--port`, `-i`, `--identity`, `-k`, `--key`. |
+| **Download Push Flags** | Suggests `--push`, `--push-method` (`auto`, `icontrol`, `scp`), `--push-dest`, `--push-target`, `--push-user`, `--push-port`, `--push-key`. |
 | **Global Flags** | Suggests `--profile`, `-o`, `--output`. |
