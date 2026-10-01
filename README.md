@@ -1,12 +1,5 @@
 # myf5-api
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/SalesAmerSP/myf5-api?style=flat-square&logo=go)](https://golang.org)
-[![CI Status](https://img.shields.io/github/actions/workflow/status/SalesAmerSP/myf5-api/ci.yml?branch=main&style=flat-square&logo=githubactions&logoColor=white&label=CI)](https://github.com/SalesAmerSP/myf5-api/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/SalesAmerSP/myf5-api?style=flat-square&logo=github)](https://github.com/SalesAmerSP/myf5-api/releases)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=flat-square)](LICENSE)
-[![Zero-Secret Policy](https://img.shields.io/badge/Security-Zero--Secret_CLI-brightgreen.svg?style=flat-square&logo=shield)](SECURITY.md)
-[![Vulnerability Audit](https://img.shields.io/badge/Security-govulncheck_verified-2ea44f.svg?style=flat-square&logo=securityscorecards)](https://github.com/SalesAmerSP/myf5-api/actions/workflows/security.yml)
-
 A high-performance, memory-safe, zero-dependency Go CLI and client library for **MyF5 Cloud APIs**, **Software Downloads**, **iHealth Diagnostics**, and **BIG-IP TMOS Appliances**.
 
 > [!IMPORTANT]
