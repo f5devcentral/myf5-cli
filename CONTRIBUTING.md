@@ -10,7 +10,7 @@ This document outlines environment setup, coding standards, testing requirements
 ## 1. Development Environment Setup
 
 ### Prerequisites
-- **Go:** 1.22 or newer (recommended: Go 1.27.x)
+- **Go:** 1.26 or newer, as required by `go.mod` (recommended: latest stable)
 - **Make:** GNU Make
 - **Git:** 2.30+
 - **Linter:** `golangci-lint` (v1.60+)
