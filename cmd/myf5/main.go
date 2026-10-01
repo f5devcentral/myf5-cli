@@ -3,12 +3,15 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"myf5-api/pkg/auth"
@@ -24,6 +27,28 @@ import (
 const Version = "1.0.0"
 
 func main() {
+	// Set up graceful SIGINT / SIGTERM context
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Handle cancellation: first signal cancels context gracefully, second signal forces immediate exit
+	go func() {
+		<-ctx.Done()
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigChan)
+
+		select {
+		case <-sigChan:
+			fmt.Fprintln(os.Stderr, "\n[FORCED] Aborted immediately by user.")
+			os.Exit(130)
+		case <-time.After(500 * time.Millisecond):
+			// If blocked on interactive stdin or inactive network, exit cleanly
+			fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+			os.Exit(130)
+		}
+	}()
+
 	// Enforce Zero-Secret CLI Policy
 	if err := auth.CheckNoCLISecrets(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "\n[SECURITY ERROR] %s\n\n", err.Error())
@@ -40,15 +65,15 @@ func main() {
 
 	switch subcommand {
 	case "downloads", "download":
-		handleDownloads(args)
+		handleDownloads(ctx, args)
 	case "cases", "case":
-		handleCases(args)
+		handleCases(ctx, args)
 	case "ihealth":
-		handleIHealth(args)
+		handleIHealth(ctx, args)
 	case "bigip":
-		handleBIGIP(args)
+		handleBIGIP(ctx, args)
 	case "doctor":
-		handleDoctor(args)
+		handleDoctor(ctx, args)
 	case "version", "--version", "-v":
 		fmt.Printf("myf5-api version %s (Go 1.27.1 / darwin-arm64)\n", Version)
 	case "help", "--help", "-h":
@@ -87,11 +112,28 @@ Run 'myf5 <command> --help' for details on specific commands.
 `, Version)
 }
 
+// checkErr terminates the process with 130 if the context was cancelled (Ctrl-C), or 1 on normal errors.
+func checkErr(ctx context.Context, err error, prefix string) {
+	if err == nil {
+		return
+	}
+	if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+		fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+		os.Exit(130)
+	}
+	if prefix != "" {
+		fmt.Fprintf(os.Stderr, "[ERROR] %s: %v\n", prefix, err)
+	} else {
+		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+	}
+	os.Exit(1)
+}
+
 // ----------------------------------------------------------------------------
 // Downloads Command
 // ----------------------------------------------------------------------------
 
-func handleDownloads(args []string) {
+func handleDownloads(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		printDownloadsUsage()
 		os.Exit(1)
@@ -127,8 +169,6 @@ func handleDownloads(args []string) {
 		}
 	}
 
-	ctx := context.Background()
-
 	// Helper to get authenticated client
 	getDownloadsClient := func() *downloads.Client {
 		creds, err := auth.ResolveCredentials(profileVal)
@@ -137,10 +177,7 @@ func handleDownloads(args []string) {
 			os.Exit(1)
 		}
 		token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[AUTH ERROR] %v\n", err)
-			os.Exit(1)
-		}
+		checkErr(ctx, err, "Authentication failed")
 		return downloads.NewClient(token, "")
 	}
 
@@ -148,10 +185,7 @@ func handleDownloads(args []string) {
 	case "families", "products", "list-products", "list-families":
 		client := getDownloadsClient()
 		meta, err := client.GetMetadata(ctx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-			os.Exit(1)
-		}
+		checkErr(ctx, err, "Failed to load product families")
 		fmt.Println("Available Product Families:")
 		for i, fam := range meta.Data.ProductFamilies {
 			if fam.DisplayName != "" {
@@ -169,10 +203,7 @@ func handleDownloads(args []string) {
 		targetFamily := remaining[0]
 		client := getDownloadsClient()
 		meta, err := client.GetMetadata(ctx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-			os.Exit(1)
-		}
+		checkErr(ctx, err, "Failed to load product lines")
 		for _, fam := range meta.Data.ProductFamilies {
 			if strings.EqualFold(fam.Name, targetFamily) {
 				fmt.Printf("Product Lines for '%s':\n", fam.GetTitle())
@@ -196,10 +227,7 @@ func handleDownloads(args []string) {
 		}
 		client := getDownloadsClient()
 		resp, err := client.GetProductVersions(ctx, remaining[0], remaining[1])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-			os.Exit(1)
-		}
+		checkErr(ctx, err, "Failed to load versions")
 		versions := resp.GetVersions()
 		fmt.Printf("Versions for %s / %s (%d found):\n", remaining[0], remaining[1], len(versions))
 		for _, v := range versions {
@@ -216,10 +244,7 @@ func handleDownloads(args []string) {
 		}
 		client := getDownloadsClient()
 		resp, err := client.GetProductVersions(ctx, remaining[0], remaining[1])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-			os.Exit(1)
-		}
+		checkErr(ctx, err, "Failed to load files")
 		targetVer := ""
 		if len(remaining) >= 3 {
 			targetVer = remaining[2]
@@ -252,10 +277,7 @@ func handleDownloads(args []string) {
 		client := getDownloadsClient()
 		fmt.Printf("Fetching download links for %s...\n", fileName)
 		linksResp, err := client.GetFileLinks(ctx, family, line, ver, cont, fileName, "english")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-			os.Exit(1)
-		}
+		checkErr(ctx, err, "Failed to retrieve download link")
 		links := linksResp.GetLinks()
 		if len(links) == 0 {
 			fmt.Fprintf(os.Stderr, "No download links available for %s\n", fileName)
@@ -286,6 +308,11 @@ func handleDownloads(args []string) {
 
 		err = downloads.DownloadFile(ctx, link.Href, outPath, expectedHash, hashAlgo, renderProgress)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				bar.Abort("Download cancelled by user.")
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
 			fmt.Fprintf(os.Stderr, "\n[DOWNLOAD FAILED] %v\n", err)
 			os.Exit(1)
 		}
@@ -326,8 +353,12 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 	fmt.Println("=== MyF5 Software Downloads Interactive Browser ===")
 	meta, err := client.GetMetadata(ctx)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+			os.Exit(130)
+		}
 		fmt.Fprintf(os.Stderr, "Failed to load catalog: %v\n", err)
-		return
+		os.Exit(1)
 	}
 
 	for {
@@ -338,6 +369,10 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 		fmt.Print("\nEnter number (or 'q' to quit): ")
 		input, err := reader.ReadString('\n')
 		if err != nil {
+			if ctx.Err() != nil {
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
 			return
 		}
 		input = strings.TrimSpace(input)
@@ -359,6 +394,10 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 		fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
 		input, err = reader.ReadString('\n')
 		if err != nil {
+			if ctx.Err() != nil {
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
 			return
 		}
 		input = strings.TrimSpace(input)
@@ -379,6 +418,10 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 		fmt.Printf("Fetching versions for %s...\n", selectedLine.Name)
 		vResp, err := client.GetProductVersions(ctx, selectedFamily.Name, selectedLine.Name)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			continue
 		}
@@ -396,6 +439,10 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 		fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
 		input, err = reader.ReadString('\n')
 		if err != nil {
+			if ctx.Err() != nil {
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
 			return
 		}
 		input = strings.TrimSpace(input)
@@ -437,6 +484,10 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 		fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
 		input, err = reader.ReadString('\n')
 		if err != nil {
+			if ctx.Err() != nil {
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
 			return
 		}
 		input = strings.TrimSpace(input)
@@ -457,6 +508,10 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 		fmt.Printf("\nFetching signed CDN link for %s...\n", selectedTarget.file.Name)
 		linkResp, err := client.GetFileLinks(ctx, selectedFamily.Name, selectedLine.Name, selectedVersion.Name, selectedTarget.containerName, selectedTarget.file.Name, "english")
 		if err != nil {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			continue
 		}
@@ -472,6 +527,10 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 		fmt.Printf("Download this file directly to %s? [y/N]: ", targetPath)
 		input, err = reader.ReadString('\n')
 		if err != nil {
+			if ctx.Err() != nil {
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
 			return
 		}
 		if strings.ToLower(strings.TrimSpace(input)) == "y" {
@@ -489,6 +548,11 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 				bar.Update(transferred)
 			})
 			if err != nil {
+				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+					bar.Abort("Download cancelled by user.")
+					fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+					os.Exit(130)
+				}
 				fmt.Fprintf(os.Stderr, "\n[ERROR] Download failed: %v\n", err)
 			} else {
 				bar.Finish(fmt.Sprintf("File saved successfully to %s", targetPath))
@@ -513,14 +577,13 @@ func getDefaultDownloadsDir() string {
 // Cases Command
 // ----------------------------------------------------------------------------
 
-func handleCases(args []string) {
+func handleCases(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		fmt.Println("Usage: myf5 cases [list | metadata | comment <case-num> <note>]")
 		os.Exit(1)
 	}
 
 	action := args[0]
-	ctx := context.Background()
 
 	creds, err := auth.ResolveCredentials("default")
 	if err != nil {
@@ -528,29 +591,20 @@ func handleCases(args []string) {
 		os.Exit(1)
 	}
 	token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[AUTH ERROR] %v\n", err)
-		os.Exit(1)
-	}
+	checkErr(ctx, err, "Authentication failed")
 	client := cases.NewClient(token, "")
 
 	switch action {
 	case "list":
 		resp, err := client.ListCases(ctx, false)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to list cases: %v\n", err)
-			os.Exit(1)
-		}
+		checkErr(ctx, err, "Failed to list cases")
 		fmt.Println("MyF5 Support Cases:")
 		for _, c := range resp.Data {
 			fmt.Printf("  Case #%-10s [%-8s] [%-6s] %s\n", c.CaseNumber, c.Status, c.Severity, c.Subject)
 		}
 	case "metadata":
 		resp, err := client.GetMetadata(ctx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to get metadata: %v\n", err)
-			os.Exit(1)
-		}
+		checkErr(ctx, err, "Failed to get metadata")
 		fmt.Printf("Case Metadata Schema retrieved (%d root keys).\n", len(resp.Data))
 	case "comment":
 		if len(args) < 3 {
@@ -558,10 +612,7 @@ func handleCases(args []string) {
 			os.Exit(1)
 		}
 		_, err := client.AddComment(ctx, args[1], args[2])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to add comment: %v\n", err)
-			os.Exit(1)
-		}
+		checkErr(ctx, err, "Failed to add comment")
 		fmt.Println("Comment added successfully.")
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown cases action '%s'\n", action)
@@ -573,14 +624,13 @@ func handleCases(args []string) {
 // iHealth Command
 // ----------------------------------------------------------------------------
 
-func handleIHealth(args []string) {
+func handleIHealth(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		fmt.Println("Usage: myf5 ihealth [list | upload <file.qkview>]")
 		os.Exit(1)
 	}
 
 	action := args[0]
-	ctx := context.Background()
 
 	creds, err := auth.ResolveCredentials("default")
 	if err != nil {
@@ -588,19 +638,13 @@ func handleIHealth(args []string) {
 		os.Exit(1)
 	}
 	token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "ihealth")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[AUTH ERROR] %v\n", err)
-		os.Exit(1)
-	}
+	checkErr(ctx, err, "Authentication failed")
 	client := ihealth.NewClient(token, "")
 
 	switch action {
 	case "list":
 		summaries, err := client.ListQKViews(ctx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to list iHealth QKViews: %v\n", err)
-			os.Exit(1)
-		}
+		checkErr(ctx, err, "Failed to list iHealth QKViews")
 		fmt.Println("iHealth QKViews:")
 		for _, q := range summaries {
 			fmt.Printf("  ID: %-12s Status: %-10s File: %s\n", q.ID, q.Status, q.FileName)
@@ -633,6 +677,11 @@ func handleIHealth(args []string) {
 			bar.Update(transferred)
 		})
 		if err != nil {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				bar.Abort("Upload cancelled by user.")
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
 			fmt.Fprintf(os.Stderr, "\nUpload failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -647,7 +696,7 @@ func handleIHealth(args []string) {
 // BIG-IP Command
 // ----------------------------------------------------------------------------
 
-func handleBIGIP(args []string) {
+func handleBIGIP(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		fmt.Println("Usage: myf5 bigip [ready <host> | qkview <host>] [--user <user>] [--port <port>]")
 		os.Exit(1)
@@ -709,15 +758,11 @@ func handleBIGIP(args []string) {
 	}
 
 	client := bigip.NewClient(host, port, user, pw)
-	ctx := context.Background()
 
 	switch action {
 	case "ready":
 		ready, err := client.CheckReady(ctx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Ready check failed: %v\n", err)
-			os.Exit(1)
-		}
+		checkErr(ctx, err, "Ready check failed")
 		if ready {
 			fmt.Printf("BIG-IP appliance at %s is READY (HTTP 200).\n", host)
 		} else {
@@ -730,6 +775,11 @@ func handleBIGIP(args []string) {
 			spinner.SetMessage(status)
 		})
 		if err != nil {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				spinner.Abort("QKView generation cancelled by user.")
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
 			spinner.Fail(fmt.Sprintf("QKView generation failed: %v", err))
 			os.Exit(1)
 		}
@@ -742,6 +792,11 @@ func handleBIGIP(args []string) {
 			bar.Update(transferred)
 		})
 		if err != nil {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				bar.Abort("QKView download cancelled by user.")
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
 			fmt.Fprintf(os.Stderr, "\n[ERROR] Failed to download QKView: %v\n", err)
 			os.Exit(1)
 		}
@@ -760,6 +815,11 @@ func handleBIGIP(args []string) {
 			bar.Update(transferred)
 		})
 		if err != nil {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				bar.Abort("Download cancelled by user.")
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
 			fmt.Fprintf(os.Stderr, "\n[ERROR] Download failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -774,7 +834,7 @@ func handleBIGIP(args []string) {
 // Doctor Command
 // ----------------------------------------------------------------------------
 
-func handleDoctor(args []string) {
+func handleDoctor(ctx context.Context, args []string) {
 	fmt.Println("=== myf5 System Doctor & Security Audit ===")
 	fmt.Printf("Timestamp: %s\n\n", time.Now().Format(time.RFC3339))
 

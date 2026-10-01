@@ -85,3 +85,33 @@ func TestSpinnerNonTTY(t *testing.T) {
 		t.Errorf("expected success message, got: %s", out)
 	}
 }
+
+func TestProgressBarAbort(t *testing.T) {
+	var buf bytes.Buffer
+	bar := NewBar(1000, "Downloading")
+	bar.Writer = &buf
+	bar.isTTY = false
+
+	bar.Update(250)
+	bar.Abort("Cancelled by user")
+
+	out := buf.String()
+	if !strings.Contains(out, "[✖] Cancelled by user") {
+		t.Errorf("expected abort message, got: %s", out)
+	}
+}
+
+func TestSpinnerAbort(t *testing.T) {
+	var buf bytes.Buffer
+	spin := NewSpinner("Generating QKView")
+	spin.Writer = &buf
+	spin.isTTY = false
+
+	spin.Start()
+	spin.Abort("Aborted by user")
+
+	out := buf.String()
+	if !strings.Contains(out, "[✖] Aborted by user") {
+		t.Errorf("expected abort message, got: %s", out)
+	}
+}

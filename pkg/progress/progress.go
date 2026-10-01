@@ -153,6 +153,23 @@ func (b *Bar) Finish(summary string) {
 	}
 }
 
+// Abort stops the progress bar and prints an aborted notification.
+func (b *Bar) Abort(reason string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.finished {
+		return
+	}
+	b.finished = true
+
+	if b.isTTY {
+		fmt.Fprintf(b.Writer, "\r\033[K[✖] %s\n", reason)
+	} else {
+		fmt.Fprintf(b.Writer, "[✖] %s\n", reason)
+	}
+}
+
 // Spinner represents an animated terminal spinner for indeterminate operations (e.g. QKView generation).
 type Spinner struct {
 	Label     string
@@ -254,6 +271,16 @@ func (s *Spinner) Fail(errMsg string) {
 		fmt.Fprintf(s.Writer, "\r\033[K[✖] %s [%s]\n", errMsg, FormatDuration(elapsed))
 	} else {
 		fmt.Fprintf(s.Writer, "[✖] %s [%s]\n", errMsg, FormatDuration(elapsed))
+	}
+}
+
+// Abort stops the spinner and marks the operation aborted without duration.
+func (s *Spinner) Abort(reason string) {
+	s.stop()
+	if s.isTTY {
+		fmt.Fprintf(s.Writer, "\r\033[K[✖] %s\n", reason)
+	} else {
+		fmt.Fprintf(s.Writer, "[✖] %s\n", reason)
 	}
 }
 
