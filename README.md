@@ -1,6 +1,6 @@
 # myf5-api
 
-A high-performance, memory-safe, zero-dependency Go CLI and client library for **MyF5 Cloud APIs**, **Software Downloads**, **iHealth Diagnostics**, and **BIG-IP TMOS Appliances**.
+A high-performance, memory-safe, zero-dependency Go CLI and client library for **MyF5 Cloud APIs**, **Software Downloads**, **iHealth Diagnostics**, **BIG-IP TMOS Appliances**, and **BIG-IQ Centralized Management**.
 
 > [!IMPORTANT]
 > **DISCLAIMER:** This project is **NOT** an officially supported F5 product or service.
@@ -13,11 +13,13 @@ A high-performance, memory-safe, zero-dependency Go CLI and client library for *
 
 - **Memory-Safe & Statically Compiled**: Compiles to a single static binary with zero external runtime dependencies (`CGO_ENABLED=0`).
 - **Wire-Speed Multi-GB Streaming**: Streams 2.5 GB – 10+ GB BIG-IP ISOs, OVAs, and qcow2 images directly to disk using `io.TeeReader` with simultaneous SHA-256 verification and minimal RAM footprint (< 10 MB).
+- **Direct Appliance Push Engine**: Pushes software ISOs, engineering hotfixes, and GeoDB updates directly to BIG-IP and BIG-IQ appliances using either **iControl REST chunked transfer** (HTTPS) or **native Go SCP streaming** (SSH).
+- **End-to-End Download & Deploy**: Downloads an image from MyF5, cryptographically verifies its SHA-256 checksum, and immediately pushes it to target appliances in a single atomic pipeline (`myf5 downloads get ... --push <host>`).
 - **MyF5 Downloads Migration Ready**: Defaults to the new October 2, 2026 endpoint (`api.software.downloads.f5.com`) without the legacy `k` query parameter, with automatic pre-cutover fallback and HTTP 429 rate-limit backoff.
 - **Strict Zero-Secret CLI Security**: Rejects plaintext secret arguments (`--password`, `--client-secret`) with exit code `2` to protect against process table (`ps aux`) and shell history leaks.
 - **Multiple Credential Formats**: Automatically discovers credentials in `F5_CLIENT_ID` / `F5_CLIENT_SECRET` environment variables or `~/.f5api_credentials` (both `KEY=VALUE` and `[profile]` INI formats).
 - **Interactive Console Browser**: Menu-driven terminal TUI for exploring product families, branches, release versions, and signed CDN download links.
-- **Universal BIG-IP Connectivity**: Seamlessly supports standard LAN management IPs (`10.1.1.4`), custom management ports (`:8443`), and cloud/UDF access proxies (`https://*.access.udf.f5.com`).
+- **Universal Appliance Connectivity**: Seamlessly supports standard LAN management IPs (`10.1.1.4`), custom management ports (`:8443`), and cloud/UDF access proxies (`https://*.access.udf.f5.com`).
 
 ---
 
@@ -34,7 +36,10 @@ myf5-api/
 │   ├── downloads/              # Downloads API catalog client and streaming downloader
 │   ├── cases/                  # MyF5 Support Case API client
 │   ├── ihealth/                # F5 iHealth QKView multipart upload and status client
-│   ├── bigip/                  # BIG-IP TMOS iControl REST appliance client (with URL & proxy support)
+│   ├── bigip/                  # BIG-IP & BIG-IQ client (iControl REST chunking, bash promotion, native SCP)
+│   │   ├── client.go           # Appliance HTTP client, readiness, QKView automation
+│   │   ├── upload.go           # iControl REST chunked file transfer & bash promotion
+│   │   └── scp.go              # Native Go SCP sink streaming over SSH
 │   └── completion/             # Zero-dependency shell tab completion generator (bash, zsh, fish)
 ├── .github/
 │   ├── workflows/              # GitHub Actions CI, Release, and Security workflows
@@ -43,7 +48,8 @@ myf5-api/
 │   └── pull_request_template.md
 ├── docs/
 │   ├── cli.md                  # Comprehensive CLI reference manual
-│   ├── downloads.md            # Downloads catalog taxonomy & GeoDB automation guide
+│   ├── appliance_push.md       # Appliance software deployment, hotfix, and GeoDB push guide
+│   ├── downloads.md            # Downloads catalog taxonomy, GeoDB automation & direct push
 │   ├── credentials.md          # Zero-Secret policy & credential management
 │   ├── shell_completion.md     # Shell tab autocompletion guide (zsh, bash, fish)
 │   └── network_and_firewall.md # Egress firewall rules and DNS cutover documentation
@@ -106,8 +112,15 @@ client_secret = prod_oauth2_client_secret
 
 ### 2. Environment Variables (Recommended for CI/CD)
 ```bash
+# Cloud API credentials
 export F5_CLIENT_ID="your_oauth2_client_id"
 export F5_CLIENT_SECRET="your_oauth2_client_secret"
+
+# Appliance credentials
+export BIGIP_USER="admin"
+export BIGIP_PASSWORD="YourAppliancePassword"
+export BIGIQ_USER="admin"
+export BIGIQ_PASSWORD="YourAppliancePassword"
 ```
 
 ---
@@ -139,6 +152,13 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
 
 # Download software image with wire-speed streaming and live progress bar
 ./bin/myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 "Virtual Edition" BIGIP-17.1.1-0.0.6.ALL.qcow2.tar.gz -o /var/tmp/bigip.qcow2.tar.gz
+
+# Download and push directly to BIG-IP appliance in one step
+./bin/myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 "Base Software & ISO Releases" BIGIP-17.1.1-0.0.6.iso \
+    -o /var/tmp/BIGIP-17.1.1.iso \
+    --push 10.1.1.4 \
+    --push-method icontrol \
+    --push-dest /shared/images
 ```
 
 ### 3. MyF5 Support Cases
@@ -162,29 +182,42 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
 ./bin/myf5 ihealth upload /path/to/appliance.qkview "C1000234" "Initial triage bundle"
 ```
 
-### 5. BIG-IP Appliance Management
+### 5. BIG-IP Appliance Management & Image Push
 Works with local management IPs, lab appliances, or cloud/UDF external access proxies.
 
 ```bash
-# Set password via environment variable (optional)
-export BIGIP_PASSWORD="YourAppliancePassword"
-
-# Or omit BIGIP_PASSWORD and you will be prompted securely with terminal echo suppressed.
-
 # Check TMOS readiness (via local IP)
 ./bin/myf5 bigip ready 10.1.1.4
 
 # Check TMOS readiness (via UDF or Cloud Access Proxy)
 ./bin/myf5 bigip ready https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com/
 
-# Check TMOS readiness with custom user or port
-./bin/myf5 bigip ready 10.1.1.4 --port 8443 --user admin
-
 # Trigger full, non-truncating QKView generation (-s0)
-./bin/myf5 bigip qkview https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com/
+./bin/myf5 bigip qkview 10.1.1.4 --user admin
+
+# Push software ISO to BIG-IP /shared/images via iControl REST
+./bin/myf5 bigip push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --method icontrol --dest /shared/images
+
+# Push engineering hotfix via native Go SCP over SSH
+./bin/myf5 bigip push 10.1.1.4 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso --method scp
 ```
 
-### 6. Shell Tab Autocompletion (`bash`, `zsh`, `fish`)
+### 6. BIG-IQ Centralized Management & Image Push
+```bash
+# Check BIG-IQ management plane readiness
+./bin/myf5 bigiq ready 192.0.2.50
+
+# Push software ISO to BIG-IQ central repository
+./bin/myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --method scp --dest /shared/images
+```
+
+### 7. Unified Appliance Push
+```bash
+# Push file to any appliance with target selection
+./bin/myf5 push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --target bigip --dest /shared/GeoIP
+```
+
+### 8. Shell Tab Autocompletion (`bash`, `zsh`, `fish`)
 Enable fast tab autocompletion for commands, subcommands, flags, and product families:
 
 ```bash
@@ -225,13 +258,16 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
 - **Shell History Protection:** Because secrets cannot be provided via arguments, commands stored in `~/.bash_history`, `~/.zsh_history`, and auditing agents (e.g., Falco, auditd) remain free of secrets.
 - **Hierarchical Credential Resolution:**
   ```
-  1. OS Environment Variables (F5_CLIENT_ID / F5_CLIENT_SECRET)
+  1. OS Environment Variables (F5_CLIENT_ID / F5_CLIENT_SECRET, BIGIP_PASSWORD / BIGIQ_PASSWORD)
        │ (Not Found)
        ▼
   2. File: ~/.f5api_credentials (Permissions 0600, INI profile support)
        │ (Not Found)
        ▼
-  3. Interactive Masked Terminal Prompt (Echo suppressed via term.ReadPassword)
+  3. SSH Keys / Agent (SCP method: ~/.ssh/id_*, $SSH_AUTH_SOCK)
+       │ (Not Found)
+       ▼
+  4. Interactive Masked Terminal Prompt (Echo suppressed via term.ReadPassword)
   ```
 - **Masked Diagnostics:** Diagnostic utilities (`myf5 doctor`) mask all secret strings, displaying only non-sensitive metadata (e.g. `Client ID: 9x8*************************`).
 
@@ -242,8 +278,9 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
 | Guide | Description |
 | :--- | :--- |
 | **[CLI Reference Manual](docs/cli.md)** | Full reference for all commands, subcommands, arguments, and exit codes. |
-| **[MyF5 Downloads & GeoDB Guide](docs/downloads.md)** | Catalog hierarchy, automated GeoDB updates, and streaming architecture. |
-| **[Zero-Secret Security Architecture](docs/credentials.md)** | Process isolation, credentials file permissions, and environment setup. |
+| **[Appliance Push & Deployment Guide](docs/appliance_push.md)** | Direct streaming of ISOs, hotfixes, and GeoDB updates to BIG-IP and BIG-IQ via iControl REST and SCP. |
+| **[MyF5 Downloads & GeoDB Guide](docs/downloads.md)** | Catalog hierarchy, automated GeoDB updates, and end-to-end download & push workflows. |
+| **[Zero-Secret Security Architecture](docs/credentials.md)** | Process isolation, credentials file permissions, SSH keys, and environment setup. |
 | **[Shell Tab Autocompletion](docs/shell_completion.md)** | Setup instructions and completion features for Zsh, Bash, and Fish. |
 | **[Network, DNS & Firewall Architecture](docs/network_and_firewall.md)** | Egress firewall requirements (TCP 443) and F5 infrastructure cutover notices. |
 

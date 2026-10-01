@@ -1,6 +1,6 @@
 # Credential Management & Zero-Secret Security Architecture
 
-Security is built into `myf5` at the architectural level. This document details credential storage, profile management, environment variable resolution, and our defense-in-depth zero-secret security guarantees.
+Security is built into `myf5` at the architectural level. This document details credential storage, profile management, environment variable resolution, and the defense-in-depth zero-secret security guarantees.
 
 ---
 
@@ -51,7 +51,7 @@ chmod 600 ~/.f5api_credentials
 ```
 
 #### Profile Selection
-You can specify which profile to use with the `--profile` flag:
+Select an alternative profile with the `--profile` flag:
 ```bash
 myf5 downloads families --profile production
 ```
@@ -71,17 +71,32 @@ When set, environment variables take precedence over profile files.
 
 ---
 
-### 3. BIG-IP Appliance Credentials
+### 3. BIG-IP & BIG-IQ Appliance Credentials
 
-When managing BIG-IP TMOS appliances via `myf5 bigip`:
+When managing BIG-IP TMOS or BIG-IQ Centralized Management appliances via `myf5 bigip`, `myf5 bigiq`, `myf5 push`, or post-download push flags (`--push`):
 
-- **Username**: Sourced from `$BIGIP_USER`, the `--user` flag, or defaults to `"admin"`.
-- **Password**:
-  - May be provided via the `BIGIP_PASSWORD` environment variable.
-  - If `BIGIP_PASSWORD` is not set and an interactive terminal (TTY) is detected, `myf5` prompts for the password with terminal echo suppressed via `golang.org/x/term`:
+- **Username Resolution**:
+  - Command flag: `-u`, `--user <username>` or `--push-user <username>`.
+  - Environment variable: `$BIGIQ_USER` (for BIG-IQ) or `$BIGIP_USER` (for BIG-IP and fallback).
+  - Default: `"admin"`.
+
+- **Password Resolution**:
+  - Environment variables:
+    * BIG-IQ: `$BIGIQ_PASSWORD` (falls back to `$BIGIP_PASSWORD`).
+    * BIG-IP: `$BIGIP_PASSWORD`.
+  - Interactive Masked Terminal Prompt:
+    If no password environment variable is set and an interactive terminal (TTY) is detected, `myf5` securely prompts for the appliance password with terminal echo suppressed via `golang.org/x/term`:
     ```
     Enter BIG-IP password for admin@10.1.1.4: 
     ```
+    In non-interactive environments (cron, headless CI/CD), if the password is not provided via environment variables or SSH keys, `myf5` halts execution with exit code `1` rather than hanging.
+
+- **SSH Key & Agent Authentication (SCP Method)**:
+  When using native Go SCP transfers (`--method scp` or `--push-method scp`):
+  1. **Explicit Private Key**: Specify `--key <path>` or `--push-key <path>` (supports encrypted keys with passphrase).
+  2. **SSH Agent**: Connects automatically to `$SSH_AUTH_SOCK` if active.
+  3. **Default Key Fallback**: Inspects standard user keys (`~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`).
+  4. **Password / PAM Fallback**: Uses password or interactive prompt if no keys are found.
 
 ---
 

@@ -74,6 +74,10 @@ func main() {
 		handleIHealth(ctx, args)
 	case "bigip":
 		handleBIGIP(ctx, args)
+	case "bigiq":
+		handleBIGIQ(ctx, args)
+	case "push":
+		handlePush(ctx, args)
 	case "doctor":
 		handleDoctor(ctx, args)
 	case "completion":
@@ -103,7 +107,9 @@ COMMANDS:
     downloads    Browse MyF5 catalog and stream multi-GB software images
     cases        View and manage MyF5 support cases
     ihealth      Upload and inspect QKView diagnostic bundles on iHealth
-    bigip        Manage BIG-IP TMOS appliances (ready check, QKView generation)
+    bigip        Manage BIG-IP TMOS appliances (ready check, QKView generation, push)
+    bigiq        Manage BIG-IQ appliances (ready check, push software images/files)
+    push         Push software downloads or files to BIG-IP / BIG-IQ via iControl or SCP
     doctor       Verify API credentials, DNS, and network firewall egress
     completion   Generate shell tab completion script (bash, zsh, fish)
     version      Print application version
@@ -111,7 +117,7 @@ COMMANDS:
 ZERO-SECRET SECURITY POLICY:
     CLI arguments for secrets (--password, --client-secret) are strictly rejected.
     Store credentials in environment variables or ~/.f5api_credentials (or [profile]).
-    For BIG-IP commands without BIGIP_PASSWORD set, interactive masked entry will prompt.
+    For appliance commands without BIGIP_PASSWORD / BIGIQ_PASSWORD, interactive masked prompt is used.
 
 Run 'myf5 <command> --help' for details on specific commands.
 `, Version)
@@ -149,6 +155,13 @@ func handleDownloads(ctx context.Context, args []string) {
 
 	outputVal := ""
 	profileVal := "default"
+	pushHost := ""
+	pushMethod := "icontrol"
+	pushDest := ""
+	pushUser := ""
+	pushPort := 0
+	pushKey := ""
+	pushTarget := "BIG-IP"
 	var remaining []string
 
 	for i := 0; i < len(actionArgs); i++ {
@@ -169,6 +182,59 @@ func handleDownloads(ctx context.Context, args []string) {
 			}
 		} else if strings.HasPrefix(arg, "--profile=") {
 			profileVal = strings.TrimPrefix(arg, "--profile=")
+		} else if arg == "--push" {
+			if i+1 < len(actionArgs) {
+				pushHost = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--push=") {
+			pushHost = strings.TrimPrefix(arg, "--push=")
+		} else if arg == "--push-method" {
+			if i+1 < len(actionArgs) {
+				pushMethod = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--push-method=") {
+			pushMethod = strings.TrimPrefix(arg, "--push-method=")
+		} else if arg == "--push-dest" {
+			if i+1 < len(actionArgs) {
+				pushDest = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--push-dest=") {
+			pushDest = strings.TrimPrefix(arg, "--push-dest=")
+		} else if arg == "--push-user" {
+			if i+1 < len(actionArgs) {
+				pushUser = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--push-user=") {
+			pushUser = strings.TrimPrefix(arg, "--push-user=")
+		} else if arg == "--push-port" {
+			if i+1 < len(actionArgs) {
+				if p, err := strconv.Atoi(actionArgs[i+1]); err == nil {
+					pushPort = p
+				}
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--push-port=") {
+			if p, err := strconv.Atoi(strings.TrimPrefix(arg, "--push-port=")); err == nil {
+				pushPort = p
+			}
+		} else if arg == "--push-key" {
+			if i+1 < len(actionArgs) {
+				pushKey = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--push-key=") {
+			pushKey = strings.TrimPrefix(arg, "--push-key=")
+		} else if arg == "--push-target" {
+			if i+1 < len(actionArgs) {
+				pushTarget = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--push-target=") {
+			pushTarget = strings.TrimPrefix(arg, "--push-target=")
 		} else {
 			remaining = append(remaining, arg)
 		}
@@ -368,6 +434,10 @@ func handleDownloads(ctx context.Context, args []string) {
 			os.Exit(1)
 		}
 		bar.Finish(fmt.Sprintf("Download verified and complete: %s", outPath))
+		if pushHost != "" {
+			fmt.Printf("\n--- Automatic Appliance Push Requested ---\n")
+			executePushToAppliance(ctx, pushHost, outPath, pushMethod, pushDest, pushUser, pushPort, pushKey, pushTarget)
+		}
 
 	case "browse":
 		runInteractiveBrowser(ctx, getDownloadsClient())
@@ -1005,30 +1075,126 @@ func handleIHealth(ctx context.Context, args []string) {
 }
 
 // ----------------------------------------------------------------------------
-// BIG-IP Command
+// Appliance & Push Commands (BIG-IP, BIG-IQ)
 // ----------------------------------------------------------------------------
 
 func handleBIGIP(ctx context.Context, args []string) {
-	if len(args) == 0 {
-		fmt.Println("Usage: myf5 bigip [ready <host> | qkview <host>] [--user <user>] [--port <port>]")
+	handleAppliance(ctx, "BIG-IP", args)
+}
+
+func handleBIGIQ(ctx context.Context, args []string) {
+	handleAppliance(ctx, "BIG-IQ", args)
+}
+
+func handlePush(ctx context.Context, args []string) {
+	if len(args) < 2 {
+		fmt.Println("Usage: myf5 push <host> <file> [--method icontrol|scp] [--dest <path>] [--target bigip|bigiq] [--user <user>] [--port <port>] [--key <key>]")
 		os.Exit(1)
 	}
 
-	action := args[0]
-	actionArgs := args[1:]
-	if len(actionArgs) < 1 {
-		fmt.Fprintf(os.Stderr, "Usage: myf5 bigip %s <host> [--user <user>] [--port <port>]\n", action)
-		os.Exit(1)
-	}
-
-	host := actionArgs[0]
-	user := os.Getenv("BIGIP_USER")
-	if user == "" {
-		user = "admin"
-	}
+	var positional []string
+	user := ""
 	port := 0
+	method := "icontrol"
+	destPath := ""
+	keyPath := ""
+	targetKind := "BIG-IP"
 
-	for i := 1; i < len(actionArgs); i++ {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--user" || arg == "-u" {
+			if i+1 < len(args) {
+				user = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--user=") {
+			user = strings.TrimPrefix(arg, "--user=")
+		} else if arg == "--port" || arg == "-p" {
+			if i+1 < len(args) {
+				if p, err := strconv.Atoi(args[i+1]); err == nil {
+					port = p
+				}
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--port=") {
+			if p, err := strconv.Atoi(strings.TrimPrefix(arg, "--port=")); err == nil {
+				port = p
+			}
+		} else if arg == "--method" || arg == "-m" {
+			if i+1 < len(args) {
+				method = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--method=") {
+			method = strings.TrimPrefix(arg, "--method=")
+		} else if arg == "--dest" || arg == "-d" {
+			if i+1 < len(args) {
+				destPath = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--dest=") {
+			destPath = strings.TrimPrefix(arg, "--dest=")
+		} else if arg == "--identity" || arg == "-i" {
+			if i+1 < len(args) {
+				keyPath = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--identity=") {
+			keyPath = strings.TrimPrefix(arg, "--identity=")
+		} else if arg == "--target" || arg == "-t" {
+			if i+1 < len(args) {
+				targ := args[i+1]
+				if strings.EqualFold(targ, "bigiq") || strings.EqualFold(targ, "big-iq") {
+					targetKind = "BIG-IQ"
+				}
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--target=") {
+			targ := strings.TrimPrefix(arg, "--target=")
+			if strings.EqualFold(targ, "bigiq") || strings.EqualFold(targ, "big-iq") {
+				targetKind = "BIG-IQ"
+			}
+		} else if !strings.HasPrefix(arg, "-") {
+			positional = append(positional, arg)
+		}
+	}
+
+	if len(positional) < 2 {
+		fmt.Fprintf(os.Stderr, "Usage: myf5 push <host> <file> [--method icontrol|scp] [--dest <dest>] [--target bigip|bigiq] ...\n")
+		os.Exit(1)
+	}
+
+	host := positional[0]
+	localFile := positional[1]
+	executePushToAppliance(ctx, host, localFile, method, destPath, user, port, keyPath, targetKind)
+}
+
+func handleAppliance(ctx context.Context, targetKind string, args []string) {
+	cmdName := "bigip"
+	if strings.EqualFold(targetKind, "BIG-IQ") {
+		cmdName = "bigiq"
+	}
+
+	if len(args) == 0 {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			fmt.Printf("Usage: myf5 %s [ready <host> | push <host> <file>] [--method icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [--key <key>]\n", cmdName)
+		} else {
+			fmt.Printf("Usage: myf5 %s [ready <host> | qkview <host> | push <host> <file>] [--method icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [--key <key>]\n", cmdName)
+		}
+		os.Exit(1)
+	}
+
+	action := strings.ToLower(args[0])
+	actionArgs := args[1:]
+
+	var positional []string
+	user := ""
+	port := 0
+	method := "icontrol"
+	destPath := ""
+	keyPath := ""
+
+	for i := 0; i < len(actionArgs); i++ {
 		arg := actionArgs[i]
 		if arg == "--user" || arg == "-u" {
 			if i+1 < len(actionArgs) {
@@ -1048,39 +1214,116 @@ func handleBIGIP(ctx context.Context, args []string) {
 			if p, err := strconv.Atoi(strings.TrimPrefix(arg, "--port=")); err == nil {
 				port = p
 			}
+		} else if arg == "--method" || arg == "-m" {
+			if i+1 < len(actionArgs) {
+				method = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--method=") {
+			method = strings.TrimPrefix(arg, "--method=")
+		} else if arg == "--dest" || arg == "-d" {
+			if i+1 < len(actionArgs) {
+				destPath = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--dest=") {
+			destPath = strings.TrimPrefix(arg, "--dest=")
+		} else if arg == "--identity" || arg == "-i" {
+			if i+1 < len(actionArgs) {
+				keyPath = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--identity=") {
+			keyPath = strings.TrimPrefix(arg, "--identity=")
+		} else if !strings.HasPrefix(arg, "-") {
+			positional = append(positional, arg)
 		}
 	}
 
-	pw := os.Getenv("BIGIP_PASSWORD")
-	if pw == "" {
-		// Prompt securely from terminal if interactive TTY is available
-		if term.IsTerminal(int(os.Stdin.Fd())) {
-			fmt.Printf("Enter BIG-IP password for %s@%s: ", user, host)
+	switch action {
+	case "ready":
+		if len(positional) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s ready <host> [--user <user>] [--port <port>]\n", cmdName)
+			os.Exit(1)
+		}
+		host := positional[0]
+		if user == "" {
+			if strings.EqualFold(targetKind, "BIG-IQ") {
+				user = os.Getenv("BIGIQ_USER")
+			}
+			if user == "" {
+				user = os.Getenv("BIGIP_USER")
+			}
+			if user == "" {
+				user = "admin"
+			}
+		}
+
+		pw := ""
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			pw = os.Getenv("BIGIQ_PASSWORD")
+		}
+		if pw == "" {
+			pw = os.Getenv("BIGIP_PASSWORD")
+		}
+		if pw == "" && term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
 			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
 			if err == nil {
 				pw = strings.TrimSpace(string(bytePw))
 			}
 		}
-	}
+		if pw == "" {
+			fmt.Fprintf(os.Stderr, "[ERROR] Password required. Set BIGIP_PASSWORD / BIGIQ_PASSWORD or enter at prompt.\n")
+			os.Exit(1)
+		}
 
-	if pw == "" {
-		fmt.Fprintf(os.Stderr, "[ERROR] BIGIP_PASSWORD environment variable must be set, or entered at prompt.\n")
-		os.Exit(1)
-	}
-
-	client := bigip.NewClient(host, port, user, pw)
-
-	switch action {
-	case "ready":
+		client := bigip.NewClient(host, port, user, pw)
 		ready, err := client.CheckReady(ctx)
 		checkErr(ctx, err, "Ready check failed")
 		if ready {
-			fmt.Printf("BIG-IP appliance at %s is READY (HTTP 200).\n", host)
+			fmt.Printf("%s appliance at %s is READY (HTTP 200).\n", targetKind, host)
 		} else {
-			fmt.Printf("BIG-IP appliance at %s is NOT READY.\n", host)
+			fmt.Printf("%s appliance at %s is NOT READY.\n", targetKind, host)
 		}
+
+	case "push", "upload":
+		if len(positional) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s push <host> <file> [--method icontrol|scp] [--dest <dest>] [--user <user>] [--port <port>] [--key <key>]\n", cmdName)
+			os.Exit(1)
+		}
+		host := positional[0]
+		localFile := positional[1]
+		executePushToAppliance(ctx, host, localFile, method, destPath, user, port, keyPath, targetKind)
+
 	case "qkview":
+		if len(positional) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s qkview <host> [--user <user>] [--port <port>]\n", cmdName)
+			os.Exit(1)
+		}
+		host := positional[0]
+		if user == "" {
+			user = os.Getenv("BIGIP_USER")
+			if user == "" {
+				user = "admin"
+			}
+		}
+		pw := os.Getenv("BIGIP_PASSWORD")
+		if pw == "" && term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
+			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err == nil {
+				pw = strings.TrimSpace(string(bytePw))
+			}
+		}
+		if pw == "" {
+			fmt.Fprintf(os.Stderr, "[ERROR] BIGIP_PASSWORD environment variable must be set, or entered at prompt.\n")
+			os.Exit(1)
+		}
+
+		client := bigip.NewClient(host, port, user, pw)
 		spinner := progress.NewSpinner(fmt.Sprintf("Generating diagnostic QKView on %s", host))
 		spinner.Start()
 		remoteFile, err := client.GenerateQKViewWithStatus(ctx, "", true, func(status string) {
@@ -1097,9 +1340,9 @@ func handleBIGIP(ctx context.Context, args []string) {
 		}
 		spinner.Success(fmt.Sprintf("QKView generated on appliance: /var/tmp/qkviews/%s", remoteFile))
 
-		destPath := filepath.Join(getDefaultDownloadsDir(), remoteFile)
+		destFile := filepath.Join(getDefaultDownloadsDir(), remoteFile)
 		bar := progress.NewBar(0, "Downloading")
-		err = client.DownloadQKView(ctx, remoteFile, destPath, func(transferred, total int64) {
+		err = client.DownloadQKView(ctx, remoteFile, destFile, func(transferred, total int64) {
 			bar.Total = total
 			bar.Update(transferred)
 		})
@@ -1112,17 +1355,32 @@ func handleBIGIP(ctx context.Context, args []string) {
 			fmt.Fprintf(os.Stderr, "\n[ERROR] Failed to download QKView: %v\n", err)
 			os.Exit(1)
 		}
-		bar.Finish(fmt.Sprintf("QKView saved to %s", destPath))
+		bar.Finish(fmt.Sprintf("QKView saved to %s", destFile))
 
 	case "download":
-		if len(actionArgs) < 2 {
-			fmt.Fprintln(os.Stderr, "Usage: myf5 bigip download <url> <remote-filename>")
+		if len(positional) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s download <host> <remote-filename>\n", cmdName)
 			os.Exit(1)
 		}
-		remoteFile := actionArgs[1]
-		destPath := filepath.Join(getDefaultDownloadsDir(), remoteFile)
+		host := positional[0]
+		remoteFile := positional[1]
+		if user == "" {
+			user = os.Getenv("BIGIP_USER")
+			if user == "" {
+				user = "admin"
+			}
+		}
+		pw := os.Getenv("BIGIP_PASSWORD")
+		if pw == "" && term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
+			bytePw, _ := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			pw = strings.TrimSpace(string(bytePw))
+		}
+		client := bigip.NewClient(host, port, user, pw)
+		destFile := filepath.Join(getDefaultDownloadsDir(), remoteFile)
 		bar := progress.NewBar(0, "Downloading")
-		err := client.DownloadQKView(ctx, remoteFile, destPath, func(transferred, total int64) {
+		err := client.DownloadQKView(ctx, remoteFile, destFile, func(transferred, total int64) {
 			bar.Total = total
 			bar.Update(transferred)
 		})
@@ -1135,10 +1393,161 @@ func handleBIGIP(ctx context.Context, args []string) {
 			fmt.Fprintf(os.Stderr, "\n[ERROR] Download failed: %v\n", err)
 			os.Exit(1)
 		}
-		bar.Finish(fmt.Sprintf("File saved to %s", destPath))
+		bar.Finish(fmt.Sprintf("File saved to %s", destFile))
+
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown bigip action '%s'\n", action)
+		fmt.Fprintf(os.Stderr, "Unknown %s action '%s'\n", cmdName, action)
 		os.Exit(1)
+	}
+}
+
+// executePushToAppliance handles streaming upload of a local file to a BIG-IP or BIG-IQ appliance
+// via either iControl REST chunked transfer or SCP over SSH.
+func executePushToAppliance(ctx context.Context, host, localPath, method, destPath, user string, port int, keyPath, targetKind string) {
+	if targetKind == "" {
+		targetKind = "BIG-IP"
+	}
+	if method == "" {
+		method = "icontrol"
+	}
+	method = strings.ToLower(strings.TrimSpace(method))
+	if method != "icontrol" && method != "scp" && method != "ssh" {
+		fmt.Fprintf(os.Stderr, "[ERROR] Invalid push method %q. Valid methods: 'icontrol', 'scp'\n", method)
+		os.Exit(1)
+	}
+
+	stat, err := os.Stat(localPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Local file %q does not exist or cannot be read: %v\n", localPath, err)
+		os.Exit(1)
+	}
+	fileSize := stat.Size()
+	baseName := filepath.Base(localPath)
+
+	if user == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			user = os.Getenv("BIGIQ_USER")
+		}
+		if user == "" {
+			user = os.Getenv("BIGIP_USER")
+		}
+		if user == "" {
+			user = "admin"
+		}
+	}
+
+	pw := ""
+	if strings.EqualFold(targetKind, "BIG-IQ") {
+		pw = os.Getenv("BIGIQ_PASSWORD")
+	}
+	if pw == "" {
+		pw = os.Getenv("BIGIP_PASSWORD")
+	}
+
+	fmt.Printf("Pushing %s (%s) to %s (%s) via %s...\n", baseName, downloads.FormatBytes(fileSize), targetKind, host, strings.ToUpper(method))
+
+	if method == "icontrol" {
+		if pw == "" {
+			if term.IsTerminal(int(os.Stdin.Fd())) {
+				fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
+				bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Println()
+				if err == nil {
+					pw = strings.TrimSpace(string(bytePw))
+				}
+			}
+		}
+		if pw == "" {
+			fmt.Fprintf(os.Stderr, "[ERROR] Password required for iControl REST. Set BIGIP_PASSWORD / BIGIQ_PASSWORD or enter at prompt.\n")
+			os.Exit(1)
+		}
+
+		client := bigip.NewClient(host, port, user, pw)
+		bar := progress.NewBar(0, fmt.Sprintf("Uploading via iControl REST"))
+		remotePath, err := client.UploadFile(ctx, localPath, baseName, func(transferred, total int64) {
+			bar.Total = total
+			bar.Update(transferred)
+		})
+		if err != nil {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				bar.Abort("Upload cancelled by user.")
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
+			bar.Abort(fmt.Sprintf("Upload failed: %v", err))
+			os.Exit(1)
+		}
+		bar.Finish(fmt.Sprintf("File uploaded to appliance at %s", remotePath))
+
+		// If a custom destination directory was requested, promote the file
+		if destPath != "" && destPath != "/var/config/rest/downloads" && destPath != "/var/config/rest/downloads/" {
+			spinner := progress.NewSpinner(fmt.Sprintf("Promoting to %s", destPath))
+			spinner.Start()
+			finalPath, copyErr := client.CopyRemoteFile(ctx, remotePath, destPath)
+			if copyErr != nil {
+				spinner.Fail(fmt.Sprintf("Upload succeeded to %s, but copy to %s failed (appliance bash utility may be restricted): %v", remotePath, destPath, copyErr))
+			} else {
+				spinner.Success(fmt.Sprintf("File promoted on appliance: %s", finalPath))
+			}
+		}
+	} else {
+		// SCP / SSH method
+		if keyPath == "" {
+			if k := os.Getenv("BIGIP_SSH_KEY"); k != "" {
+				keyPath = k
+			} else if k := os.Getenv("SSH_KEY_PATH"); k != "" {
+				keyPath = k
+			}
+		}
+
+		if pw == "" && keyPath == "" {
+			home, _ := os.UserHomeDir()
+			hasKey := false
+			if home != "" {
+				for _, k := range []string{filepath.Join(home, ".ssh", "id_ed25519"), filepath.Join(home, ".ssh", "id_rsa")} {
+					if _, err := os.Stat(k); err == nil {
+						hasKey = true
+						break
+					}
+				}
+			}
+			if os.Getenv("SSH_AUTH_SOCK") != "" {
+				hasKey = true
+			}
+
+			if !hasKey && term.IsTerminal(int(os.Stdin.Fd())) {
+				fmt.Printf("Enter %s SSH password for %s@%s: ", targetKind, user, host)
+				bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Println()
+				if err == nil {
+					pw = strings.TrimSpace(string(bytePw))
+				}
+			}
+		}
+
+		opts := bigip.SCPOptions{
+			Host:     host,
+			Port:     port,
+			Username: user,
+			Password: pw,
+			KeyPath:  keyPath,
+		}
+
+		bar := progress.NewBar(0, fmt.Sprintf("Uploading via SCP"))
+		finalPath, err := bigip.SCPUpload(ctx, localPath, destPath, opts, func(transferred, total int64) {
+			bar.Total = total
+			bar.Update(transferred)
+		})
+		if err != nil {
+			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				bar.Abort("SCP transfer cancelled by user.")
+				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+				os.Exit(130)
+			}
+			bar.Abort(fmt.Sprintf("SCP transfer failed: %v", err))
+			os.Exit(1)
+		}
+		bar.Finish(fmt.Sprintf("File transferred to appliance at %s", finalPath))
 	}
 }
 

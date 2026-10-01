@@ -109,7 +109,7 @@ func (c *Client) BaseURL() string {
 	return fmt.Sprintf("%s://%s:%d", scheme, c.Host, c.Port)
 }
 
-// CheckReady queries /mgmt/tm/sys/ready to verify appliance availability.
+// CheckReady queries /mgmt/tm/sys/ready (or /mgmt/shared/echo for BIG-IQ) to verify appliance availability.
 func (c *Client) CheckReady(ctx context.Context) (bool, error) {
 	url := fmt.Sprintf("%s/mgmt/tm/sys/ready", c.BaseURL())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -124,7 +124,24 @@ func (c *Client) CheckReady(ctx context.Context) (bool, error) {
 	}
 	defer resp.Body.Close()
 
-	return resp.StatusCode == http.StatusOK, nil
+	if resp.StatusCode == http.StatusOK {
+		return true, nil
+	}
+
+	// Fallback to /mgmt/shared/echo for BIG-IQ and appliances without sys ready
+	if resp.StatusCode == http.StatusNotFound {
+		echoURL := fmt.Sprintf("%s/mgmt/shared/echo", c.BaseURL())
+		echoReq, echoErr := http.NewRequestWithContext(ctx, http.MethodGet, echoURL, nil)
+		if echoErr == nil {
+			c.setAuth(echoReq)
+			if echoResp, doErr := c.HTTPClient.Do(echoReq); doErr == nil {
+				defer echoResp.Body.Close()
+				return echoResp.StatusCode == http.StatusOK, nil
+			}
+		}
+	}
+
+	return false, nil
 }
 
 var validQKViewFilenameRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)

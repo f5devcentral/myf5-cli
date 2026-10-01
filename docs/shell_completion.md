@@ -9,13 +9,13 @@
 ### 1. Zsh (Default on macOS)
 
 #### Current Terminal Session
-To test autocompletion immediately in your current terminal:
+To test autocompletion immediately in the current terminal:
 ```zsh
 source <(myf5 completion zsh)
 ```
 
 #### Persistent Setup (Recommended)
-Add autocompletion to your `~/.zshrc`:
+Add autocompletion to `~/.zshrc`:
 
 ```zsh
 # Option A: Sourced dynamically in ~/.zshrc
@@ -73,10 +73,14 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
 
 | Scope | Autocompletion Behavior |
 | :--- | :--- |
-| **Primary Commands** | Tab completes `downloads`, `cases`, `ihealth`, `bigip`, `doctor`, `completion`, `version`, `help` with inline descriptions. |
+| **Primary Commands** | Tab completes `downloads`, `cases`, `ihealth`, `bigip`, `bigiq`, `push`, `doctor`, `completion`, `version`, `help` with contextual descriptions. |
 | **Download Actions** | Tab completes `browse`, `families`, `lines`, `versions`, `containers`, `files`, `get`. |
 | **Product Families** | Suggests common F5 product families: `BIG-IP`, `NGINX`, `BIG-IQ`. |
 | **Case Actions** | Tab completes `list`, `metadata`, `comment`. |
 | **iHealth Actions** | Tab completes `list`, `upload`. |
-| **File Filtering** | When running `myf5 ihealth upload <TAB>`, autocompletion automatically filters directory listings to `*.qkview` files. |
-| **Flags & Options** | Suggests flags such as `--profile`, `-o`, `--output`, `-u`, `--user`, `-p`, `--port`. |
+| **BIG-IP Actions** | Tab completes `ready`, `qkview`, `push`, `download`. |
+| **BIG-IQ Actions** | Tab completes `ready`, `push`. |
+| **File Filtering** | When running `myf5 ihealth upload <TAB>`, autocompletion automatically filters directory listings to `*.qkview`, `*.tar.gz`, `*.tgz` files. |
+| **Appliance Push Flags** | Suggests `-m`, `--method` (`icontrol`, `scp`), `-d`, `--dest`, `-t`, `--target` (`BIG-IP`, `BIG-IQ`), `-u`, `--user`, `-p`, `--port`, `-k`, `--key`. |
+| **Download Push Flags** | Suggests `--push`, `--push-method`, `--push-dest`, `--push-target`, `--push-user`, `--push-port`, `--push-key`. |
+| **Global Flags** | Suggests `--profile`, `-o`, `--output`. |

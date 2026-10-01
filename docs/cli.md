@@ -1,6 +1,6 @@
 # Command-Line Interface (CLI) Reference
 
-`myf5` is a high-performance, zero-dependency command-line utility built in pure Go for orchestrating F5 cloud services and BIG-IP TMOS appliances.
+`myf5` is a high-performance, zero-dependency command-line utility built in pure Go for orchestrating F5 cloud services, BIG-IP TMOS appliances, and BIG-IQ Centralized Management.
 
 ---
 
@@ -14,7 +14,8 @@ myf5 <command> [subcommand] [arguments...] [options]
 In accordance with enterprise DevSecOps standards, **passing credentials or tokens via command-line flags is strictly prohibited**. 
 - Flags like `--password`, `-p`, `--client-secret`, or `--token` are trapped prior to command dispatch.
 - When detected, `myf5` immediately terminates with exit code `2` to prevent credentials from leaking into process tables (`/proc/$PID/cmdline`, `ps aux`), system audit logs (auditd, Falco), and shell histories (`.zsh_history`, `.bash_history`).
-- Store credentials in `~/.f5api_credentials` or set `F5_CLIENT_ID` / `F5_CLIENT_SECRET` in the environment.
+- Store cloud credentials in `~/.f5api_credentials` or set `F5_CLIENT_ID` / `F5_CLIENT_SECRET` in the environment.
+- Appliance passwords are provided via environment variables (`BIGIP_PASSWORD`, `BIGIQ_PASSWORD`), SSH keys/agents, or entered interactively at the masked terminal prompt.
 
 ---
 
@@ -25,16 +26,18 @@ In accordance with enterprise DevSecOps standards, **passing credentials or toke
 | [`downloads`](#1-myf5-downloads) | Browse the MyF5 software catalog and stream multi-GB images |
 | [`cases`](#2-myf5-cases) | Inspect, query, and comment on MyF5 support cases |
 | [`ihealth`](#3-myf5-ihealth) | Upload and audit QKView diagnostic bundles on F5 iHealth |
-| [`bigip`](#4-myf5-bigip) | Orchestrate BIG-IP TMOS appliances (readiness, QKView generation) |
-| [`doctor`](#5-myf5-doctor) | Run connectivity, DNS, egress, and credential diagnostics |
-| [`completion`](#6-myf5-completion) | Generate native shell autocompletion scripts (`bash`, `zsh`, `fish`) |
-| [`version`](#7-myf5-version) | Display application version and toolchain info |
+| [`bigip`](#4-myf5-bigip) | Orchestrate BIG-IP TMOS appliances (readiness, QKView generation, push) |
+| [`bigiq`](#5-myf5-bigiq) | Orchestrate BIG-IQ Centralized Management appliances (readiness, push) |
+| [`push`](#6-myf5-push) | Push downloads or files to BIG-IP / BIG-IQ via iControl REST or SCP |
+| [`doctor`](#7-myf5-doctor) | Run connectivity, DNS, egress, and credential diagnostics |
+| [`completion`](#8-myf5-completion) | Generate native shell autocompletion scripts (`bash`, `zsh`, `fish`) |
+| [`version`](#9-myf5-version) | Display application version and toolchain info |
 
 ---
 
 ## 1. `myf5 downloads`
 
-Browse the MyF5 software image catalog, query releases, and download images with live streaming progress and cryptographic checksum verification.
+Browse the MyF5 software image catalog, query releases, and download images with live streaming progress, cryptographic checksum verification, and optional post-download appliance push.
 
 ### Actions
 
@@ -74,15 +77,31 @@ Lists downloadable files, formatted sizes, and containers.
 myf5 downloads files BIG-IP big-ip_v17.x 17.1.1 "Virtual Edition"
 ```
 
-#### `get <family> <line> <version> <container> <file> [-o <path>]`
-Streams the specified software image directly to disk. Uses constant RAM (<10 MB) via `io.TeeReader` and validates SHA-256 integrity upon completion.
+#### `get <family> <line> <version> <container> <file> [-o <path>] [push-options...]`
+Streams the specified software image directly to disk. Uses constant RAM (<10 MB) via `io.TeeReader` and validates SHA-256 integrity upon completion. If post-download push options are provided, pushes the verified image directly to the target appliance.
+
 ```bash
+# Standard local download
 myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 "Virtual Edition" BIGIP-17.1.1-0.0.6.ALL.qcow2.tar.gz -o /var/tmp/bigip.qcow2.tar.gz
+
+# Download and push directly to BIG-IP appliance
+myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 "Base Software & ISO Releases" BIGIP-17.1.1-0.0.6.iso \
+    -o /var/tmp/BIGIP-17.1.1.iso \
+    --push 10.1.1.4 \
+    --push-method icontrol \
+    --push-dest /shared/images
 ```
 
 ### Options
-- `-o, --output <path>`: Destination file path for downloaded image.
+- `-o, --output <path>`: Destination file path for downloaded image (default: `~/Downloads/<filename>`).
 - `--profile <name>`: Select credentials profile from `~/.f5api_credentials` (default: `"default"`).
+- `--push <host>`: Target appliance host IP, FQDN, or URL to push to immediately following download verification.
+- `--push-method <icontrol|scp>`: Appliance transfer method (`icontrol` or `scp`, default: `icontrol`).
+- `--push-dest <path>`: Destination directory on appliance (e.g., `/shared/images` or `/shared/GeoIP`).
+- `--push-target <bigip|bigiq>`: Appliance operating system type (`BIG-IP` or `BIG-IQ`, default: `BIG-IP`).
+- `--push-user <user>`: Appliance administrative user (default: `$BIGIP_USER` / `$BIGIQ_USER` or `"admin"`).
+- `--push-port <port>`: Appliance HTTPS or SSH port (default: 443 for iControl REST, 22 for SCP).
+- `--push-key <key>`: Path to SSH private key for SCP transfer authentication.
 
 ---
 
@@ -134,12 +153,12 @@ myf5 ihealth upload /path/to/appliance.qkview "C1000234" "Initial triage bundle"
 
 ## 4. `myf5 bigip`
 
-Automate BIG-IP TMOS appliances over the iControl REST interface. Supports direct IP addressing, custom ports, and cloud/UDF external access proxies.
+Automate BIG-IP TMOS appliances over iControl REST or native Go SCP over SSH. Supports direct IP addressing, custom ports, and cloud/UDF external access proxies.
 
 ### Actions
 
 #### `ready <host> [--user <user>] [--port <port>]`
-Verifies management plane availability against `/mgmt/tm/sys/ready`.
+Verifies management plane availability against `/mgmt/tm/sys/ready` (with fallback to `/mgmt/shared/echo`).
 ```bash
 # Direct appliance IP
 myf5 bigip ready 10.1.1.4
@@ -154,14 +173,91 @@ Generates a complete, non-truncating (`-s0`) diagnostic QKView archive on the BI
 myf5 bigip qkview 10.1.1.4 --user admin
 ```
 
+#### `push <host> <file> [--method icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [--key <key>]`
+Pushes a local software image, engineering hotfix, or GeoDB archive to the BIG-IP appliance.
+```bash
+# Push ISO to /shared/images via iControl REST
+myf5 bigip push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --method icontrol --dest /shared/images
+
+# Push hotfix via native SCP (defaults to /shared/images for ISO/hotfix files)
+myf5 bigip push 10.1.1.4 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso --method scp
+
+# Push GeoDB update to /shared/GeoIP/
+myf5 bigip push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --dest /shared/GeoIP
+```
+
+#### `download <host> <remote-filename>`
+Downloads an existing diagnostic file or QKView from the appliance autodeploy store (`/mgmt/cm/autodeploy/qkview-downloads/`).
+```bash
+myf5 bigip download 10.1.1.4 qkview_10.1.1.4_1727760000.qkview
+```
+
 ### Options
 - `-u, --user <username>`: Administrative user (default: `$BIGIP_USER` or `"admin"`).
-- `-p, --port <port>`: Target HTTPS management port (default: 443).
-- **Authentication**: Set via `BIGIP_PASSWORD` environment variable, or enter securely when prompted via masked terminal input.
+- `-p, --port <port>`: HTTPS port for iControl (default: 443) or SSH port for SCP (default: 22).
+- `-m, --method <icontrol|scp>`: Transfer protocol (default: `icontrol`).
+- `-d, --dest <path>`: Destination directory on appliance (e.g., `/shared/images` or `/shared/GeoIP`).
+- `-k, --key <path>`: Private key path for SSH authentication during SCP transfers.
+- **Authentication**: Set via `BIGIP_PASSWORD` environment variable, SSH key / agent, or enter interactively at the masked terminal prompt.
 
 ---
 
-## 5. `myf5 doctor`
+## 5. `myf5 bigiq`
+
+Manage and orchestrate BIG-IQ Centralized Management appliances.
+
+### Actions
+
+#### `ready <host> [--user <user>] [--port <port>]`
+Checks BIG-IQ management plane availability against `/mgmt/tm/sys/ready` or `/mgmt/shared/echo`.
+```bash
+myf5 bigiq ready 192.0.2.50
+```
+
+#### `push <host> <file> [--method icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [--key <key>]`
+Uploads software images, hotfixes, or files to BIG-IQ central software repositories.
+```bash
+# Push to BIG-IQ central image repository via SCP
+myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --method scp --dest /shared/images
+
+# Push via iControl REST
+myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --method icontrol --dest /shared/images
+```
+
+### Options
+- `-u, --user <username>`: Administrative user (default: `$BIGIQ_USER`, `$BIGIP_USER`, or `"admin"`).
+- `-p, --port <port>`: Management HTTPS / SSH port.
+- `-m, --method <icontrol|scp>`: Transfer protocol (default: `icontrol`).
+- `-d, --dest <path>`: Remote directory on appliance.
+- `-k, --key <path>`: SSH private key for SCP transfer.
+- **Authentication**: Set via `BIGIQ_PASSWORD` (or `BIGIP_PASSWORD`), SSH key / agent, or enter interactively at the masked terminal prompt.
+
+---
+
+## 6. `myf5 push`
+
+Unified command to push software downloads, hotfixes, or packages to any BIG-IP or BIG-IQ instance.
+
+### Syntax
+```bash
+myf5 push <host> <file> [--method icontrol|scp] [--dest <path>] [--target bigip|bigiq] [--user <user>] [--port <port>] [--key <key>]
+```
+
+### Examples
+```bash
+# Push software image to BIG-IP via iControl REST
+myf5 push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --target bigip --dest /shared/images
+
+# Push software image to BIG-IQ repository via SCP
+myf5 push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --target bigiq --method scp --dest /shared/images
+
+# Push using specific SSH key
+myf5 push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --method scp --dest /shared/GeoIP --key ~/.ssh/f5_deploy
+```
+
+---
+
+## 7. `myf5 doctor`
 
 Pre-flight diagnostic audit that verifies local credentials, DNS resolution, and TCP port 443 egress to all authoritative F5 cloud endpoints.
 
@@ -175,7 +271,7 @@ Output audits:
 
 ---
 
-## 6. `myf5 completion`
+## 8. `myf5 completion`
 
 Generates tab autocompletion scripts for the specified shell.
 
@@ -204,9 +300,22 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
 
 ---
 
-## 7. `myf5 version`
+## 9. `myf5 version`
 
 Prints the compiled application version and target architecture.
 ```bash
 myf5 version
 ```
+
+---
+
+## 10. Process Exit Codes
+
+`myf5` returns standard POSIX exit codes to support reliable shell script branching and CI/CD pipelines:
+
+| Exit Code | Classification | Description |
+| :--- | :--- | :--- |
+| `0` | **Success** | Operation completed successfully and verified. |
+| `1` | **General Error** | Command syntax error, invalid arguments, network failure, missing credentials in non-interactive environment, or appliance error. |
+| `2` | **Zero-Secret Violation** | Security error triggered when prohibited credential flags (`--password`, `--client-secret`) are supplied on the command line. |
+| `130` | **Cancelled / Interrupted** | Execution aborted by user via `SIGINT` (Ctrl+C) or `SIGTERM`. |

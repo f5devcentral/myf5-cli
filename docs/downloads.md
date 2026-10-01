@@ -64,6 +64,74 @@ echo "==> GeoDB downloaded and verified: ${TARGET_DIR}/ip-geolocation-default.zi
 
 ---
 
+## End-to-End Download & Appliance Push in One Step
+
+Instead of executing download, checksum verification, and appliance file transfer as separate decoupled steps, `myf5 downloads get` natively supports post-download appliance push via `--push <host>`.
+
+### Cryptographic Integrity Guarantee
+When `--push` is specified:
+1. The payload streams from the official MyF5 CDN mirror to local disk with constant memory footprint (< 10 MB RAM).
+2. The SHA-256 hash is computed in real time via `io.TeeReader`.
+3. The downloaded image is validated against the authoritative SHA-256 checksum from the MyF5 catalog.
+4. **Only upon successful cryptographic validation**, `myf5` initiates the push to the target appliance. If the download checksum fails or is interrupted, the appliance transfer is aborted immediately.
+
+```
+MyF5 CDN ---> io.TeeReader ---> SHA-256 Checksum Verification
+                  │                          │
+                  ▼                          ▼ [Checksum Valid]
+          Local Disk Image        ------------------------> Stream to Appliance
+                                                             (iControl REST or SCP)
+```
+
+### Push Options on `myf5 downloads get`
+
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--push <host>` | *Required for push* | Target BIG-IP or BIG-IQ appliance IP, hostname, or URL. |
+| `--push-method <method>` | `icontrol` | Transfer protocol: `icontrol` (HTTPS) or `scp` (SSH). |
+| `--push-dest <path>` | `/shared/images` or `/var/tmp` | Remote directory on appliance (e.g., `/shared/images` or `/shared/GeoIP`). |
+| `--push-target <target>` | `BIG-IP` | Appliance operating system type: `BIG-IP` or `BIG-IQ`. |
+| `--push-user <user>` | `$BIGIP_USER` / `"admin"` | Appliance administrative user. |
+| `--push-port <port>` | `443` (iControl) / `22` (SCP) | Appliance management port. |
+| `--push-key <key>` | *Auto-detected* | SSH private key path for SCP authentication. |
+
+### Practical Examples
+
+#### 1. Download BIG-IP ISO and Push Directly to `/shared/images`
+```bash
+myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 \
+    "Base Software & ISO Releases" "BIGIP-17.1.1-0.0.6.iso" \
+    -o /var/tmp/BIGIP-17.1.1.iso \
+    --push 10.1.1.4 \
+    --push-method icontrol \
+    --push-dest /shared/images
+```
+
+#### 2. Automated Download & Push of Updated GeoDB Package
+```bash
+myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 \
+    "GeoLocationUpdates" "ip-geolocation-default.zip" \
+    -o /var/tmp/ip-geolocation-default.zip \
+    --push 10.1.1.4 \
+    --push-method scp \
+    --push-dest /shared/GeoIP
+```
+
+#### 3. Download Engineering Hotfix and Push to BIG-IQ Software Repository
+```bash
+myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 \
+    "Hotfixes & Patches" "Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso" \
+    -o /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso \
+    --push 192.0.2.50 \
+    --push-target bigiq \
+    --push-method scp \
+    --push-dest /shared/images
+```
+
+For complete technical details on appliance transfer mechanisms, refer to the [Appliance Push Guide](appliance_push.md).
+
+---
+
 ## High-Performance Streaming Pipeline
 
 Traditional HTTP clients buffer response payloads into system memory before writing to disk. For multi-gigabyte ISOs and disk images (2.5 GB to 10+ GB), this leads to high memory pressure or out-of-memory (OOM) faults.
