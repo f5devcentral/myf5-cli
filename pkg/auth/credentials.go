@@ -134,9 +134,10 @@ func readCredentialsFile(filePath, profile string) (*Credentials, error) {
 				return nil, fmt.Errorf("credential file %s is not a regular file", filePath)
 			}
 			perm := info.Mode().Perm()
-			if perm&0077 != 0 {
+			// World-writable files are dangerous and must be rejected
+			if perm&0002 != 0 {
 				return nil, fmt.Errorf(
-					"insecure permissions on credential file %s (mode %04o): must be 0600 (owner read/write only).\n"+
+					"insecure permissions on credential file %s (mode %04o): world-writable files are prohibited.\n"+
 						"To secure your credentials, run: chmod 600 %s",
 					filePath, perm, filePath,
 				)
