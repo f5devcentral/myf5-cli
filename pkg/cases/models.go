@@ -6,14 +6,19 @@ type CaseMetadataResponse struct {
 }
 
 // CaseSummary represents a brief overview of an F5 support case.
+//
+// Field tags follow GetCaseApiResponse in the F5 OpenAPI specification
+// (docs/openapi.json). Two earlier tags matched nothing in the payload and so
+// always decoded as empty: `severity` (the API returns `priority`, e.g.
+// "2 - Site At Risk") and `createdDate` (the API returns `dateOpened`).
 type CaseSummary struct {
-	CaseNumber  string `json:"caseNumber"`
-	Subject     string `json:"subject"`
-	Status      string `json:"status"`
-	Severity    string `json:"severity"`
-	CreatedDate string `json:"createdDate,omitempty"`
-	Product     string `json:"product,omitempty"`
-	Version     string `json:"version,omitempty"`
+	CaseNumber string `json:"caseNumber"`
+	Subject    string `json:"subject"`
+	Status     string `json:"status"`
+	Priority   string `json:"priority"`
+	DateOpened string `json:"dateOpened,omitempty"`
+	Product    string `json:"product,omitempty"`
+	Version    string `json:"version,omitempty"`
 }
 
 // ListCasesResponse is the response from GET /case-management/v1/cases.
