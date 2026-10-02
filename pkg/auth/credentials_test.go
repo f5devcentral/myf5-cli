@@ -3,6 +3,7 @@ package auth
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -60,6 +61,94 @@ func TestResolveCredentialsEnv(t *testing.T) {
 	if creds.ClientID != "env-client-id" || creds.ClientSecret != "env-client-secret" {
 		t.Errorf("unexpected credentials: %+v", creds)
 	}
+}
+
+// The `k` API usage key is a second credential, separate from the OAuth pair,
+// and is issued per entitlement. These cover each way it can be supplied, plus
+// its redaction.
+func TestResolveAPIKey(t *testing.T) {
+	t.Run("from environment alongside env client creds", func(t *testing.T) {
+		os.Setenv("F5_CLIENT_ID", "env-client-id")
+		os.Setenv("F5_CLIENT_SECRET", "env-client-secret")
+		os.Setenv("F5_API_KEY", "env-api-key")
+		defer func() {
+			os.Unsetenv("F5_CLIENT_ID")
+			os.Unsetenv("F5_CLIENT_SECRET")
+			os.Unsetenv("F5_API_KEY")
+		}()
+
+		creds, err := ResolveCredentials("default")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if creds.APIKey != "env-api-key" {
+			t.Errorf("APIKey = %q, want env-api-key", creds.APIKey)
+		}
+	})
+
+	t.Run("absent leaves APIKey empty so the client falls back", func(t *testing.T) {
+		os.Setenv("F5_CLIENT_ID", "env-client-id")
+		os.Setenv("F5_CLIENT_SECRET", "env-client-secret")
+		os.Unsetenv("F5_API_KEY")
+		defer func() {
+			os.Unsetenv("F5_CLIENT_ID")
+			os.Unsetenv("F5_CLIENT_SECRET")
+		}()
+
+		creds, err := ResolveCredentials("default")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if creds.APIKey != "" {
+			t.Errorf("APIKey = %q, want empty", creds.APIKey)
+		}
+	})
+
+	t.Run("from flat file", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), ".f5api_credentials")
+		content := []byte("client_id=file-id\nclient_secret=file-sec\napi_key=file-api-key\n")
+		if err := os.WriteFile(f, content, 0600); err != nil {
+			t.Fatal(err)
+		}
+		creds, err := readCredentialsFile(f, "default")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if creds.APIKey != "file-api-key" {
+			t.Errorf("APIKey = %q, want file-api-key", creds.APIKey)
+		}
+	})
+
+	t.Run("profile key overrides top-level, top-level serves other profiles", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "ini_creds")
+		content := []byte("api_key = shared-key\n\n[default]\nclient_id = d-id\nclient_secret = d-sec\n\n[prod]\nclient_id = p-id\nclient_secret = p-sec\napi_key = prod-only-key\n")
+		if err := os.WriteFile(f, content, 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		prod, err := readCredentialsFile(f, "prod")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if prod.APIKey != "prod-only-key" {
+			t.Errorf("prod APIKey = %q, want prod-only-key", prod.APIKey)
+		}
+
+		def, err := readCredentialsFile(f, "default")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if def.APIKey != "shared-key" {
+			t.Errorf("default APIKey = %q, want shared-key (top-level fallback)", def.APIKey)
+		}
+	})
+
+	t.Run("never appears in String output", func(t *testing.T) {
+		c := Credentials{ClientID: "id", ClientSecret: "sec", APIKey: "super-secret-key"}
+		if s := c.String(); strings.Contains(s, "super-secret-key") {
+			t.Errorf("String() leaked the API key: %s", s)
+		}
+	})
 }
 
 func TestReadCredentialsFile(t *testing.T) {

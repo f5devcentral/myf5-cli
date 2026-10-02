@@ -21,7 +21,19 @@ const (
 	// LegacySupportFQDN is the fallback gateway used prior to October 2.
 	LegacySupportFQDN = "support.apis.f5.com"
 
-	// LegacyKParam is the query rate-limiting parameter required ONLY on support.apis.f5.com.
+	// LegacyKParam is the fallback `k` API usage key, required ONLY on
+	// support.apis.f5.com.
+	//
+	// Despite the historical "rate-limiting parameter" description, F5 treats
+	// this as an API key: it is marked required on every support.apis.f5.com
+	// operation in the OpenAPI spec, and an unassociated value is rejected with
+	// HTTP 403 "The API Key to API association not exist." Keys are issued per
+	// entitlement from the MyF5 API Catalog, so this shared constant cannot be
+	// valid for arbitrary callers. Supply your own via F5_API_KEY or `api_key`
+	// in ~/.f5api_credentials.
+	//
+	// This value is present in the repository's git history and in every
+	// released binary; treat it as compromised and do not reuse it.
 	LegacyKParam = "UKKD3Vxv7NHrM3QmYk8Fk2mZnLtljAKX"
 )
 
@@ -31,6 +43,11 @@ type Client struct {
 	BaseFQDN     string
 	Token        string
 	AutoFallback bool
+
+	// APIKey is the `k` usage key sent only on the legacy support.apis.f5.com
+	// fallback path. Empty falls back to LegacyKParam, which is a dead shared
+	// constant — see its doc comment.
+	APIKey string
 }
 
 // String implements fmt.Stringer to ensure bearer tokens are never leaked in logs.
@@ -50,8 +67,17 @@ func (c *Client) GoString() string {
 	return c.String()
 }
 
-// NewClient initializes a MyF5 Downloads API client.
+// NewClient initializes a MyF5 Downloads API client without an explicit API
+// usage key. The key matters only on the legacy fallback path; prefer
+// NewClientWithKey.
 func NewClient(token string, baseFQDN string) *Client {
+	return NewClientWithKey(token, baseFQDN, "")
+}
+
+// NewClientWithKey initializes a client carrying the caller's own `k` API
+// usage key for the legacy fallback. An empty apiKey falls back to
+// LegacyKParam.
+func NewClientWithKey(token, baseFQDN, apiKey string) *Client {
 	if baseFQDN == "" {
 		baseFQDN = DefaultDownloadsFQDN
 	}
@@ -60,6 +86,7 @@ func NewClient(token string, baseFQDN string) *Client {
 		BaseFQDN:     baseFQDN,
 		Token:        token,
 		AutoFallback: true,
+		APIKey:       apiKey,
 	}
 }
 
@@ -174,7 +201,11 @@ func (c *Client) doGetWithFallback(ctx context.Context, path string) ([]byte, er
 }
 
 func (c *Client) doLegacyFallback(ctx context.Context, path string) ([]byte, error) {
-	fallbackURL := fmt.Sprintf("https://%s%s?k=%s", LegacySupportFQDN, path, LegacyKParam)
+	apiKey := c.APIKey
+	if apiKey == "" {
+		apiKey = LegacyKParam
+	}
+	fallbackURL := fmt.Sprintf("https://%s%s?k=%s", LegacySupportFQDN, path, apiKey)
 	redactedURL := fmt.Sprintf("https://%s%s?k=[REDACTED]", LegacySupportFQDN, path)
 
 	for attempt := 0; attempt < 3; attempt++ {

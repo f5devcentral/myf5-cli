@@ -69,14 +69,32 @@ func CheckNoCLISecrets(args []string) error {
 type Credentials struct {
 	ClientID     string
 	ClientSecret string
+
+	// APIKey is the "API usage key" sent as the required `k` query parameter
+	// on support.apis.f5.com endpoints. It is a SECOND credential, distinct
+	// from the OAuth bearer token built from ClientID/ClientSecret: the F5
+	// OpenAPI spec marks `k` required on every Support Case operation and
+	// defines bearerAuth separately. A bad token yields 401; a `k` that is not
+	// associated with the caller's API entitlement yields 403 with
+	// "The API Key to API association not exist."
+	//
+	// It is issued per entitlement from the MyF5 API Catalog, so it cannot be
+	// a single shared constant. Empty means "fall back to the package default".
+	APIKey string
 }
 
 // String implements fmt.Stringer to ensure secrets are never leaked into logs or stdout.
 func (c Credentials) String() string {
-	if c.ClientSecret != "" {
-		return fmt.Sprintf("Credentials{ClientID: %q, ClientSecret: [REDACTED]}", c.ClientID)
+	// APIKey is a credential in its own right and must be redacted alongside
+	// ClientSecret, never printed even in part.
+	apiKey := "[EMPTY]"
+	if c.APIKey != "" {
+		apiKey = "[REDACTED]"
 	}
-	return fmt.Sprintf("Credentials{ClientID: %q}", c.ClientID)
+	if c.ClientSecret != "" {
+		return fmt.Sprintf("Credentials{ClientID: %q, ClientSecret: [REDACTED], APIKey: %s}", c.ClientID, apiKey)
+	}
+	return fmt.Sprintf("Credentials{ClientID: %q, APIKey: %s}", c.ClientID, apiKey)
 }
 
 // GoString implements fmt.GoStringer.
@@ -104,10 +122,17 @@ func ResolveCredentials(profile string) (*Credentials, error) {
 		clientSecret = os.Getenv("IHEALTH_CLIENT_SECRET")
 	}
 
+	// The API usage key resolves independently of the OAuth pair: a user may
+	// supply it by environment variable while keeping client credentials in a
+	// file, or vice versa. It is therefore read here and also looked up in the
+	// credentials file below, with the environment taking precedence.
+	apiKey := os.Getenv("F5_API_KEY")
+
 	if clientID != "" && clientSecret != "" {
 		return &Credentials{
 			ClientID:     clientID,
 			ClientSecret: clientSecret,
+			APIKey:       apiKey,
 		}, nil
 	}
 
@@ -121,6 +146,11 @@ func ResolveCredentials(profile string) (*Credentials, error) {
 
 		for _, path := range paths {
 			if creds, err := readCredentialsFile(path, profile); err == nil && creds != nil {
+				// Environment wins over the file, matching the precedence used
+				// for the OAuth pair above.
+				if apiKey != "" {
+					creds.APIKey = apiKey
+				}
 				return creds, nil
 			}
 		}
@@ -213,7 +243,13 @@ func readCredentialsFile(filePath, profile string) (*Credentials, error) {
 		cid := lookupKey(section, "client_id", "clientid", "id")
 		csec := lookupKey(section, "client_secret", "clientsecret", "secret")
 		if cid != "" && csec != "" {
-			return &Credentials{ClientID: cid, ClientSecret: csec}, nil
+			// A profile may carry its own api_key; fall back to any top-level
+			// one so a single key can serve every profile.
+			ak := lookupKey(section, "api_key", "apikey", "k")
+			if ak == "" {
+				ak = lookupKey(kvStore, "api_key", "apikey", "k")
+			}
+			return &Credentials{ClientID: cid, ClientSecret: csec, APIKey: ak}, nil
 		}
 	}
 
@@ -221,7 +257,8 @@ func readCredentialsFile(filePath, profile string) (*Credentials, error) {
 	cid := lookupKey(kvStore, "client_id", "clientid", "f5_client_id")
 	csec := lookupKey(kvStore, "client_secret", "clientsecret", "f5_client_secret")
 	if cid != "" && csec != "" {
-		return &Credentials{ClientID: cid, ClientSecret: csec}, nil
+		ak := lookupKey(kvStore, "api_key", "apikey", "k", "f5_api_key")
+		return &Credentials{ClientID: cid, ClientSecret: csec, APIKey: ak}, nil
 	}
 
 	return nil, fmt.Errorf("no credentials found in %s for profile %s", filePath, profile)

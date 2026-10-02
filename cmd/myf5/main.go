@@ -253,7 +253,7 @@ func handleDownloads(ctx context.Context, args []string) {
 		}
 		token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
 		checkErr(ctx, err, "Authentication failed")
-		return downloads.NewClient(token, "")
+		return downloads.NewClientWithKey(token, "", creds.APIKey)
 	}
 
 	switch action {
@@ -978,7 +978,7 @@ func handleCases(ctx context.Context, args []string) {
 	}
 	token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
 	checkErr(ctx, err, "Authentication failed")
-	client := cases.NewClient(token, "")
+	client := cases.NewClientWithKey(token, "", creds.APIKey)
 
 	switch action {
 	case "list":
@@ -986,7 +986,9 @@ func handleCases(ctx context.Context, args []string) {
 		checkErr(ctx, err, "Failed to list cases")
 		fmt.Println("MyF5 Support Cases:")
 		for _, c := range resp.Data {
-			fmt.Printf("  Case #%-10s [%-8s] [%-6s] %s\n", c.CaseNumber, c.Status, c.Severity, c.Subject)
+			// Priority values are long ("2 - Site At Risk"), so the column is
+			// wider than the old 6-wide severity field it replaced.
+			fmt.Printf("  Case #%-10s [%-20s] [%-18s] %s\n", c.CaseNumber, c.Status, c.Priority, c.Subject)
 		}
 	case "metadata":
 		resp, err := client.GetMetadata(ctx)

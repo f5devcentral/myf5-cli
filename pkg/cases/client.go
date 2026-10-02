@@ -16,7 +16,21 @@ import (
 
 const (
 	DefaultSupportFQDN = "support.apis.f5.com"
-	DefaultKParam      = "UKKD3Vxv7NHrM3QmYk8Fk2mZnLtljAKX"
+
+	// DefaultKParam is a legacy fallback for the required `k` API usage key.
+	//
+	// It is NOT a usable default: the key is issued per entitlement from the
+	// MyF5 API Catalog, so a single shared constant cannot be valid for every
+	// caller. Requests carrying it are rejected with HTTP 403 and
+	// "The API Key to API association not exist."
+	//
+	// It is retained only so existing setups fail the same way they did before
+	// the key became configurable, rather than changing error shape. Supply a
+	// real key via F5_API_KEY or `api_key` in ~/.f5api_credentials.
+	//
+	// This value is present in the repository's git history and in every
+	// released binary; treat it as compromised and do not reuse it.
+	DefaultKParam = "UKKD3Vxv7NHrM3QmYk8Fk2mZnLtljAKX"
 )
 
 // Client interacts with MyF5 Support Case Management APIs.
@@ -44,16 +58,27 @@ func (c *Client) GoString() string {
 	return c.String()
 }
 
-// NewClient initializes a new MyF5 Support Case client.
+// NewClient initializes a new MyF5 Support Case client using the legacy
+// fallback API usage key. Prefer NewClientWithKey, which accepts the caller's
+// own key; see DefaultKParam for why the fallback cannot work.
 func NewClient(token string, baseFQDN string) *Client {
+	return NewClientWithKey(token, baseFQDN, "")
+}
+
+// NewClientWithKey initializes a client with an explicit `k` API usage key.
+// An empty apiKey falls back to DefaultKParam.
+func NewClientWithKey(token, baseFQDN, apiKey string) *Client {
 	if baseFQDN == "" {
 		baseFQDN = DefaultSupportFQDN
+	}
+	if apiKey == "" {
+		apiKey = DefaultKParam
 	}
 	return &Client{
 		HTTPClient: client.NewSecureHTTPClient(30 * time.Second),
 		BaseFQDN:   baseFQDN,
 		Token:      token,
-		KParam:     DefaultKParam,
+		KParam:     apiKey,
 	}
 }
 
@@ -72,12 +97,31 @@ func (c *Client) GetMetadata(ctx context.Context) (*CaseMetadataResponse, error)
 	return &resp, nil
 }
 
-// ListCases returns active (or all) support cases.
+// Case list `type` values, per the caseTypeParam enum in the F5 OpenAPI
+// specification (docs/openapi.json). `type` is REQUIRED on
+// GET /case-management/v1/cases; omitting it returns
+// 400 "Missing type in the query params".
+const (
+	TypeAllCases       = "ALL_CASES"
+	TypeAllOpenCases   = "ALL_OPEN_CASES"
+	TypeAllClosedCases = "ALL_CLOSED_CASES"
+	TypeMyOpenCases    = "MY_OPEN_CASES"
+	TypeMyClosedCases  = "MY_CLOSED_CASES"
+	TypeMyAllCases     = "MY_ALL_CASES"
+)
+
+// ListCases returns support cases. showClosed selects ALL_CASES (open and
+// closed) rather than ALL_OPEN_CASES.
+//
+// Note that `status` is NOT the way to widen the result set: per the spec it
+// takes comma-separated metadata values such as "New,Solving". An earlier
+// implementation sent `status=all`, which is not a valid status.
 func (c *Client) ListCases(ctx context.Context, showClosed bool) (*ListCasesResponse, error) {
-	path := "/case-management/v1/cases"
+	caseType := TypeAllOpenCases
 	if showClosed {
-		path += "?status=all"
+		caseType = TypeAllCases
 	}
+	path := "/case-management/v1/cases?type=" + caseType
 	bodyBytes, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -179,6 +223,26 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// A 403 here is nearly always the `k` API usage key rather than the
+		// bearer token (a bad token returns 401). Say so, because the raw API
+		// message — "The API Key to API association not exist" — does not make
+		// it obvious which of the two credentials is at fault, nor that the
+		// built-in fallback key cannot work for anyone.
+		if resp.StatusCode == http.StatusForbidden {
+			hint := "the API usage key (`k`) was rejected for this API"
+			if c.KParam == DefaultKParam {
+				hint = "no API usage key is configured, so the non-functional built-in fallback was sent"
+			}
+			return nil, fmt.Errorf(
+				"request to %s failed with status 403: %s\n"+
+					"%s.\n"+
+					"This key is separate from your OAuth client credentials and is issued per entitlement:\n"+
+					"  1. Log in to https://my.f5.com\n"+
+					"  2. Request API Catalog access from F5 Support\n"+
+					"  3. Create an API key, then set F5_API_KEY or add `api_key = <key>` to ~/.f5api_credentials",
+				redactedURL, string(respBytes), hint,
+			)
+		}
 		return nil, fmt.Errorf("request to %s failed with status %d: %s", redactedURL, resp.StatusCode, string(respBytes))
 	}
 
