@@ -47,6 +47,23 @@ func TestGenerateZsh(t *testing.T) {
 	if !strings.Contains(out, "_myf5") {
 		t.Errorf("zsh completion script missing _myf5 function")
 	}
+
+	// The script must REGISTER the completion function, not invoke it.
+	//
+	// A bare trailing `_myf5 "$@"` calls the function at source time, outside
+	// any completion context, so the first _arguments call aborts with
+	//   _arguments:comparguments: can only be called from completion function
+	// and tab completion never works. Registration via compdef is the correct
+	// idiom. Checking only for the presence of "#compdef"/"_myf5" does not
+	// catch this — both survive the broken form — so assert on the call.
+	if !strings.Contains(out, "compdef _myf5 myf5") {
+		t.Errorf("zsh completion script must register via 'compdef _myf5 myf5'")
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == `_myf5 "$@"` {
+			t.Errorf("zsh completion script invokes _myf5 at source time; it must only define and register it")
+		}
+	}
 }
 
 func TestGenerateFish(t *testing.T) {

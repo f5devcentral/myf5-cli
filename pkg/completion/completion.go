@@ -316,7 +316,18 @@ _myf5() {
     esac
 }
 
-_myf5 "$@"
+# Register the completion function against the command.
+#
+# Do NOT call _myf5 directly here. The function body uses _arguments,
+# _describe and friends, which are only valid inside a completion context;
+# invoking it at source time fails with
+#   _arguments:comparguments: can only be called from completion function
+#
+# When this file is autoloaded from $fpath, the leading #compdef tag does the
+# registration and compdef is not defined as a command, so guard on it.
+if (( $+functions[compdef] )); then
+    compdef _myf5 myf5
+fi
 `
 	_, err := io.WriteString(w, script)
 	return err

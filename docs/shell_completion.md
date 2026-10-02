@@ -8,10 +8,25 @@
 
 ### 1. Zsh (Default on macOS)
 
+> [!IMPORTANT]
+> **The zsh completion system must be initialised first.** The generated script uses `_arguments`, `_describe`, `_files` and `_hosts`, which do not exist until `compinit` has run. Sourcing it in a shell without `compinit` fails with:
+>
+> ```
+> _myf5:16: command not found: _arguments
+> ```
+>
+> Most interactive zsh setups (Oh My Zsh, prezto, the macOS default `~/.zshrc`) already run `compinit`. If yours does not, run `autoload -Uz compinit && compinit` first, or add it to `~/.zshrc` **above** any line that sources completions.
+
 #### Current Terminal Session
 To test autocompletion immediately in the current terminal:
 ```zsh
+autoload -Uz compinit && compinit    # only if your shell has not already run it
 source <(myf5 completion zsh)
+```
+
+If `myf5` is not yet on your `PATH`, invoke the binary by path — note that the inner command must still resolve:
+```zsh
+source <(./bin/myf5 completion zsh)
 ```
 
 #### Persistent Setup (Recommended)
@@ -19,10 +34,12 @@ Add autocompletion to `~/.zshrc`:
 
 ```zsh
 # Option A: Sourced dynamically in ~/.zshrc
+# Must appear AFTER compinit, or the completion functions will not exist yet.
 echo 'source <(myf5 completion zsh)' >> ~/.zshrc
 source ~/.zshrc
 
-# Option B: Placed in your zsh completion functions directory
+# Option B: Placed in your zsh completion functions directory (preferred)
+# zsh autoloads it on demand, so ordering relative to compinit does not matter.
 mkdir -p "${fpath[1]}"
 myf5 completion zsh > "${fpath[1]}/_myf5"
 ```
