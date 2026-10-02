@@ -91,6 +91,9 @@ make cross-compile
 
 In accordance with the **Zero-Secret CLI Policy**, secret flags are prohibited on the command line. Provide credentials using either method:
 
+> [!IMPORTANT]
+> **Don't have a `client_id` and `client_secret` yet?** They are issued from MyF5, but only after your account is granted API Catalog access. In short: log in at [my.f5.com](https://my.f5.com), request API Catalog access from F5 Support, then create an API key once the grant lands. Full steps are in [Obtaining API Credentials](./docs/credentials.md#obtaining-api-credentials).
+
 ### 1. `~/.f5api_credentials` (Recommended for Local Dev)
 Create `~/.f5api_credentials` with mode `0600`:
 

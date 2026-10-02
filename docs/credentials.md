@@ -21,6 +21,55 @@ Store secrets in ~/.f5api_credentials or export F5_CLIENT_ID / F5_CLIENT_SECRET.
 
 ---
 
+## Obtaining API Credentials
+
+Before any of the storage options below will work, you need an API key — a `client_id` and `client_secret` pair — issued from your MyF5 account. Access is not enabled by default; it is granted per account on request.
+
+1. **Log in to MyF5.** Sign in at [my.f5.com](https://my.f5.com) with the account associated with your organization's F5 entitlements.
+2. **Request access to the API Catalog.** Raise a request with F5 Support asking for API Catalog access on your account. This is an entitlement grant rather than a self-service toggle, so it is not instantaneous — expect it to be handled on support's normal turnaround.
+3. **Create an API key.** Once support confirms the grant, the API Catalog becomes available in MyF5. Create a key there; it is issued as a `client_id` and `client_secret` pair.
+
+The `client_secret` is shown once at creation. Copy it straight into `~/.f5api_credentials` or your CI secret store — if it is lost, generate a new key rather than attempting to recover the old one.
+
+### The `k` API usage key
+
+Support Case and legacy Downloads endpoints on `support.apis.f5.com` require a **second** credential alongside the OAuth token: an "API usage key" sent as the `k` query parameter. F5's OpenAPI specification marks it required on every such operation, independently of bearer authentication.
+
+It is issued with the same API Catalog entitlement as your client credentials. Supply it as `api_key`:
+
+```ini
+[default]
+client_id = your_oauth2_client_id
+client_secret = your_oauth2_client_secret
+api_key = your_api_usage_key
+```
+
+or by environment variable, which takes precedence:
+
+```bash
+export F5_API_KEY="your_api_usage_key"
+```
+
+An `api_key` at the top level of the file applies to every profile; one inside a profile section overrides it.
+
+> [!WARNING]
+> `myf5` carries a built-in fallback key for backward compatibility, but **it does not work** — it is not associated with any current entitlement. Without your own key, Support Case commands fail with:
+> ```
+> 403: {"message":"The API Key to API association not exist."}
+> ```
+> Note that this is a `403`, distinct from the `401` you would see from a bad OAuth token. If you get a 403 where the token is known good, the `k` key is the cause.
+
+> [!NOTE]
+> These credentials authenticate to the F5 **cloud** APIs — Downloads, Support Cases, and iHealth. They are unrelated to BIG-IP and BIG-IQ appliance credentials, which are covered in [§3](#3-big-ip--big-iq-appliance-credentials) below and are never issued through MyF5.
+
+Verify a new key end to end with:
+
+```bash
+myf5 doctor
+```
+
+---
+
 ## Credential Storage Options
 
 ### 1. Credentials File (`~/.f5api_credentials`)
