@@ -107,19 +107,37 @@ func (c Credentials) GoString() string {
 // 2. ~/.f5api_credentials (primary configuration file)
 // 3. ~/.ihealth_credentials (legacy fallback file)
 func ResolveCredentials(profile string) (*Credentials, error) {
+	return ResolveCredentialsForService(profile, "")
+}
+
+// ResolveCredentialsForService resolves credentials for a specific F5 service.
+//
+// Services differ in the OAuth scopes their clients are granted — iHealth
+// requires the "ihealth" scope, which a general MyF5 client is not given, so
+// reusing one client across both fails with
+//
+//	403 "Client has not been granted scopes: ihealth"
+//
+// A non-empty service selects "<SERVICE>_CLIENT_ID" / "<SERVICE>_CLIENT_SECRET"
+// in the environment and "<service>_client_id" / "<service>_client_secret" in
+// the credentials file, each falling back to the general pair when absent.
+func ResolveCredentialsForService(profile, service string) (*Credentials, error) {
 	if profile == "" {
 		profile = "default"
 	}
 
-	// 1. Check environment variables
-	clientID := os.Getenv("F5_CLIENT_ID")
-	if clientID == "" {
-		clientID = os.Getenv("IHEALTH_CLIENT_ID")
+	// 1. Check environment variables, service-specific first.
+	var clientID, clientSecret string
+	if service != "" {
+		up := strings.ToUpper(service)
+		clientID = os.Getenv(up + "_CLIENT_ID")
+		clientSecret = os.Getenv(up + "_CLIENT_SECRET")
 	}
-
-	clientSecret := os.Getenv("F5_CLIENT_SECRET")
+	if clientID == "" {
+		clientID = os.Getenv("F5_CLIENT_ID")
+	}
 	if clientSecret == "" {
-		clientSecret = os.Getenv("IHEALTH_CLIENT_SECRET")
+		clientSecret = os.Getenv("F5_CLIENT_SECRET")
 	}
 
 	// The API usage key resolves independently of the OAuth pair: a user may
@@ -145,7 +163,7 @@ func ResolveCredentials(profile string) (*Credentials, error) {
 		}
 
 		for _, path := range paths {
-			if creds, err := readCredentialsFile(path, profile); err == nil && creds != nil {
+			if creds, err := readCredentialsFile(path, profile, service); err == nil && creds != nil {
 				// Environment wins over the file, matching the precedence used
 				// for the OAuth pair above.
 				if apiKey != "" {
@@ -165,7 +183,11 @@ func ResolveCredentials(profile string) (*Credentials, error) {
 }
 
 // readCredentialsFile parses KEY=VALUE or INI format credentials files.
-func readCredentialsFile(filePath, profile string) (*Credentials, error) {
+//
+// servicePrefix, when non-empty, causes "<prefix>_client_id" /
+// "<prefix>_client_secret" to be preferred over the unprefixed names, so a
+// single file can hold credentials for services with different OAuth scopes.
+func readCredentialsFile(filePath, profile, servicePrefix string) (*Credentials, error) {
 	if runtime.GOOS != "windows" {
 		info, err := os.Stat(filePath)
 		if err == nil {
@@ -238,10 +260,23 @@ func readCredentialsFile(filePath, profile string) (*Credentials, error) {
 		return ""
 	}
 
+	// A service prefix lets one file hold credentials for several F5 services
+	// whose OAuth clients are granted different scopes — iHealth in
+	// particular needs the "ihealth" scope, which the general MyF5 client is
+	// not granted. Prefixed keys are preferred, with the unprefixed pair as
+	// the fallback so existing single-client files keep working.
+	cidNames := []string{"client_id", "clientid", "id"}
+	csecNames := []string{"client_secret", "clientsecret", "secret"}
+	if servicePrefix != "" {
+		p := strings.ToLower(servicePrefix) + "_"
+		cidNames = append([]string{p + "client_id", p + "clientid"}, cidNames...)
+		csecNames = append([]string{p + "client_secret", p + "clientsecret"}, csecNames...)
+	}
+
 	targetProfile := strings.ToLower(profile)
 	if section, exists := profileStore[targetProfile]; exists {
-		cid := lookupKey(section, "client_id", "clientid", "id")
-		csec := lookupKey(section, "client_secret", "clientsecret", "secret")
+		cid := lookupKey(section, cidNames...)
+		csec := lookupKey(section, csecNames...)
 		if cid != "" && csec != "" {
 			// A profile may carry its own api_key; fall back to any top-level
 			// one so a single key can serve every profile.
@@ -254,8 +289,8 @@ func readCredentialsFile(filePath, profile string) (*Credentials, error) {
 	}
 
 	// Fallback to top-level key=value format (e.g. standard ~/.f5api_credentials)
-	cid := lookupKey(kvStore, "client_id", "clientid", "f5_client_id")
-	csec := lookupKey(kvStore, "client_secret", "clientsecret", "f5_client_secret")
+	cid := lookupKey(kvStore, append(cidNames, "f5_client_id")...)
+	csec := lookupKey(kvStore, append(csecNames, "f5_client_secret")...)
 	if cid != "" && csec != "" {
 		ak := lookupKey(kvStore, "api_key", "apikey", "k", "f5_api_key")
 		return &Credentials{ClientID: cid, ClientSecret: csec, APIKey: ak}, nil

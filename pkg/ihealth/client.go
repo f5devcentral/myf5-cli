@@ -18,9 +18,24 @@ import (
 
 const (
 	// DefaultIHealthFQDN represents the standard iHealth API gateway hostname.
+	// F5 article K000130498 uses this host in its worked example.
 	DefaultIHealthFQDN = "ihealth2-api.f5.com"
 	// PrimaryIHealthFQDN represents the primary authoritative iHealth API gateway hostname.
 	PrimaryIHealthFQDN = "ihealth-api.f5.com"
+
+	// QKViewsPath is the QKView collection path.
+	//
+	// There is NO version segment. An earlier value of
+	// "/qkview-analyzer/api/v1/qkviews" returned
+	//   404 "The requested resource is not available"
+	// because the API versions by Accept header, not by URL path
+	// (K000130498).
+	QKViewsPath = "/qkview-analyzer/api/qkviews"
+
+	// IHealthAccept is the vendor media type the iHealth API requires.
+	// Requesting "application/json" is what the version segment above was
+	// compensating for; the API selects its representation from this header.
+	IHealthAccept = "application/vnd.f5.ihealth.api"
 )
 
 // UploadProgressCallback reports transferred bytes and total bytes during file upload.
@@ -148,7 +163,7 @@ func (c *Client) UploadQKViewWithProgress(ctx context.Context, filePath, caseNum
 		fqdn = strings.TrimPrefix(fqdn, "https://")
 	}
 
-	uploadURL := fmt.Sprintf("%s://%s/qkview-analyzer/api/v1/qkviews", scheme, fqdn)
+	uploadURL := fmt.Sprintf("%s://%s%s", scheme, fqdn, QKViewsPath)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, pr)
 	if err != nil {
 		_ = pr.Close()
@@ -157,7 +172,7 @@ func (c *Client) UploadQKViewWithProgress(ctx context.Context, filePath, caseNum
 
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", IHealthAccept)
 	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
 
 	resp, err := c.HTTPClient.Do(req)
@@ -193,14 +208,14 @@ func (c *Client) ListQKViews(ctx context.Context) ([]QKViewSummary, error) {
 		fqdn = strings.TrimPrefix(fqdn, "https://")
 	}
 
-	listURL := fmt.Sprintf("%s://%s/qkview-analyzer/api/v1/qkviews", scheme, fqdn)
+	listURL := fmt.Sprintf("%s://%s%s", scheme, fqdn, QKViewsPath)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create list request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", IHealthAccept)
 	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
 
 	resp, err := c.HTTPClient.Do(req)

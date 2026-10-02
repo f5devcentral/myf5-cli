@@ -15,8 +15,15 @@ func TestUploadQKView(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
-		if r.URL.Path != "/qkview-analyzer/api/v1/qkviews" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
+		// No "v1" segment: the live API 404s on /api/v1/qkviews. This test
+		// previously pinned that broken path, so it passed while the command
+		// could not work at all. Assert the documented contract (K000130498)
+		// rather than whatever the code happened to send.
+		if r.URL.Path != QKViewsPath {
+			t.Errorf("path = %s, want %s", r.URL.Path, QKViewsPath)
+		}
+		if got := r.Header.Get("Accept"); got != IHealthAccept {
+			t.Errorf("Accept = %q, want %q (the API versions by media type, not URL)", got, IHealthAccept)
 		}
 		if r.Header.Get("Authorization") != "Bearer test-tok" {
 			t.Errorf("unexpected auth header")

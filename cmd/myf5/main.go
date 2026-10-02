@@ -1020,7 +1020,9 @@ func handleIHealth(ctx context.Context, args []string) {
 
 	action := args[0]
 
-	creds, err := auth.ResolveCredentials("default")
+	// iHealth needs an OAuth client granted the "ihealth" scope, which is
+	// usually a different client from the general MyF5 one.
+	creds, err := auth.ResolveCredentialsForService("default", "ihealth")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
 		os.Exit(1)

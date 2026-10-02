@@ -110,7 +110,7 @@ func TestResolveAPIKey(t *testing.T) {
 		if err := os.WriteFile(f, content, 0600); err != nil {
 			t.Fatal(err)
 		}
-		creds, err := readCredentialsFile(f, "default")
+		creds, err := readCredentialsFile(f, "default", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -126,7 +126,7 @@ func TestResolveAPIKey(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		prod, err := readCredentialsFile(f, "prod")
+		prod, err := readCredentialsFile(f, "prod", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -134,7 +134,7 @@ func TestResolveAPIKey(t *testing.T) {
 			t.Errorf("prod APIKey = %q, want prod-only-key", prod.APIKey)
 		}
 
-		def, err := readCredentialsFile(f, "default")
+		def, err := readCredentialsFile(f, "default", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -151,6 +151,72 @@ func TestResolveAPIKey(t *testing.T) {
 	})
 }
 
+// iHealth's OAuth client is granted the "ihealth" scope, which the general
+// MyF5 client is not; reusing one client for both fails with
+// 403 "Client has not been granted scopes: ihealth". One credentials file
+// therefore has to hold both pairs, keyed by service prefix.
+func TestResolveCredentialsForService(t *testing.T) {
+	t.Run("prefixed keys win over unprefixed", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), ".f5api_credentials")
+		content := []byte("client_id=general-id\nclient_secret=general-sec\n" +
+			"ihealth_client_id=ih-id\nihealth_client_secret=ih-sec\n")
+		if err := os.WriteFile(f, content, 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		ih, err := readCredentialsFile(f, "default", "ihealth")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ih.ClientID != "ih-id" || ih.ClientSecret != "ih-sec" {
+			t.Errorf("ihealth creds = %q/%q, want ih-id/ih-sec", ih.ClientID, ih.ClientSecret)
+		}
+
+		gen, err := readCredentialsFile(f, "default", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if gen.ClientID != "general-id" {
+			t.Errorf("general creds = %q, want general-id", gen.ClientID)
+		}
+	})
+
+	t.Run("falls back to unprefixed when service keys absent", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), ".f5api_credentials")
+		if err := os.WriteFile(f, []byte("client_id=only-id\nclient_secret=only-sec\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		c, err := readCredentialsFile(f, "default", "ihealth")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if c.ClientID != "only-id" {
+			t.Errorf("ClientID = %q, want only-id fallback", c.ClientID)
+		}
+	})
+
+	t.Run("service environment variables win", func(t *testing.T) {
+		os.Setenv("F5_CLIENT_ID", "env-general")
+		os.Setenv("F5_CLIENT_SECRET", "env-general-sec")
+		os.Setenv("IHEALTH_CLIENT_ID", "env-ih")
+		os.Setenv("IHEALTH_CLIENT_SECRET", "env-ih-sec")
+		defer func() {
+			os.Unsetenv("F5_CLIENT_ID")
+			os.Unsetenv("F5_CLIENT_SECRET")
+			os.Unsetenv("IHEALTH_CLIENT_ID")
+			os.Unsetenv("IHEALTH_CLIENT_SECRET")
+		}()
+
+		c, err := ResolveCredentialsForService("default", "ihealth")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if c.ClientID != "env-ih" || c.ClientSecret != "env-ih-sec" {
+			t.Errorf("creds = %q/%q, want env-ih/env-ih-sec", c.ClientID, c.ClientSecret)
+		}
+	})
+}
+
 func TestReadCredentialsFile(t *testing.T) {
 	tempDir := t.TempDir()
 	kvFile := filepath.Join(tempDir, ".f5api_credentials")
@@ -159,7 +225,7 @@ func TestReadCredentialsFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	creds, err := readCredentialsFile(kvFile, "default")
+	creds, err := readCredentialsFile(kvFile, "default", "")
 	if err != nil {
 		t.Fatalf("unexpected error reading kv file: %v", err)
 	}
@@ -174,7 +240,7 @@ func TestReadCredentialsFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	credsProd, err := readCredentialsFile(iniFile, "prod")
+	credsProd, err := readCredentialsFile(iniFile, "prod", "")
 	if err != nil {
 		t.Fatalf("unexpected error reading ini prod: %v", err)
 	}
