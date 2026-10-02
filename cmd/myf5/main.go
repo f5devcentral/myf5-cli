@@ -999,9 +999,24 @@ func handleCases(ctx context.Context, args []string) {
 			fmt.Fprintln(os.Stderr, "Usage: myf5 cases comment <case-number> <note>")
 			os.Exit(1)
 		}
-		_, err := client.AddComment(ctx, args[1], args[2])
+		resp, err := client.AddComment(ctx, args[1], args[2])
 		checkErr(ctx, err, "Failed to add comment")
-		fmt.Println("Comment added successfully.")
+		// The API carries an isError flag in the body, so a 2xx does not by
+		// itself mean the comment landed. Discarding the response here would
+		// report success for a server-side failure.
+		if resp.IsError {
+			msg := resp.Message
+			if msg == "" {
+				msg = "the API reported an error without a message"
+			}
+			fmt.Fprintf(os.Stderr, "[ERROR] Failed to add comment: %s\n", msg)
+			os.Exit(1)
+		}
+		if resp.Data.CaseNumber != "" {
+			fmt.Printf("Comment added to case %s (updated %s).\n", resp.Data.CaseNumber, resp.Data.UpdatedDate)
+		} else {
+			fmt.Println("Comment added successfully.")
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown cases action '%s'\n", action)
 		os.Exit(1)

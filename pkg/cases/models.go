@@ -67,9 +67,24 @@ type CreateCaseResponse struct {
 	} `json:"links,omitempty"`
 }
 
-// AddCommentResponse is the response from POST /case-management/v1/cases/{caseNumber}/notes.
+// AddCommentResponse is the response from
+// PATCH /case-management/v1/cases/{caseNumber}.
+//
+// The previous model read data.id, which no documented response returns, so
+// it decoded empty even on success. The API returns the case number and an
+// update timestamp, alongside the status envelope the other case endpoints
+// use.
 type AddCommentResponse struct {
-	Data struct {
-		ID string `json:"id"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	IsError bool   `json:"isError"`
+	Code    int    `json:"code"`
+	Data    struct {
+		CaseNumber  string `json:"caseNumber"`
+		UpdatedDate string `json:"updatedDate"`
 	} `json:"data"`
+	Links []struct {
+		Rel  string `json:"rel"`
+		Href string `json:"href"`
+	} `json:"links,omitempty"`
 }

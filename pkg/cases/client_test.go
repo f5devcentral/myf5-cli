@@ -3,8 +3,10 @@ package cases
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -56,6 +58,56 @@ func TestListCases(t *testing.T) {
 // invisible — `severity` and `createdDate` both passed that test for the
 // project's whole history while always decoding as empty. Decoding a literal
 // payload shaped like GetCaseApiResponse is what catches it.
+// AddComment had no test at all, which is how a wrong method, path AND field
+// name shipped together: the code sent
+// POST /case-management/v1/cases/{n}/notes {"comment": ...} against an API
+// that defines PATCH /case-management/v1/cases/{n} {"comments": ...} and has
+// no /notes endpoint whatsoever. This pins all three.
+func TestAddCommentRequestShape(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(`{"status":"Success","message":"Comments added to Case.","isError":false,"code":200,"data":{"caseNumber":"00449105","updatedDate":"05/28/2024 20:14:15"}}`)); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	c := NewClient("tok", server.URL)
+	c.HTTPClient = server.Client()
+
+	resp, err := c.AddComment(context.Background(), "00449105", "a note")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotMethod != http.MethodPatch {
+		t.Errorf("method = %s, want PATCH", gotMethod)
+	}
+	if want := "/case-management/v1/cases/00449105"; gotPath != want {
+		t.Errorf("path = %s, want %s (there is no /notes sub-resource)", gotPath, want)
+	}
+	if !strings.Contains(gotBody, `"comments"`) {
+		t.Errorf("body = %s, want the plural field %q", gotBody, "comments")
+	}
+	if strings.Contains(gotBody, `"comment"`) && !strings.Contains(gotBody, `"comments"`) {
+		t.Errorf("body uses singular %q; the API expects %q", "comment", "comments")
+	}
+
+	// The response envelope carries the case number; the old model read
+	// data.id, which no documented response returns.
+	if resp.Data.CaseNumber != "00449105" {
+		t.Errorf("CaseNumber = %q, want 00449105", resp.Data.CaseNumber)
+	}
+	if resp.IsError {
+		t.Errorf("IsError = true for a success payload")
+	}
+}
+
 func TestListCasesDecodesLiveFieldNames(t *testing.T) {
 	payload := `{"data":[{"caseNumber":"01287164","subject":"RFE: tmipsecd","status":"Resolution Provided","priority":"3 - Site Not At Risk","dateOpened":"2025-09-12"}]}`
 

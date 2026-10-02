@@ -161,18 +161,33 @@ func (c *Client) CreateCase(ctx context.Context, payload map[string]interface{})
 	return &resp, nil
 }
 
-// AddComment appends notes or diagnostics to an existing case.
+// AddComment appends a comment to an existing case.
+//
+// This is a PATCH to the case itself, not a POST to a sub-resource. An
+// earlier implementation sent
+//
+//	POST /case-management/v1/cases/{n}/notes  {"comment": "..."}
+//
+// which diverges from the specification in method, path and field name:
+// there is no /notes endpoint in the API at all, and the field is plural.
+// The spec's CASE_PATCH_REQUEST is described as "Case Add Comment Request"
+// with the example {"comments": "Adding test comments"}.
+//
+// NOT YET VERIFIED LIVE — exercising it writes a visible comment to a real
+// support case, so this is reasoned from the specification alone. Given that
+// the spec was wrong about three other things on 2026-10-02, treat the first
+// live run as the real test.
 func (c *Client) AddComment(ctx context.Context, caseNumber, comment string) (*AddCommentResponse, error) {
 	payload := map[string]string{
-		"comment": comment,
+		"comments": comment,
 	}
 	jsonBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode comment payload: %w", err)
 	}
 
-	path := fmt.Sprintf("/case-management/v1/cases/%s/notes", url.PathEscape(caseNumber))
-	bodyBytes, err := c.doRequest(ctx, http.MethodPost, path, jsonBytes)
+	path := fmt.Sprintf("/case-management/v1/cases/%s", url.PathEscape(caseNumber))
+	bodyBytes, err := c.doRequest(ctx, http.MethodPatch, path, jsonBytes)
 	if err != nil {
 		return nil, err
 	}
