@@ -81,6 +81,6 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
 | **BIG-IP Actions** | Tab completes `ready`, `qkview`, `push`, `download`. |
 | **BIG-IQ Actions** | Tab completes `ready`, `push`, `download`. |
 | **File Filtering** | When running `myf5 ihealth upload <TAB>`, autocompletion automatically filters directory listings to `*.qkview`, `*.tar.gz`, `*.tgz` files. |
-| **Appliance Push Flags** | Suggests `-m`, `--method` (`auto`, `icontrol`, `scp`), `-d`, `--dest`, `-t`, `--target` (`BIG-IP`, `BIG-IQ`), `-u`, `--user`, `-p`, `--port`, `-i`, `--identity`, `-k`, `--key`. |
+| **Appliance Push Flags** | Suggests `-m`, `--method` (`auto`, `icontrol`, `scp`), `-d`, `--dest`, `-t`, `--target` (`BIG-IP`, `BIG-IQ`), `-u`, `--user`, `-p`, `--port`, `-i`, `--identity`. |
 | **Download Push Flags** | Suggests `--push`, `--push-method` (`auto`, `icontrol`, `scp`), `--push-dest`, `--push-target`, `--push-user`, `--push-port`, `--push-key`. |
 | **Global Flags** | Suggests `--profile`, `-o`, `--output`. |

@@ -98,7 +98,7 @@ When managing BIG-IP TMOS or BIG-IQ Centralized Management appliances via `myf5 
 
 - **SSH Key & Agent Authentication (SCP Method)**:
   When using native Go SCP transfers (`--method scp` or `--push-method scp`):
-  1. **Explicit Private Key**: Specify `--key <path>` or `--push-key <path>` (supports encrypted keys with passphrase).
+  1. **Explicit Private Key**: Specify `-i`/`--identity <path>` (appliance `push`/`download`) or `--push-key <path>` (download-then-push), both supporting encrypted keys with passphrase. Note that `--key` is **not** a valid flag: it appears in `ForbiddenSecretFlags`, so passing it aborts the command before any work is done.
   2. **SSH Agent**: Connects automatically to `$SSH_AUTH_SOCK` if active.
   3. **Default Key Fallback**: Inspects standard user keys (`~/.ssh/id_ed25519`, `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa`).
   4. **Password / PAM Fallback**: Uses password or interactive prompt if no keys are found.

@@ -16,6 +16,19 @@ func TestCheckNoCLISecrets(t *testing.T) {
 		{args: []string{"myf5", "--password=123"}, wantErr: true},
 		{args: []string{"myf5", "-pw", "secret"}, wantErr: true},
 		{args: []string{"myf5", "--profile", "prod"}, wantErr: false},
+
+		// SSH key path flags. "--key" is forbidden: it is close enough to a
+		// secret-bearing flag that it is rejected outright, so an SSH key
+		// *path* must be passed as --identity/-i (appliance push/download) or
+		// --push-key (download-then-push). Documentation advertised "--key"
+		// at one point; these cases pin which spellings actually work so the
+		// docs and the validator cannot drift apart again.
+		{args: []string{"myf5", "--key", "/home/u/.ssh/id_ed25519"}, wantErr: true},
+		{args: []string{"myf5", "--key=/home/u/.ssh/id_ed25519"}, wantErr: true},
+		{args: []string{"myf5", "-key", "/home/u/.ssh/id_ed25519"}, wantErr: true},
+		{args: []string{"myf5", "--identity", "/home/u/.ssh/id_ed25519"}, wantErr: false},
+		{args: []string{"myf5", "-i", "/home/u/.ssh/id_ed25519"}, wantErr: false},
+		{args: []string{"myf5", "--push-key", "/home/u/.ssh/id_ed25519"}, wantErr: false},
 	}
 
 	for _, tt := range tests {

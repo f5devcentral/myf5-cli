@@ -121,7 +121,7 @@ This policy ensures that appliance credentials never leak into:
      │ (If not set)
      ▼
 2. SSH Key / Agent (SCP method only):
-   - Explicit flag: --key <path>
+   - Explicit flag: -i, --identity <path>
    - SSH Agent: $SSH_AUTH_SOCK
    - Default Identity Files: ~/.ssh/id_ed25519, ~/.ssh/id_rsa, ~/.ssh/id_ecdsa
      │ (If not available)
@@ -189,7 +189,7 @@ Hotfix ISO files are uploaded directly to `/shared/images` alongside base images
 # Push an engineering hotfix via native SCP using a specific SSH key
 myf5 bigip push 192.0.2.10 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso \
     --method scp \
-    --key ~/.ssh/f5_deploy_ed25519
+    --identity ~/.ssh/f5_deploy_ed25519
 ```
 
 #### TMOS Hotfix Installation Command
