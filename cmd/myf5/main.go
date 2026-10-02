@@ -1050,9 +1050,29 @@ func handleIHealth(ctx context.Context, args []string) {
 	case "list":
 		summaries, err := client.ListQKViews(ctx)
 		checkErr(ctx, err, "Failed to list iHealth QKViews")
+		if len(summaries) == 0 {
+			fmt.Println("No QKViews found.")
+			break
+		}
 		fmt.Println("iHealth QKViews:")
 		for _, q := range summaries {
 			fmt.Printf("  ID: %-12s Status: %-10s File: %s\n", q.ID, q.Status, q.FileName)
+			if q.Hostname != "" {
+				fmt.Printf("    Host: %s\n", q.Hostname)
+			}
+			if q.UploadDate != "" {
+				fmt.Printf("    Uploaded: %s", q.UploadDate)
+				if q.FileSize > 0 {
+					fmt.Printf("  (%.1f MB)", float64(q.FileSize)/(1024*1024))
+				}
+				fmt.Println()
+			}
+			if q.CaseNumber != "" {
+				fmt.Printf("    Case: %s\n", q.CaseNumber)
+			}
+			if q.GUIURL != "" {
+				fmt.Printf("    %s\n", q.GUIURL)
+			}
 		}
 	case "upload":
 		if len(args) < 2 {

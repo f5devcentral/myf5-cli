@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,10 +33,17 @@ const (
 	// (K000130498).
 	QKViewsPath = "/qkview-analyzer/api/qkviews"
 
-	// IHealthAccept is the vendor media type the iHealth API requires.
-	// Requesting "application/json" is what the version segment above was
-	// compensating for; the API selects its representation from this header.
-	IHealthAccept = "application/vnd.f5.ihealth.api"
+	// IHealthAccept is the vendor media type the iHealth API requires, with
+	// the +json suffix.
+	//
+	// The suffix is NOT optional. Verified live 2026-10-02: the bare
+	// "application/vnd.f5.ihealth.api" returns 200 with an XML body
+	//   <?xml version="1.0"...?><qkview_ids><id>26894783</id></qkview_ids>
+	// which fails to decode with
+	//   invalid character '<' looking for beginning of value
+	// The API selects its representation from this header, so the suffix is
+	// what asks for JSON.
+	IHealthAccept = "application/vnd.f5.ihealth.api+json"
 )
 
 // UploadProgressCallback reports transferred bytes and total bytes during file upload.
@@ -234,9 +242,66 @@ func (c *Client) ListQKViews(ctx context.Context) ([]QKViewSummary, error) {
 		return nil, fmt.Errorf("failed with HTTP %d: %s", resp.StatusCode, string(respBytes))
 	}
 
-	var summaries []QKViewSummary
-	if err := json.Unmarshal(respBytes, &summaries); err != nil {
-		return nil, fmt.Errorf("failed to decode qkview summaries: %w", err)
+	// The collection endpoint returns ONLY ids — {"id":["26894783", ...]} —
+	// not an array of objects. Metadata lives on the per-qkview detail
+	// resource, so each id is fetched individually to populate the summary.
+	var idList struct {
+		ID []string `json:"id"`
+	}
+	if err := json.Unmarshal(respBytes, &idList); err != nil {
+		return nil, fmt.Errorf("failed to decode qkview id list: %w", err)
+	}
+
+	summaries := make([]QKViewSummary, 0, len(idList.ID))
+	for _, id := range idList.ID {
+		s, err := c.GetQKView(ctx, id)
+		if err != nil {
+			// One unreadable record should not hide the rest of the list.
+			summaries = append(summaries, QKViewSummary{ID: id, Status: "unavailable: " + err.Error()})
+			continue
+		}
+		summaries = append(summaries, *s)
 	}
 	return summaries, nil
+}
+
+// GetQKView fetches the metadata for a single QKView.
+func (c *Client) GetQKView(ctx context.Context, id string) (*QKViewSummary, error) {
+	scheme := "https"
+	fqdn := c.BaseFQDN
+	if strings.HasPrefix(fqdn, "http://") {
+		scheme = "http"
+		fqdn = strings.TrimPrefix(fqdn, "http://")
+	} else if strings.HasPrefix(fqdn, "https://") {
+		fqdn = strings.TrimPrefix(fqdn, "https://")
+	}
+
+	detailURL := fmt.Sprintf("%s://%s%s/%s", scheme, fqdn, QKViewsPath, url.PathEscape(id))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, detailURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create detail request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set("Accept", IHealthAccept)
+	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("detail request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed with HTTP %d: %s", resp.StatusCode, string(respBytes))
+	}
+
+	var detail qkviewDetail
+	if err := json.Unmarshal(respBytes, &detail); err != nil {
+		return nil, fmt.Errorf("failed to decode qkview detail: %w", err)
+	}
+	return detail.toSummary(id), nil
 }
