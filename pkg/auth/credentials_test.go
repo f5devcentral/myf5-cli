@@ -29,6 +29,12 @@ func TestCheckNoCLISecrets(t *testing.T) {
 		{args: []string{"myf5", "--identity", "/home/u/.ssh/id_ed25519"}, wantErr: false},
 		{args: []string{"myf5", "-i", "/home/u/.ssh/id_ed25519"}, wantErr: false},
 		{args: []string{"myf5", "--push-key", "/home/u/.ssh/id_ed25519"}, wantErr: false},
+
+		// "-p" is the port flag on appliance commands and is deliberately NOT
+		// forbidden; only "-pw" is. Two documents claimed "-p" was trapped as a
+		// secret flag, which would have made "bigip push -p 8443" impossible.
+		{args: []string{"myf5", "bigip", "push", "-p", "8443"}, wantErr: false},
+		{args: []string{"myf5", "-pw", "hunter2"}, wantErr: true},
 	}
 
 	for _, tt := range tests {

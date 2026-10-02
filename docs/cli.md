@@ -12,7 +12,7 @@ myf5 <command> [subcommand] [arguments...] [options]
 
 ### Zero-Secret Security Enforcement
 In accordance with enterprise DevSecOps standards, **passing credentials or tokens via command-line flags is strictly prohibited**. 
-- Flags like `--password`, `-p`, `--client-secret`, or `--token` are trapped prior to command dispatch.
+- Flags like `--password`, `-pw`, `--client-secret`, or `--token` are trapped prior to command dispatch. (Note that `-p` is *not* trapped — on appliance commands it is the port flag.)
 - When detected, `myf5` immediately terminates with exit code `2` to prevent credentials from leaking into process tables (`/proc/$PID/cmdline`, `ps aux`), system audit logs (auditd, Falco), and shell histories (`.zsh_history`, `.bash_history`).
 - Store cloud credentials in `~/.f5api_credentials` or set `F5_CLIENT_ID` / `F5_CLIENT_SECRET` in the environment.
 - Appliance passwords are provided via environment variables (`BIGIP_PASSWORD`, `BIGIQ_PASSWORD`), SSH keys/agents, or entered interactively at the masked terminal prompt.

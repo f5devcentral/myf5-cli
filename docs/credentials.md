@@ -6,7 +6,7 @@ Security is built into `myf5` at the architectural level. This document details 
 
 ## The Zero-Secret CLI Policy
 
-**Flags that accept passwords or client secrets (`--password`, `-p`, `--client-secret`) are strictly forbidden in `myf5`.**
+**Flags that accept passwords or client secrets (`--password`, `-pw`, `--client-secret`) are strictly forbidden in `myf5`.** The short flag `-p` is not among them — it sets the port on appliance commands.
 
 ### Why Command-Line Secret Flags Are Prohibited
 1. **Process Table Inspection**: On multi-user Unix/Linux jump hosts and bastion servers, command-line arguments are globally visible to all unprivileged users via `/proc/$PID/cmdline` and commands like `ps aux` or `top`.
