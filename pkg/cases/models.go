@@ -5,6 +5,32 @@ type CaseMetadataResponse struct {
 	Data map[string]interface{} `json:"data"`
 }
 
+// Support case priority levels, per F5 article K2633 (docs/K2633.txt).
+//
+// These are PRIORITY values, not "severity" — F5 retired that terminology and
+// the API returns this field as `priority`. The live API returns them in the
+// "<n> - <Name>" form shown here.
+//
+// Initial response targets, for choosing a level: P1 30 minutes by phone or
+// one hour via the portal, P2 two hours, P3 four hours, P4 24 hours.
+const (
+	PrioritySiteDown            = "1 - Site Down"
+	PrioritySiteAtRisk          = "2 - Site At Risk"
+	PriorityPerformanceDegraded = "3 - Performance Degraded"
+	PriorityGeneralAssistance   = "4 - General Assistance"
+)
+
+// ValidPriorities lists the accepted case priority values.
+//
+// Note that MyF5 may also display a "Low" option; K2633 states this is shown
+// in error and is not a valid case priority, so it is deliberately absent.
+var ValidPriorities = []string{
+	PrioritySiteDown,
+	PrioritySiteAtRisk,
+	PriorityPerformanceDegraded,
+	PriorityGeneralAssistance,
+}
+
 // CaseSummary represents a brief overview of an F5 support case.
 //
 // Field tags follow GetCaseApiResponse in the F5 OpenAPI specification

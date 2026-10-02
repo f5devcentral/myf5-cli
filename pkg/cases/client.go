@@ -17,19 +17,26 @@ import (
 const (
 	DefaultSupportFQDN = "support.apis.f5.com"
 
-	// DefaultKParam is a legacy fallback for the required `k` API usage key.
+	// DefaultKParam is the `k` API usage key sent to Support Case endpoints.
 	//
-	// It is NOT a usable default: the key is issued per entitlement from the
-	// MyF5 API Catalog, so a single shared constant cannot be valid for every
-	// caller. Requests carrying it are rejected with HTTP 403 and
-	// "The API Key to API association not exist."
+	// It is not a per-user secret: this value is published in F5's OpenAPI
+	// specification (docs/openapi.json) as the rateLimitParam example.
 	//
-	// It is retained only so existing setups fail the same way they did before
-	// the key became configurable, rather than changing error shape. Supply a
-	// real key via F5_API_KEY or `api_key` in ~/.f5api_credentials.
+	// VERIFIED 2026-10-02: this value is accepted by GET
+	// /case-management/v1/cases and returns real data. The spec's
+	// rateLimitParam_Cases example (X4Y6fGWJdC1qLhTsCSDW4lPcqKvF5g5r) is
+	// REJECTED there with 400 "Missing or invalid k query parameter", so the
+	// spec's per-endpoint key examples do not reflect the live API. Prefer
+	// what is observed over what is specified.
 	//
-	// This value is present in the repository's git history and in every
-	// released binary; treat it as compromised and do not reuse it.
+	// UNRESOLVED: the same three published keys are all rejected by the
+	// Downloads endpoints on this host. Whether that is a genuine key
+	// mismatch or rate limiting returning a misleading message is not yet
+	// established — the API is rate limited and the probing that produced
+	// those 400s was itself heavy. Re-test singly, not in a loop.
+	//
+	// Override via F5_API_KEY or `api_key` in ~/.f5api_credentials if F5
+	// rotates it.
 	DefaultKParam = "UKKD3Vxv7NHrM3QmYk8Fk2mZnLtljAKX"
 )
 
@@ -229,18 +236,15 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 		// it obvious which of the two credentials is at fault, nor that the
 		// built-in fallback key cannot work for anyone.
 		if resp.StatusCode == http.StatusForbidden {
-			hint := "the API usage key (`k`) was rejected for this API"
-			if c.KParam == DefaultKParam {
-				hint = "no API usage key is configured, so the non-functional built-in fallback was sent"
-			}
 			return nil, fmt.Errorf(
 				"request to %s failed with status 403: %s\n"+
-					"%s.\n"+
-					"This key is separate from your OAuth client credentials and is issued per entitlement:\n"+
-					"  1. Log in to https://my.f5.com\n"+
-					"  2. Request API Catalog access from F5 Support\n"+
-					"  3. Create an API key, then set F5_API_KEY or add `api_key = <key>` to ~/.f5api_credentials",
-				redactedURL, string(respBytes), hint,
+					"The `k` API usage key was rejected for this API. These keys are per-API-family\n"+
+					"constants from F5's OpenAPI specification, not per-user secrets, so this usually\n"+
+					"means the wrong family's key was sent (Case, Downloads and Knowledge each have\n"+
+					"their own) rather than anything being wrong with your account.\n"+
+					"If F5 has rotated the key, override it with F5_API_KEY or `api_key` in ~/.f5api_credentials.\n"+
+					"Note that a bad OAuth token returns 401, not 403.",
+				redactedURL, string(respBytes),
 			)
 		}
 		return nil, fmt.Errorf("request to %s failed with status %d: %s", redactedURL, resp.StatusCode, string(respBytes))

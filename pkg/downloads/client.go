@@ -14,26 +14,69 @@ import (
 )
 
 const (
-	// DefaultDownloadsFQDN is the authoritative endpoint effective October 2, 2026.
-	// Does NOT accept the legacy 'k' parameter.
+	// DefaultDownloadsFQDN is the host this client contacts first, without a
+	// `k` parameter.
+	//
+	// STATUS 2026-10-02 — DOWNLOADS ARE OFFLINE BY DESIGN, NOT BROKEN.
+	//
+	// F5 Digital maintenance notifications for Oct 1-7 2026 scheduled the
+	// cutover from ESDM (Enterprise Software Download Manager) to ESDP
+	// (Enterprise Software Distribution Platform) to begin Friday 2026-10-02
+	// at 06:00 PT and run for three days, with availability "currently
+	// targeted for Monday, October 5". A 09:00 notification the same day
+	// confirmed it had started and that ESDM was "now offline".
+	//
+	// Access to ESDP post-go-live is requested separately per KB57950.
+	//
+	// DO NOT "fix" this client against the half-migrated service. Any change
+	// to host, path or key made during the cutover window is being fitted to
+	// a transient state and will likely be wrong once ESDP is released. Wait
+	// for Go-Live, then re-test and adapt to what ESDP actually serves.
+	//
+	// Observed during the window, consistent with the announcement:
+	//   - This host resolves to its published address (159.60.134.92, F5 XC)
+	//     and is listed in F5 article K15202 as "F5 software downloads", so
+	//     it is a real service and not an unprovisioned distribution.
+	//   - Every path tried returns 404 with an EMPTY body, including "/".
+	//     That is a host terminating TLS while serving no API, not a routing
+	//     miss, so the correct path here is still unknown.
+	//   - The legacy fallback below then rejects every published `k` value
+	//     with 400 "Missing or invalid k query parameter".
+	//
+	// Neither observation says anything is wrong with this client. `cases
+	// list` on the same legacy host with the same key worked throughout the
+	// window, so the key itself is fine; it is the downloads service behind
+	// that gateway that is down. (The API is also rate limited, and the 400s
+	// above came from heavy probing, which can produce the same message — a
+	// second reason not to read them as key errors.)
+	//
+	// CAUTION on provenance: comments here previously asserted an F5
+	// "October 2, 2026 cutover" moving Downloads to this host and removing
+	// `k`. No F5 bulletin supporting that has been located. The F5 articles
+	// published on that date (K000163521, K15202) describe an IP ADDRESS
+	// change for api.f5.com and callhome.f5.com — a firewall-allowlist
+	// matter — and say nothing about base URLs or `k`. Treat the cutover
+	// claim in docs/ as unsourced until a bulletin is produced.
 	DefaultDownloadsFQDN = "api.software.downloads.f5.com"
 
-	// LegacySupportFQDN is the fallback gateway used prior to October 2.
+	// LegacySupportFQDN is the fallback gateway, tried when the host above
+	// returns 403/404 (which, as of 2026-10-02, it always does).
 	LegacySupportFQDN = "support.apis.f5.com"
 
-	// LegacyKParam is the fallback `k` API usage key, required ONLY on
-	// support.apis.f5.com.
+	// LegacyKParam is the `k` API usage key sent on the legacy fallback path.
 	//
-	// Despite the historical "rate-limiting parameter" description, F5 treats
-	// this as an API key: it is marked required on every support.apis.f5.com
-	// operation in the OpenAPI spec, and an unassociated value is rejected with
-	// HTTP 403 "The API Key to API association not exist." Keys are issued per
-	// entitlement from the MyF5 API Catalog, so this shared constant cannot be
-	// valid for arbitrary callers. Supply your own via F5_API_KEY or `api_key`
-	// in ~/.f5api_credentials.
+	// It is not a per-user secret: this value is published in F5's OpenAPI
+	// specification (docs/openapi.json) as the rateLimitParam example, which
+	// is also the example for the downloads metadata endpoint specifically.
 	//
-	// This value is present in the repository's git history and in every
-	// released binary; treat it as compromised and do not reuse it.
+	// Do NOT assume keys are scoped per API family. This same value is
+	// accepted by the Support Case endpoints (verified live 2026-10-02),
+	// while all three published values — including this one — are currently
+	// rejected by Downloads. An earlier comment claimed the reverse; it was
+	// wrong.
+	//
+	// Override via F5_API_KEY or `api_key` in ~/.f5api_credentials if F5
+	// rotates it.
 	LegacyKParam = "UKKD3Vxv7NHrM3QmYk8Fk2mZnLtljAKX"
 )
 

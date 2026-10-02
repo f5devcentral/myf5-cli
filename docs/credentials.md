@@ -31,11 +31,63 @@ Before any of the storage options below will work, you need an API key — a `cl
 
 The `client_secret` is shown once at creation. Copy it straight into `~/.f5api_credentials` or your CI secret store — if it is lost, generate a new key rather than attempting to recover the old one.
 
+### iHealth credentials are separate
+
+iHealth does **not** use your MyF5 client credentials. It is a distinct OAuth resource server (`api://ciam-api-ihealth`), and a MyF5 client holds no grant on it — using one produces:
+
+```
+403 Client "..." is not authorized to access resource server "api://ciam-api-myf5".
+```
+
+Per F5 article **K000130498**, generate a dedicated pair at [ihealth.f5.com/qkview-analyzer/settings](https://ihealth.f5.com/qkview-analyzer/settings) → **API Token** → **Generate New Credentials**.
+
+> [!IMPORTANT]
+> Three things that bite people:
+> - Generating new credentials **invalidates the previous pair** immediately.
+> - The client secret is shown **once** and never again.
+> - The pair **expires after six months**, after which you must regenerate.
+
+Store them prefixed, alongside your MyF5 pair in the same file:
+
+```ini
+client_id = your_myf5_client_id
+client_secret = your_myf5_client_secret
+
+ihealth_client_id = your_ihealth_client_id
+ihealth_client_secret = your_ihealth_client_secret
+```
+
+Or by environment variable:
+
+```bash
+export IHEALTH_CLIENT_ID="..."
+export IHEALTH_CLIENT_SECRET="..."
+```
+
+`myf5` selects the prefixed pair for `ihealth` commands and the unprefixed pair for everything else, falling back to the unprefixed pair when no iHealth-specific one is present. It also sends the correct audience automatically — note that an iHealth token request carries **no** `scope` parameter; access comes from the audience alone. Bearer tokens last 30 minutes and are re-requested as needed.
+
+---
+
 ### The `k` API usage key
 
-Support Case and legacy Downloads endpoints on `support.apis.f5.com` require a **second** credential alongside the OAuth token: an "API usage key" sent as the `k` query parameter. F5's OpenAPI specification marks it required on every such operation, independently of bearer authentication.
+Endpoints on `support.apis.f5.com` require a `k` query parameter — an "API usage key" — alongside the OAuth bearer token. F5's OpenAPI specification ([`openapi.json`](./openapi.json)) marks it required on every such operation.
 
-It is issued with the same API Catalog entitlement as your client credentials. Supply it as `api_key`:
+**You do not normally need to configure this.** Despite the name, it is not a per-user secret — the value is published in F5's specification, and `myf5` ships it.
+
+The specification lists three example values, one per API family, which invites the assumption that each family needs its own. **That assumption is wrong.** Testing on 2026-10-02 found that the single value `myf5` ships is accepted by the Support Case endpoints, while the specification's own Case-specific example is rejected there with `400 Missing or invalid k query parameter`. Trust observed behaviour over the specification's examples.
+
+> [!WARNING]
+> **MyF5 Downloads is offline as of 2026-10-02 — this is F5's cutover, not a fault in this client.** An F5 Digital notification that morning announced the migration from ESDM to ESDP had begun, that ESDM was "now offline", and that MyF5 Downloads would be unavailable until a Go-Live notification is issued.
+>
+> Do not reconfigure anything to work around it. Support Case commands continue to work on the same gateway with the same key, which confirms your credentials are fine. Wait for Go-Live.
+
+If you need to diagnose this yourself, note that **the API is rate limited** — test with single requests spaced out, not loops. Rapid probing produces `400` responses that are easily mistaken for key errors.
+
+Should F5 rotate a key or issue a tenant-specific one, override it:
+
+```bash
+export F5_API_KEY="your_api_usage_key"
+```
 
 ```ini
 [default]
@@ -44,20 +96,10 @@ client_secret = your_oauth2_client_secret
 api_key = your_api_usage_key
 ```
 
-or by environment variable, which takes precedence:
+The environment variable takes precedence. An `api_key` at the top level of the file applies to every profile; one inside a profile section overrides it.
 
-```bash
-export F5_API_KEY="your_api_usage_key"
-```
-
-An `api_key` at the top level of the file applies to every profile; one inside a profile section overrides it.
-
-> [!WARNING]
-> `myf5` carries a built-in fallback key for backward compatibility, but **it does not work** — it is not associated with any current entitlement. Without your own key, Support Case commands fail with:
-> ```
-> 403: {"message":"The API Key to API association not exist."}
-> ```
-> Note that this is a `403`, distinct from the `401` you would see from a bad OAuth token. If you get a 403 where the token is known good, the `k` key is the cause.
+> [!NOTE]
+> A single override applies to whichever client is in use, so setting it will send that key to every family. It is intended for a rotation affecting the API you are calling, not as general configuration.
 
 > [!NOTE]
 > These credentials authenticate to the F5 **cloud** APIs — Downloads, Support Cases, and iHealth. They are unrelated to BIG-IP and BIG-IQ appliance credentials, which are covered in [§3](#3-big-ip--big-iq-appliance-credentials) below and are never issued through MyF5.
