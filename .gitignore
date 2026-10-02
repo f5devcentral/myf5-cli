@@ -46,6 +46,25 @@ coverage.html
 .vscode/
 scratch/
 
+# Internal F5 communications.
+#
+# Internal announcements, maintenance notices, program emails and leadership
+# decks are not public and are not needed to build or run the binary. Keep
+# them locally if they are useful as working context, but do not publish
+# them here — this repository is INTERNAL, not private, and unannounced
+# platform migrations, programme names and staff contact details should not
+# be redistributed through it.
+#
+# Public F5 knowledge base articles (docs/K*.txt) are deliberately NOT
+# ignored: they are already published, and archiving them makes the
+# citations in this repository checkable.
+docs/ESDP_CUTOVER_NOTICES_*.txt
+docs/*INTERNAL*
+docs/*_NOTICES_*.txt
+docs/*.eml
+docs/*.msg
+docs/*.pptx
+
 # AI assistant workspaces, handoff context, and tool configuration.
 # Never commit AI tooling or generated context to this repository.
 agents/
