@@ -121,13 +121,13 @@ Manage and inspect MyF5 technical support cases via the Support Case API
 
 ### Actions
 
-#### `list`
-Lists **open** support cases for the authenticated account, displaying case
-number, status, priority, and subject. Closed cases are not shown; the
-underlying client supports `ALL_CASES`, but the CLI does not yet expose a flag
-for it.
+#### `list [--all]`
+Lists support cases for the authenticated account, displaying case number,
+status, priority, and subject. Open cases only by default; `--all` includes
+closed ones.
 ```bash
 myf5 cases list
+myf5 cases list --all
 ```
 
 #### `metadata`

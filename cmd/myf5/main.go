@@ -1006,7 +1006,7 @@ func getDefaultDownloadsDir() string {
 
 func handleCases(ctx context.Context, args []string) {
 	if len(args) == 0 {
-		fmt.Println("Usage: myf5 cases [list | metadata | get <case-num> | comment <case-num> <note> | create <flags>]")
+		fmt.Println("Usage: myf5 cases [list [--all] | metadata | get <case-num> | comment <case-num> <note> | create <flags>]")
 		fmt.Println()
 		fmt.Println("Run 'myf5 cases create' with no flags for the full create usage.")
 		os.Exit(1)
@@ -1025,13 +1025,37 @@ func handleCases(ctx context.Context, args []string) {
 
 	switch action {
 	case "list":
-		resp, err := client.ListCases(ctx, false)
+		// Closed cases are hidden by default because the open ones are what a
+		// person normally wants. Without --all there was no way to see a closed
+		// case at all, which looked identical to the tool failing to find it.
+		showClosed := false
+		for _, a := range args[1:] {
+			switch a {
+			case "--all", "-a":
+				showClosed = true
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown flag %q\n\nUsage: myf5 cases list [--all]\n", a)
+				os.Exit(1)
+			}
+		}
+		resp, err := client.ListCases(ctx, showClosed)
 		checkErr(ctx, err, "Failed to list cases")
-		fmt.Println("MyF5 Support Cases:")
+		if showClosed {
+			fmt.Println("MyF5 Support Cases (open and closed):")
+		} else {
+			fmt.Println("MyF5 Support Cases (open only — use --all to include closed):")
+		}
 		for _, c := range resp.Data {
 			// Priority values are long ("2 - Site At Risk"), so the column is
 			// wider than the old 6-wide severity field it replaced.
 			fmt.Printf("  Case #%-10s [%-20s] [%-18s] %s\n", c.CaseNumber, c.Status, c.Priority, c.Subject)
+		}
+		if len(resp.Data) == 0 {
+			if showClosed {
+				fmt.Println("  (no cases)")
+			} else {
+				fmt.Println("  (no open cases — closed ones are hidden; use --all)")
+			}
 		}
 	case "metadata":
 		resp, err := client.GetMetadata(ctx)
