@@ -1258,7 +1258,11 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 			}
 		}
 		if len(missing) > 0 {
-			fmt.Printf("\nIncomplete: missing %s\n", strings.Join(missing, ", "))
+			// Reuse the real error so a dry run explains a missing entitlement
+			// identifier exactly as a live attempt would. Printing a bare field
+			// list here sent people to look for a serial number without saying
+			// that the web UI opens such cases without one.
+			fmt.Printf("\nIncomplete: %v\n", &cases.ErrMissingCreateFields{Missing: missing})
 			os.Exit(1)
 		}
 		fmt.Println("\nAll required fields present.")
