@@ -204,6 +204,16 @@ against the rate limit.
 > a **data** error, not a credentials error: reaching it means every other
 > field validated.
 
+> **This requirement belongs to the API, not to support cases.** A HAR capture
+> of the MyF5 web UI opening case `01292481` on 2026-10-05 shows a BIG-IP
+> presales case created with the serial field **empty**. The web UI does not
+> use this API at all — it writes to Salesforce directly through an internal
+> Aura endpoint and validates differently.
+>
+> So if you have no serial or subscription to hand, the case is not
+> impossible: open it at [my.f5.com](https://my.f5.com) and use
+> `cases comment` or `ihealth upload` with the number afterwards.
+
 > **`--reason "Pre Sales"` is for F5 Systems Engineers.** A customer account
 > cannot open a presales case; use `"General Problem"` or another reason from
 > case metadata.

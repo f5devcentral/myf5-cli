@@ -196,6 +196,20 @@ var requiredCreateFields = []string{
 
 // EntitlementFieldFor names the identifier a product family is verified by.
 //
+// IMPORTANT — this is a constraint of the PUBLIC API, not of a support case.
+// A HAR capture of the MyF5 web UI creating case 01292481 on 2026-10-05 shows
+// a BIG-IP Pre Sales case created with its serial/registration-key field
+// EMPTY. The UI does not call support.apis.f5.com at all: it writes to
+// Salesforce directly through an Aura endpoint
+// (CaseManagementCreateCaseCtllerWOSharing.upsertCase), and that path applies
+// different validation.
+//
+// So a case without an entitlement identifier is perfectly legitimate; it is
+// the public API that refuses to create one. We cannot relax the requirement
+// — the API enforces it and we cannot submit through Salesforce — but the
+// error message must not tell the user their case is impossible when the web
+// UI would accept it.
+//
 // Every family requires one, but not the same one, and the API's messages make
 // this clear only after the fact (verified live 2026-10-05):
 //
@@ -237,10 +251,24 @@ type ErrMissingCreateFields struct {
 }
 
 func (e *ErrMissingCreateFields) Error() string {
-	return fmt.Sprintf(
+	msg := fmt.Sprintf(
 		"cannot create case: missing required field(s): %s",
 		strings.Join(e.Missing, ", "),
 	)
+	// The entitlement identifier is required by the public API, not by support
+	// cases in general — the web UI creates them without one. Say so, rather
+	// than leaving the user to conclude their case cannot be opened at all.
+	for _, f := range e.Missing {
+		if f == "serialNumber" || f == "subscriptionId" {
+			msg += "\n\nThe MyF5 Support Case API requires an entitlement identifier on create," +
+				"\neven though the MyF5 web UI does not: the web UI writes to Salesforce" +
+				"\ndirectly and applies different validation. If you have no serial number or" +
+				"\nsubscription to hand, open the case at https://my.f5.com and use" +
+				"\n`myf5 cases comment` or `myf5 ihealth upload` with the case number after."
+			break
+		}
+	}
+	return msg
 }
 
 // GetCase fetches a single case by number.
