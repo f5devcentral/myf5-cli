@@ -53,10 +53,7 @@ myf5-cli/
 │   ├── downloads.md            # Downloads catalog taxonomy, GeoDB automation & direct push
 │   ├── credentials.md          # Zero-Secret policy & credential management
 │   ├── shell_completion.md     # Shell tab autocompletion guide (zsh, bash, fish)
-│   ├── network_and_firewall.md # Egress firewall rules and DNS cutover documentation
-│   ├── openapi-observed.json   # The APIs as they actually behave, from live requests
-│   ├── openapi-outdated-5Oct2026.json # F5's published spec, archived — wrong in several places
-│   └── K*.txt                  # Archived F5 reference articles, verbatim
+│   └── network_and_firewall.md # Egress firewall rules and DNS cutover documentation
 ├── Makefile                    # Developer build, test, and release automation
 ├── SECURITY.md                 # Security & vulnerability reporting policy
 ├── CONTRIBUTING.md             # Developer workflow & coding standards
@@ -317,7 +314,21 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
 | **[Zero-Secret Security Architecture](docs/credentials.md)** | Process isolation, credentials file permissions, SSH keys, and environment setup. |
 | **[Shell Tab Autocompletion](docs/shell_completion.md)** | Setup instructions and completion features for Zsh, Bash, and Fish. |
 | **[Network, DNS & Firewall Architecture](docs/network_and_firewall.md)** | Egress firewall requirements (TCP 443) and F5 infrastructure cutover notices. |
-| **[Observed API Behaviour](docs/openapi-observed.json)** | OpenAPI description of what the MyF5 APIs actually do, where that differs from F5's published spec. |
+
+### F5 knowledge base articles
+
+Linked rather than copied: F5 revises these in place, so a link is always
+current where an archived copy quietly goes stale.
+
+| Article | Covers |
+| :--- | :--- |
+| [K2633](https://my.f5.com/manage/s/article/K2633) | Submitting a support case — the authority for valid priority values |
+| [K12878](https://my.f5.com/manage/s/article/K12878) | Generating diagnostic data with the `qkview` utility |
+| [K000090853](https://my.f5.com/manage/s/article/K000090853) | Exchanging files with F5 Support |
+| [K27404821](https://my.f5.com/manage/s/article/K27404821) | Using F5 iHealth to diagnose vulnerabilities |
+| [K15202](https://my.f5.com/manage/s/article/K15202) | IP addresses for F5 hosted services — needed for firewall allowlists |
+| [K000163521](https://my.f5.com/manage/s/article/K000163521) | Connectivity after the `api.f5.com` / `callhome.f5.com` IP changes |
+| [K000130498](https://my.f5.com/manage/s/article/K000130498) | MyF5 API authentication — the OAuth2 client-credentials flow |
 
 ---
 

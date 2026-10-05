@@ -70,7 +70,7 @@ export IHEALTH_CLIENT_SECRET="..."
 
 ### The `k` API usage key
 
-Endpoints on `support.apis.f5.com` require a `k` query parameter — an "API usage key" — alongside the OAuth bearer token. F5's OpenAPI specification (archived here as [`openapi-outdated-5Oct2026.json`](./openapi-outdated-5Oct2026.json)) marks it required on every such operation.
+Endpoints on `support.apis.f5.com` require a `k` query parameter — an "API usage key" — alongside the OAuth bearer token. F5's [published OpenAPI specification](https://my.f5.com/manage/myf5ApiReference) marks it required on every such operation.
 
 **You do not normally need to configure this.** Despite the name, it is not a per-user secret — the value is published in F5's specification, and `myf5` ships it.
 

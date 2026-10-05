@@ -36,7 +36,7 @@ You can verify reachability to all required cloud endpoints using:
 ### A. MyF5 Downloads API Base URL Cutover (October 2, 2026) — UNSOURCED
 
 > [!CAUTION]
-> **No F5 bulletin supporting this notice has been located.** The text below has been carried in this repository without attribution — no article ID, URL, or archive link. The F5 articles actually published on 2026-10-02 are archived here as [K000163521](./K000163521.txt) and [K15202](./K15202.txt): both describe an **IP address change** for `api.f5.com` and `callhome.f5.com` (see §C) and neither mentions Downloads base URLs or the `k` parameter. K15202 does list `api.software.downloads.f5.com` as a live service, so the host is real — but that is the only part of this notice the sources support.
+> **No F5 bulletin supporting this notice has been located.** The text below has been carried in this repository without attribution — no article ID, URL, or archive link. The F5 articles actually published on 2026-10-02 are [K000163521](https://my.f5.com/manage/s/article/K000163521) and [K15202](https://my.f5.com/manage/s/article/K15202): both describe an **IP address change** for `api.f5.com` and `callhome.f5.com` (see §C) and neither mentions Downloads base URLs or the `k` parameter. K15202 does list `api.software.downloads.f5.com` as a live service, so the host is real — but that is the only part of this notice the sources support.
 >
 > Separately: this section previously recorded that `api.software.downloads.f5.com` returned `404` with an empty body on every path tried, and concluded the notice did not produce a working client. **That conclusion was wrong.** The `404`s were caused by this client omitting the gateway's leading `/v1` path segment; with the correct prefix `/v1/downloads-management/v1/downloads/...` the host returns `200` (verified live 2026-10-05). The host and the absent `k` are therefore both corroborated by observation — it is only the *bulletin* that remains uncited.
 
@@ -58,7 +58,7 @@ You can verify reachability to all required cloud endpoints using:
 
 ### C. IP Address Change for `api.f5.com` and `callhome.f5.com` (October 2, 2026)
 
-Source: **[K000163521](./K000163521.txt)** and **[K15202](./K15202.txt)**, both updated 2026-10-02 and archived in this directory. Unlike §A, this one is attributable.
+Source: **[K000163521](https://my.f5.com/manage/s/article/K000163521)** and **[K15202](https://my.f5.com/manage/s/article/K15202)**, both updated 2026-10-02. Unlike §A, this one is attributable.
 
 Effective October 2, 2026:
 
