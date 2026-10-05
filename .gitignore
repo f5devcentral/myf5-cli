@@ -48,22 +48,30 @@ scratch/
 
 # Internal F5 communications.
 #
-# Internal announcements, maintenance notices, program emails and leadership
-# decks are not public and are not needed to build or run the binary. Keep
-# them locally if they are useful as working context, but do not publish
-# them here — this repository is INTERNAL, not private, and unannounced
-# platform migrations, programme names and staff contact details should not
-# be redistributed through it.
+# Internal announcements, maintenance notices, programme emails and
+# leadership decks are not public and are not needed to build or run the
+# binary. Keep them locally if they are useful as working context, but do not
+# publish them here — this repository is INTERNAL, not private, and
+# unannounced platform migrations, programme names and staff contact details
+# should not be redistributed through it.
 #
-# Public F5 knowledge base articles (docs/K*.txt) are deliberately NOT
-# ignored: they are already published, and archiving them makes the
-# citations in this repository checkable.
-docs/ESDP_CUTOVER_NOTICES_*.txt
+# EVERYTHING under internal_docs/ is ignored, whatever it is called. Put
+# internal material there and the question of whether it is safe to commit
+# does not arise. The filename patterns below are kept as a backstop for
+# material dropped into docs/ by mistake, but they only work if the file
+# happens to be named correctly — the directory is the real boundary.
+internal_docs/
+
+# Backstop patterns for internal material misfiled into docs/.
 docs/*INTERNAL*
 docs/*_NOTICES_*.txt
 docs/*.eml
 docs/*.msg
 docs/*.pptx
+#
+# Public F5 knowledge base articles (docs/K*.txt) are deliberately NOT
+# ignored: they are already published, and archiving them makes the
+# citations in this repository checkable.
 
 # AI assistant workspaces, handoff context, and tool configuration.
 # Never commit AI tooling or generated context to this repository.
