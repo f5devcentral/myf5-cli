@@ -133,9 +133,23 @@ func NewClientWithKey(token, baseFQDN, apiKey string) *Client {
 	}
 }
 
+// DownloadsPrefix is the path prefix for all Downloads endpoints.
+//
+// The doubled "v1" is NOT a typo. Verified live 2026-10-05 against
+// api.software.downloads.f5.com:
+//
+//	/downloads-management/v1/downloads/metadata     -> 404 (empty body)
+//	/v1/downloads-management/v1/downloads/metadata  -> 200
+//
+// The leading /v1 is the gateway's own route version and the inner /v1 is the
+// API's. Omitting the leading segment 404s every Downloads call, which is what
+// the pre-cutover code did. The shape matches the published OpenAPI document
+// (docs/openapi-pulled-5Oct2026.json).
+const DownloadsPrefix = "/v1/downloads-management/v1/downloads"
+
 // GetMetadata fetches the complete product hierarchy and catalog index.
 func (c *Client) GetMetadata(ctx context.Context) (*DownloadsMetadataResponse, error) {
-	path := "/downloads-management/v1/downloads/metadata"
+	path := DownloadsPrefix + "/metadata"
 	bodyBytes, err := c.doGetWithFallback(ctx, path)
 	if err != nil {
 		return nil, err
@@ -151,7 +165,7 @@ func (c *Client) GetMetadata(ctx context.Context) (*DownloadsMetadataResponse, e
 // GetProductVersions retrieves versions, containers, and file lists for a product line.
 func (c *Client) GetProductVersions(ctx context.Context, family, line string) (*ProductVersionsResponse, error) {
 	path := fmt.Sprintf(
-		"/downloads-management/v1/downloads/product/%s/%s",
+		DownloadsPrefix+"/product/%s/%s",
 		url.PathEscape(family),
 		url.PathEscape(line),
 	)
@@ -174,7 +188,7 @@ func (c *Client) GetFileLinks(ctx context.Context, family, line, version, contai
 	}
 
 	path := fmt.Sprintf(
-		"/downloads-management/v1/downloads/product/%s/%s/%s/%s/%s/%s",
+		DownloadsPrefix+"/product/%s/%s/%s/%s/%s/%s",
 		url.PathEscape(family),
 		url.PathEscape(line),
 		url.PathEscape(version),

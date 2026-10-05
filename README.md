@@ -174,7 +174,8 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
 ./bin/myf5 cases metadata
 
 # Add a note or comment to a case
-./bin/myf5 cases comment C1000234 "Investigating packet captures."
+# Case numbers are 8 digits, no prefix - exactly as MyF5 displays them.
+./bin/myf5 cases comment 01287164 "Investigating packet captures."
 ```
 
 ### 4. F5 iHealth
@@ -182,8 +183,8 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
 # List previously uploaded QKViews
 ./bin/myf5 ihealth list
 
-# Upload a local QKView bundle to iHealth
-./bin/myf5 ihealth upload /path/to/appliance.qkview "C1000234" "Initial triage bundle"
+# Upload a local QKView bundle to iHealth, optionally attaching it to a case
+./bin/myf5 ihealth upload /path/to/appliance.qkview "01287164" "Initial triage bundle"
 ```
 
 ### 5. BIG-IP Appliance Management & Image Transfer (Auto Failover)

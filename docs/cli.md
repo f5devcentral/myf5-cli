@@ -107,12 +107,25 @@ myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 "Base Software & ISO Releases" BIG
 
 ## 2. `myf5 cases`
 
-Manage and inspect MyF5 technical support cases via the Support Case API (`support.apis.f5.com`, endpoints: `/case-management/v1/cases` and `/support/case-management/v1/cases`).
+Manage and inspect MyF5 technical support cases via the Support Case API
+(`support.apis.f5.com`, endpoint prefix `/case-management/v1/cases`).
+
+> **Case numbers are 8 digits with no prefix** — for example `01287164`.
+> Earlier revisions of this document used a `C1000234` form, which the API
+> does not accept. Use the number exactly as MyF5 displays it.
+
+> **There is no `/support/case-management/v1/...` prefix.** It was documented
+> here previously but returns
+> `404 "Unable to identify proxy for host"` (verified 2026-10-05). The only
+> working prefix is `/case-management/v1/...`.
 
 ### Actions
 
 #### `list`
-Lists active support cases for the authenticated account, displaying case number, status, severity, and subject.
+Lists **open** support cases for the authenticated account, displaying case
+number, status, priority, and subject. Closed cases are not shown; the
+underlying client supports `ALL_CASES`, but the CLI does not yet expose a flag
+for it.
 ```bash
 myf5 cases list
 ```
@@ -123,11 +136,30 @@ Retrieves the authoritative schema metadata and valid values for case creation.
 myf5 cases metadata
 ```
 
+> **Known outage (2026-10-05):** this endpoint returns
+> `500 "Malformed JSON: Expected '{' at the beginning of object"` for every
+> request, including a plain `GET` with no body. The fault is server-side at
+> F5 and there is no client-side workaround. It is the documented source of
+> valid `productFamily`, `priority`, `timezone` and `reasonForContact` values,
+> so those values currently cannot be enumerated from the API.
+
 #### `comment <case-number> <note>`
 Appends a status comment or investigation update to an open support case.
 ```bash
-myf5 cases comment C1000234 "Uploaded new diagnostic packet captures."
+myf5 cases comment 01287164 "Uploaded new diagnostic packet captures."
 ```
+
+> The API reports failure in the response body (`isError`) as well as by
+> status code, so a `2xx` alone does not mean the comment landed. The CLI
+> checks both. Confirm in the MyF5 web UI when it matters.
+
+### Creating cases
+
+There is **no `create` action**. Open cases in the MyF5 web UI, then pass the
+case number to `comment` or `ihealth upload`. A `CreateCase` method exists in
+`pkg/cases` but is not wired to the CLI and has not completed successfully
+against the live API — see `POST /case-management/v1/cases` notes in that
+package.
 
 ---
 
@@ -146,7 +178,7 @@ myf5 ihealth list
 #### `upload <file.qkview> [case-number] [description]`
 Uploads a local diagnostic QKView bundle to iHealth with a real-time progress bar.
 ```bash
-myf5 ihealth upload /path/to/appliance.qkview "C1000234" "Initial triage bundle"
+myf5 ihealth upload /path/to/appliance.qkview "01287164" "Initial triage bundle"
 ```
 
 ---
