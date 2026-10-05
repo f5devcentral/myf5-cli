@@ -185,6 +185,12 @@ func (c *Client) UploadQKViewWithProgress(ctx context.Context, filePath, caseNum
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
+		// Close the read half so the writer goroutine's next Write fails
+		// instead of blocking forever on a pipe nobody is draining. Without
+		// this, a mid-upload network failure leaks the goroutine and the open
+		// file along with it — which is exactly when it is most likely to
+		// happen, since QKViews are large and uploads are long.
+		_ = pr.CloseWithError(err)
 		return nil, fmt.Errorf("upload request failed: %w", err)
 	}
 	defer resp.Body.Close()

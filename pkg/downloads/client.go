@@ -66,7 +66,8 @@ const (
 	// LegacyKParam is the `k` API usage key sent on the legacy fallback path.
 	//
 	// It is not a per-user secret: this value is published in F5's OpenAPI
-	// specification (docs/openapi.json) as the rateLimitParam example, which
+	// specification (docs/openapi-outdated-5Oct2026.json) as the
+	// rateLimitParam example, which
 	// is also the example for the downloads metadata endpoint specifically.
 	//
 	// Do NOT assume keys are scoped per API family. This same value is

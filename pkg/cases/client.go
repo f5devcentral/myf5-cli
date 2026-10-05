@@ -20,7 +20,8 @@ const (
 	// DefaultKParam is the `k` API usage key sent to Support Case endpoints.
 	//
 	// It is not a per-user secret: this value is published in F5's OpenAPI
-	// specification (docs/openapi.json) as the rateLimitParam example.
+	// specification (docs/openapi-outdated-5Oct2026.json) as the
+	// rateLimitParam example.
 	//
 	// VERIFIED 2026-10-02: this value is accepted by GET
 	// /case-management/v1/cases and returns real data. The spec's
@@ -105,7 +106,7 @@ func (c *Client) GetMetadata(ctx context.Context) (*CaseMetadataResponse, error)
 }
 
 // Case list `type` values, per the caseTypeParam enum in the F5 OpenAPI
-// specification (docs/openapi.json). `type` is REQUIRED on
+// specification (docs/openapi-outdated-5Oct2026.json). `type` is REQUIRED on
 // GET /case-management/v1/cases; omitting it returns
 // 400 "Missing type in the query params".
 const (
@@ -189,6 +190,35 @@ func (e *ErrMissingCreateFields) Error() string {
 		"cannot create case: missing required field(s): %s",
 		strings.Join(e.Missing, ", "),
 	)
+}
+
+// GetCase fetches a single case by number.
+//
+// The response reuses the list envelope: `data` is an ARRAY even for a single
+// case, so this returns the first element. It carries considerably more than
+// the list view — account, contacts, and the full email thread.
+func (c *Client) GetCase(ctx context.Context, caseNumber string) (*CaseDetail, error) {
+	path := fmt.Sprintf("/case-management/v1/cases/%s", url.PathEscape(caseNumber))
+	bodyBytes, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp GetCaseResponse
+	if err := json.Unmarshal(bodyBytes, &resp); err != nil {
+		return nil, fmt.Errorf("failed to decode case detail: %w", err)
+	}
+	if resp.IsError {
+		msg := resp.Message
+		if msg == "" {
+			msg = "the API reported an error without a message"
+		}
+		return nil, fmt.Errorf("failed to retrieve case %s: %s", caseNumber, msg)
+	}
+	if len(resp.Data) == 0 {
+		return nil, fmt.Errorf("case %s not found", caseNumber)
+	}
+	return &resp.Data[0], nil
 }
 
 // CreateCase submits a support ticket to MyF5.

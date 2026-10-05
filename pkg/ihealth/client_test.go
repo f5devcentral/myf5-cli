@@ -3,12 +3,16 @@ package ihealth
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The list endpoint returns ONLY ids, and the vendor media type needs its
@@ -116,11 +120,58 @@ func TestUploadQKView(t *testing.T) {
 	c := NewClient("test-tok", server.URL)
 	c.HTTPClient = server.Client()
 
-	resp, err := c.UploadQKView(context.Background(), sampleQKView, "C12345", "Test upload")
+	resp, err := c.UploadQKView(context.Background(), sampleQKView, "01287164", "Test upload")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp.ID != "12345" || resp.Status != "queued" {
 		t.Errorf("unexpected upload response: %+v", resp)
 	}
+}
+
+// A failed upload must not strand the goroutine feeding the request body.
+//
+// The body is produced by a writer goroutine through an io.Pipe. If the
+// request fails and nobody closes the read half, that goroutine blocks
+// forever on its next Write, holding the open QKView file with it. QKViews
+// are large and uploads are long, so a mid-transfer network failure is the
+// likely case, not the exotic one.
+//
+// The leak is invisible to a test that only checks the returned error, so
+// this one counts goroutines after forcing a failure.
+func TestUploadQKViewReleasesWriterOnRequestFailure(t *testing.T) {
+	// A server that hangs up immediately, so Do() fails mid-request.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("closing connection to force a client-side failure")
+	}))
+	server.Config.ErrorLog = log.New(io.Discard, "", 0)
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	sampleQKView := filepath.Join(tempDir, "big.qkview")
+	// Comfortably larger than the 64 KiB copy buffer, so the writer goroutine
+	// is still mid-loop when the request collapses.
+	if err := os.WriteFile(sampleQKView, make([]byte, 1<<20), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClient("test-tok", server.URL)
+	c.HTTPClient = server.Client()
+
+	before := runtime.NumGoroutine()
+
+	if _, err := c.UploadQKView(context.Background(), sampleQKView, "", ""); err == nil {
+		t.Fatal("expected an error when the server drops the connection")
+	}
+
+	// Give the writer goroutine a moment to observe the closed pipe and exit.
+	var after int
+	for i := 0; i < 50; i++ {
+		time.Sleep(10 * time.Millisecond)
+		after = runtime.NumGoroutine()
+		if after <= before {
+			return
+		}
+	}
+	t.Errorf("goroutine leaked after a failed upload: %d before, %d after", before, after)
 }

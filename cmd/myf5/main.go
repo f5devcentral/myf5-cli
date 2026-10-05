@@ -74,18 +74,7 @@ func main() {
 	// reported as an unknown action — and `doctor --help` was worse, running a
 	// live credential and network audit instead of explaining itself.
 	//
-	// `completion` and `doctor` are excluded: `completion` documents itself
-	// when called bare, and `doctor` runs its audit on a bare invocation, so
-	// both inspect the flag themselves. `cases create` and other nested help
-	// are handled inside their own handlers.
-	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help") {
-		switch subcommand {
-		case "completion", "doctor":
-			// falls through to the handler, which prints its own usage
-		default:
-			args = nil
-		}
-	}
+	args = normalizeHelpArgs(subcommand, args)
 
 	switch subcommand {
 	case "downloads", "download":
@@ -113,6 +102,37 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command '%s'. Run 'myf5 help' for usage.\n", subcommand)
 		os.Exit(1)
+	}
+}
+
+// isHelpFlag reports whether an argument asks for usage.
+func isHelpFlag(a string) bool {
+	return a == "--help" || a == "-h" || a == "help"
+}
+
+// normalizeHelpArgs turns `myf5 <command> --help` into the bare invocation
+// that each handler already answers with its own usage text.
+//
+// The top-level usage tells people to run `myf5 <command> --help`, so every
+// command has to honour it. Most handlers print usage when given no arguments,
+// so a help request is best expressed by dropping the argument. Without this,
+// `--help` fell through to each handler's action switch and came back as
+// "Unknown cases action '--help'".
+//
+// `completion` and `doctor` are returned untouched: `completion` takes a shell
+// name and documents itself when called bare, while `doctor` runs its audit on
+// a bare invocation — blanking its arguments would make `doctor --help`
+// perform a live credential and network audit instead of explaining itself.
+// Both inspect the flag themselves.
+func normalizeHelpArgs(subcommand string, args []string) []string {
+	if len(args) != 1 || !isHelpFlag(args[0]) {
+		return args
+	}
+	switch subcommand {
+	case "completion", "doctor":
+		return args
+	default:
+		return nil
 	}
 }
 
@@ -1040,11 +1060,67 @@ func handleCases(ctx context.Context, args []string) {
 		} else {
 			fmt.Println("Comment added successfully.")
 		}
+	case "get", "show", "detail":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "Usage: myf5 cases get <case-number>")
+			os.Exit(1)
+		}
+		detail, err := client.GetCase(ctx, args[1])
+		checkErr(ctx, err, "Failed to retrieve case")
+		printCaseDetail(detail)
 	case "create":
 		handleCaseCreate(ctx, client, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown cases action '%s'\n", action)
 		os.Exit(1)
+	}
+}
+
+func printCaseDetail(d *cases.CaseDetail) {
+	fmt.Printf("Case %s - %s\n", d.CaseNumber, d.Subject)
+	fmt.Printf("  Status     : %s\n", d.Status)
+	fmt.Printf("  Priority   : %s\n", d.Priority)
+	fmt.Printf("  Product    : %s %s\n", d.Product, d.Version)
+	if d.ReasonForContact != "" {
+		fmt.Printf("  Reason     : %s\n", d.ReasonForContact)
+	}
+	if d.SerialNumber != "" {
+		fmt.Printf("  Serial     : %s\n", d.SerialNumber)
+	}
+	if d.HostName != "" {
+		fmt.Printf("  Hostname   : %s\n", d.HostName)
+	}
+	if d.Account.AccountName != "" {
+		fmt.Printf("  Account    : %s (%s)\n", d.Account.AccountName, d.Account.AccountID)
+	}
+	if n := d.CaseOwnerContact.DisplayName(); n != "" {
+		fmt.Printf("  Owner      : %s <%s>\n", n, d.CaseOwnerContact.Email)
+	}
+	if n := d.AlternateContact.DisplayName(); n != "" {
+		fmt.Printf("  Alternate  : %s <%s>\n", n, d.AlternateContact.Email)
+	}
+	// dateOpened is deliberately not printed: the detail endpoint returns the
+	// priority string in that field. See CaseDetail.
+	for _, l := range d.Links {
+		if l.Rel == "case-detail" {
+			fmt.Printf("  Web        : %s\n", l.Href)
+		}
+	}
+	if d.Description != "" {
+		fmt.Println("\nDescription:")
+		for _, line := range strings.Split(strings.TrimRight(d.Description, "\n"), "\n") {
+			fmt.Printf("  %s\n", line)
+		}
+	}
+	if n := len(d.Activity.EmailActivities); n > 0 {
+		fmt.Printf("\nEmail thread (%d message(s), newest first):\n", n)
+		for _, e := range d.Activity.EmailActivities {
+			who := e.Contact.Name
+			if who == "" {
+				who = e.FromAddress
+			}
+			fmt.Printf("  [%s] %s\n", e.ActivityDate, who)
+		}
 	}
 }
 
@@ -1086,18 +1162,18 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 	dryRun := false
 
 	flagToField := map[string]string{
-		"--family":         "productFamily",
-		"--product":        "product",
-		"--version":        "version",
-		"--serial":         "serialNumber",
-		"--subject":        "subject",
-		"--description":    "description",
-		"--priority":       "priority",
-		"--reason":         "reasonForContact",
-		"--email":          "caseOwnerEmail",
-		"--contact-method": "preferredContactMethod",
-		"--timezone":       "timezone",
-		"--hostname":       "hostName",
+		"--family":          "productFamily",
+		"--product":         "product",
+		"--version":         "version",
+		"--serial":          "serialNumber",
+		"--subject":         "subject",
+		"--description":     "description",
+		"--priority":        "priority",
+		"--reason":          "reasonForContact",
+		"--email":           "caseOwnerEmail",
+		"--contact-method":  "preferredContactMethod",
+		"--timezone":        "timezone",
+		"--hostname":        "hostName",
 		"--customer-ticket": "customerTicketNumber",
 	}
 
@@ -1962,7 +2038,7 @@ func handleDoctor(ctx context.Context, args []string) {
 	// the other commands. Without this, `doctor --help` performed a live
 	// credential and network audit instead of describing itself.
 	for _, a := range args {
-		if a == "--help" || a == "-h" || a == "help" {
+		if isHelpFlag(a) {
 			fmt.Print(`myf5 doctor - Verify credentials, DNS, and firewall egress
 
 USAGE:
