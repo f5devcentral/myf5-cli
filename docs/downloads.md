@@ -166,14 +166,27 @@ The MyF5 Downloads API generates signed CDN download URLs distributed across glo
 
 ---
 
-## October 2, 2026 Base URL Cutover Notice
+## Endpoint, Path Prefix & the October 2, 2026 Cutover Notice
 
-> **Action Required**: The MyF5 Downloads API base URL changes October 2. Update your integrations to use `https://api.software.downloads.f5.com` and remove the `"k"` value from API calls to help prevent service disruptions.
+> [!CAUTION]
+> **The "October 2 base URL cutover" notice is UNSOURCED.** No F5 bulletin supporting it has been located. The F5 articles actually published that day (archived as [K000163521](./K000163521.txt) and [K15202](./K15202.txt)) describe an IP address change for `api.f5.com` and `callhome.f5.com` and say nothing about Downloads base URLs or the `k` parameter. See [§A of the network guide](./network_and_firewall.md#a-myf5-downloads-api-base-url-cutover-october-2-2026--unsourced), which is the authoritative discussion — do not let these two copies drift apart again.
+>
+> What *is* confirmed by observation: `api.software.downloads.f5.com` serves the catalog, takes no `k` parameter, and K15202 lists it as a real F5 service.
 
-### How `myf5` Implements This Change
+### The doubled `v1` in the path — not a typo
+
+All Downloads endpoints sit behind the prefix:
+
+```
+/v1/downloads-management/v1/downloads/...
+```
+
+The leading `/v1` is the **gateway's** route version; the inner `/v1` is the **API's**. Omitting the leading segment returns `404` with an **empty body** on every call — indistinguishable from the service being down, which is exactly how it was misdiagnosed for three days. Verified live 2026-10-05: the short form `404`s, the doubled form returns `200` and lists all 17 product families. The constant `downloads.DownloadsPrefix` holds it in one place.
+
+### How `myf5` Implements This
 - **Authoritative Endpoint**: `myf5-cli` connects to `https://api.software.downloads.f5.com` by default.
-- **Excised Query Parameters**: The deprecated rate-limiting query parameter `k` has been completely removed from all download API HTTP requests.
+- **No Query Key**: The `k` query parameter is not sent to this host; it does not accept one.
 - **OAuth 2.0 CIAM Alignment**:
   - Primary token issuer (Auth0): `https://idp.identity.f5.com/oauth/token`
   - Dedicated Okta CIAM authorization server: `https://identity.account.f5.com/oauth2/ausp95yxb4ShxMGvW357/v1/token` with scope `myf5_scope` and audience `api://ciam-api-myf5`.
-- **Transitional Resilience**: Automatic fallback to `support.apis.f5.com` is retained during pre-cutover testing if CloudFront distributions are provisioning.
+- **Legacy Fallback**: On a `403`/`404` the client retries against `support.apis.f5.com` with `k`, with rate-limit backoff. Note this has never been observed returning a successful Downloads response, and it cannot rescue a malformed path — it sends the same path to a different host.

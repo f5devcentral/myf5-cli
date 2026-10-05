@@ -38,14 +38,15 @@ You can verify reachability to all required cloud endpoints using:
 > [!CAUTION]
 > **No F5 bulletin supporting this notice has been located.** The text below has been carried in this repository without attribution — no article ID, URL, or archive link. The F5 articles actually published on 2026-10-02 are archived here as [K000163521](./K000163521.txt) and [K15202](./K15202.txt): both describe an **IP address change** for `api.f5.com` and `callhome.f5.com` (see §C) and neither mentions Downloads base URLs or the `k` parameter. K15202 does list `api.software.downloads.f5.com` as a live service, so the host is real — but that is the only part of this notice the sources support.
 >
-> Separately, as of 2026-10-02 `api.software.downloads.f5.com` returns `404` with an empty body on every path tried, so following this notice does not currently produce a working client. Either cite the bulletin or remove this section.
+> Separately: this section previously recorded that `api.software.downloads.f5.com` returned `404` with an empty body on every path tried, and concluded the notice did not produce a working client. **That conclusion was wrong.** The `404`s were caused by this client omitting the gateway's leading `/v1` path segment; with the correct prefix `/v1/downloads-management/v1/downloads/...` the host returns `200` (verified live 2026-10-05). The host and the absent `k` are therefore both corroborated by observation — it is only the *bulletin* that remains uncited.
 
 > **Action Required** (unverified): The MyF5 Downloads API base URL changes October 2. Update your integrations to use `https://api.software.downloads.f5.com` and remove the `"k"` value from API calls to help prevent service disruptions.
 
 - **Implementation in `myf5-cli`**:
   - `myf5-cli` targets `https://api.software.downloads.f5.com` as its primary endpoint by default.
-  - The legacy `k` query parameter has been completely removed from Downloads API calls.
-  - Prior to the cutover, if `api.software.downloads.f5.com` returns HTTP 403 or 404 (CloudFront distribution provisioning), `myf5-cli` automatically and transparently falls back to `support.apis.f5.com` with rate-limit retry backoff.
+  - The `k` query parameter is not sent to this host; it does not accept one.
+  - All paths carry the gateway's doubled `v1` prefix: `/v1/downloads-management/v1/downloads/...`. The leading segment is the gateway's route version, the inner one the API's. Omitting it returns an empty-bodied `404`.
+  - If `api.software.downloads.f5.com` returns HTTP 403 or 404, `myf5-cli` falls back to `support.apis.f5.com` with rate-limit retry backoff. This fallback has never been observed succeeding, and cannot rescue a wrong path.
 
 ### B. XC DNS & Traffic Cutover for `callhome.f5.com` and `api.f5.com` (September 25, 2026)
 > On Friday, September 25, starting at 9 AM PT for 2 hours, the following changes will be made to `callhome.f5.com` and `api.f5.com`:

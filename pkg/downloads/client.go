@@ -17,50 +17,52 @@ const (
 	// DefaultDownloadsFQDN is the host this client contacts first, without a
 	// `k` parameter.
 	//
-	// STATUS 2026-10-02 — DOWNLOADS ARE OFFLINE BY DESIGN, NOT BROKEN.
+	// STATUS 2026-10-05 — WORKING. `myf5 downloads families` returns all 17
+	// product families against this host (verified live 2026-10-05).
 	//
-	// F5 Digital maintenance notifications for Oct 1-7 2026 scheduled the
-	// cutover from ESDM (Enterprise Software Download Manager) to ESDP
-	// (Enterprise Software Distribution Platform) to begin Friday 2026-10-02
-	// at 06:00 PT and run for three days, with availability "currently
-	// targeted for Monday, October 5". A 09:00 notification the same day
-	// confirmed it had started and that ESDM was "now offline".
+	// HISTORY, because the earlier diagnosis here was wrong and the wrong
+	// conclusion is an easy one to reach again:
+	//
+	// On 2026-10-02 every path against this host returned 404 with an EMPTY
+	// body, including "/". That coincided with F5's cutover from ESDM
+	// (Enterprise Software Download Manager) to ESDP (Enterprise Software
+	// Distribution Platform) — scheduled to begin 2026-10-02 at 06:00 PT for
+	// three days, with a 09:00 notification the same day confirming ESDM was
+	// "now offline" — so the 404s were read as the service being down mid
+	// migration, and this comment asserted the correct path was "still
+	// unknown" and told the reader not to touch the client.
+	//
+	// That was a misdiagnosis. The 404s were OUR BUG: every path was missing
+	// the gateway's leading /v1 segment. See DownloadsPrefix below for the
+	// detail. The service was reachable; we were asking it for paths it does
+	// not serve, and an empty-bodied 404 looks identical either way.
+	//
+	// The lesson worth keeping: an empty 404 from this gateway means "no such
+	// route", and a plausible outage story is not evidence that the route is
+	// right. Check the path before concluding the service is down.
 	//
 	// Access to ESDP post-go-live is requested separately per KB57950.
-	//
-	// DO NOT "fix" this client against the half-migrated service. Any change
-	// to host, path or key made during the cutover window is being fitted to
-	// a transient state and will likely be wrong once ESDP is released. Wait
-	// for Go-Live, then re-test and adapt to what ESDP actually serves.
-	//
-	// Observed during the window, consistent with the announcement:
-	//   - This host resolves to its published address (159.60.134.92, F5 XC)
-	//     and is listed in F5 article K15202 as "F5 software downloads", so
-	//     it is a real service and not an unprovisioned distribution.
-	//   - Every path tried returns 404 with an EMPTY body, including "/".
-	//     That is a host terminating TLS while serving no API, not a routing
-	//     miss, so the correct path here is still unknown.
-	//   - The legacy fallback below then rejects every published `k` value
-	//     with 400 "Missing or invalid k query parameter".
-	//
-	// Neither observation says anything is wrong with this client. `cases
-	// list` on the same legacy host with the same key worked throughout the
-	// window, so the key itself is fine; it is the downloads service behind
-	// that gateway that is down. (The API is also rate limited, and the 400s
-	// above came from heavy probing, which can produce the same message — a
-	// second reason not to read them as key errors.)
 	//
 	// CAUTION on provenance: comments here previously asserted an F5
 	// "October 2, 2026 cutover" moving Downloads to this host and removing
 	// `k`. No F5 bulletin supporting that has been located. The F5 articles
 	// published on that date (K000163521, K15202) describe an IP ADDRESS
 	// change for api.f5.com and callhome.f5.com — a firewall-allowlist
-	// matter — and say nothing about base URLs or `k`. Treat the cutover
-	// claim in docs/ as unsourced until a bulletin is produced.
+	// matter — and say nothing about base URLs or `k`. The host and the
+	// absent `k` are both confirmed by observation (this host serves the
+	// catalog and takes no `k`), but the bulletin said to justify them has
+	// never been produced. Treat the cutover NARRATIVE as unsourced.
 	DefaultDownloadsFQDN = "api.software.downloads.f5.com"
 
 	// LegacySupportFQDN is the fallback gateway, tried when the host above
-	// returns 403/404 (which, as of 2026-10-02, it always does).
+	// returns 403/404.
+	//
+	// The fallback has not been needed since the path fix of 2026-10-05: the
+	// primary host serves the catalog directly. It is retained because it
+	// costs nothing when unused, but note that it has never been observed
+	// serving a successful Downloads response — every published `k` value was
+	// rejected there with 400 "Missing or invalid k query parameter" during
+	// 2026-10-02 probing. Do not assume it is a working safety net.
 	LegacySupportFQDN = "support.apis.f5.com"
 
 	// LegacyKParam is the `k` API usage key sent on the legacy fallback path.
@@ -89,8 +91,8 @@ type Client struct {
 	AutoFallback bool
 
 	// APIKey is the `k` usage key sent only on the legacy support.apis.f5.com
-	// fallback path. Empty falls back to LegacyKParam, which is a dead shared
-	// constant — see its doc comment.
+	// fallback path. Empty falls back to LegacyKParam — see its doc comment
+	// for what that value is and is not.
 	APIKey string
 }
 
@@ -145,7 +147,7 @@ func NewClientWithKey(token, baseFQDN, apiKey string) *Client {
 // The leading /v1 is the gateway's own route version and the inner /v1 is the
 // API's. Omitting the leading segment 404s every Downloads call, which is what
 // the pre-cutover code did. The shape matches the published OpenAPI document
-// (docs/openapi-pulled-5Oct2026.json).
+// (docs/openapi-outdated-5Oct2026.json).
 const DownloadsPrefix = "/v1/downloads-management/v1/downloads"
 
 // GetMetadata fetches the complete product hierarchy and catalog index.
@@ -210,8 +212,13 @@ func (c *Client) GetFileLinks(ctx context.Context, family, line, version, contai
 }
 
 // doGetWithFallback executes a GET request against BaseFQDN without 'k'.
-// If BaseFQDN returns CloudFront 403 or 404 (common before the Oct 2 cutover),
-// it automatically falls back to support.apis.f5.com with 'k'.
+// If BaseFQDN returns 403 or 404, it automatically falls back to
+// support.apis.f5.com with 'k'.
+//
+// Note that a 404 from the primary host is far more likely to be a wrong path
+// than an unavailable service — that is what the missing leading /v1 produced
+// for three days. The fallback will not rescue a malformed path: it sends the
+// same path to a different host.
 func (c *Client) doGetWithFallback(ctx context.Context, path string) ([]byte, error) {
 	scheme := "https"
 	fqdn := c.BaseFQDN

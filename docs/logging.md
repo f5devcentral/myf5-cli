@@ -15,15 +15,17 @@ Real examples, all observed on 2026-10-05:
 
 | What the user sees | What is actually wrong |
 |---|---|
-| `400 "Serial Number,Product Family and Product are required"` | Exactly one of them is missing. The message always names all three. |
-| `403 "The value entered is invalid or out of Support"` | The serial number. Same status code the gateway uses for a bad API key, so it reads as a credentials failure. |
+| `400 "Serial Number,Product Family and Product are required"` | Exactly one of them is missing. The message always names all three, and is phrased for BIG-IP whatever family was sent. |
+| `403 "Unable to verify Subscription..."` | An NGINX or Aspen Mesh case with no `subscriptionId`. Different families are verified by different identifiers, so the field named is not always the field you omitted. |
+| `403 "The value entered is invalid or out of Support"` | The entitlement identifier was present but not recognised. Same status code the gateway uses for a bad API key, so it reads as a credentials failure. |
 | `500 "Malformed JSON: Expected '{'"` | A `GET` with no body at all. Server-side defect. |
-| `404` with an empty body | A path prefix was wrong. No hint which part. |
+| `404` with an empty body | A path prefix was wrong. No hint which part — this is what the missing leading `/v1` on Downloads produced, and it was mistaken for a service outage for three days. |
 
 None of these can be told apart without seeing the request that produced them.
-Working out the downloads `404` in this session took a side-by-side comparison
-of two URLs — something the user could have supplied directly from a debug
-log, had one existed.
+Working out the downloads `404` took a side-by-side comparison of two URLs
+differing only in a leading `/v1` — something the user could have supplied
+directly from a debug log, had one existed. Instead it was diagnosed as an
+outage and left alone for three days.
 
 ## Two separate features
 

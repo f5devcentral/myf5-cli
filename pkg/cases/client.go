@@ -66,9 +66,10 @@ func (c *Client) GoString() string {
 	return c.String()
 }
 
-// NewClient initializes a new MyF5 Support Case client using the legacy
-// fallback API usage key. Prefer NewClientWithKey, which accepts the caller's
-// own key; see DefaultKParam for why the fallback cannot work.
+// NewClient initializes a new MyF5 Support Case client using the built-in
+// API usage key, which was accepted by the Case endpoints when last verified
+// (2026-10-02 — see DefaultKParam). Prefer NewClientWithKey where the caller
+// has its own key, so a rotation does not require a rebuild.
 func NewClient(token string, baseFQDN string) *Client {
 	return NewClientWithKey(token, baseFQDN, "")
 }
@@ -167,20 +168,20 @@ func (c *Client) ListCases(ctx context.Context, showClosed bool) (*ListCasesResp
 
 // Field requirements for CreateCase, as the LIVE API enforces them.
 //
-// These differ from the published OpenAPI document, which is wrong on two
-// counts (verified live 2026-10-05):
+// These are the fields required for EVERY product family. The entitlement
+// identifier is deliberately NOT in this list: which one the API demands
+// depends on the family, so it is resolved by EntitlementFieldFor and checked
+// separately. See that function for the rule and its evidence.
 //
-//   - serialNumber is documented as an optional field "applicable for only
-//     BIG-IP products". The API requires it. Omitting it returns
-//     400 "Serial Number,Product Family and Product are required to create
-//     Case." even for a Pre Sales case, and even though existing cases are
-//     readable with serialNumber: "".
-//   - The schema's required list names `version`, while every example in the
-//     same document sends `productVersion`. `version` is what the API takes.
+// This list differs from the published OpenAPI document, which is wrong
+// (verified live 2026-10-05): the schema's required list names `version`,
+// while every example in the same document sends `productVersion`. `version`
+// is what the API takes.
 //
-// A serial that is present but unknown returns 403 "The value entered is
-// invalid or out of Support", which is how we know the rest of the payload
-// validates: the API only reaches the lookup once everything else passes.
+// An entitlement identifier that is present but unknown returns 403 "The
+// value entered is invalid or out of Support", which is how we know the rest
+// of the payload validates: the API only reaches the lookup once everything
+// else passes.
 var requiredCreateFields = []string{
 	"productFamily",
 	"product",
@@ -445,20 +446,22 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// A 403 here is nearly always the `k` API usage key rather than the
-		// bearer token (a bad token returns 401). Say so, because the raw API
-		// message — "The API Key to API association not exist" — does not make
-		// it obvious which of the two credentials is at fault, nor that the
-		// built-in fallback key cannot work for anyone.
+		// A 403 from this API means one of two unrelated things, and the
+		// status code alone does not distinguish them:
+		//
+		//   - the `k` API usage key was rejected ("The API Key to API
+		//     association not exist"), or
+		//   - the request was well formed but its DATA was rejected — an
+		//     unrecognised or out-of-support entitlement identifier on
+		//     create, answering "The value entered is invalid or out of
+		//     Support." or "Unable to verify Subscription." (both verified
+		//     live 2026-10-05).
+		//
+		// Blaming the key for a data rejection sends the reader after
+		// entirely the wrong credential, so the body is inspected first and
+		// the key explanation offered only when it carries no specific
+		// grievance. Note a bad bearer token returns 401, not 403.
 		if resp.StatusCode == http.StatusForbidden {
-			// A 403 here is NOT always the `k` key. The Case API also returns
-			// 403 for a well-formed request whose data it rejected — notably
-			// an unrecognised or out-of-support serial number on create,
-			// which answers with "The value entered is invalid or out of
-			// Support." (verified live 2026-10-05). Blaming the API key for
-			// that sends the reader after entirely the wrong credential, so
-			// only offer the key explanation when the body does not already
-			// carry a specific grievance.
 			body := string(respBytes)
 			if strings.Contains(body, "out of Support") ||
 				strings.Contains(body, "value entered is invalid") ||

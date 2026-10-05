@@ -93,7 +93,7 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
 | **Primary Commands** | Tab completes `downloads`, `cases`, `ihealth`, `bigip`, `bigiq`, `push`, `pull`, `doctor`, `completion`, `version`, `help` with contextual descriptions. |
 | **Download Actions** | Tab completes `browse`, `families`, `lines`, `versions`, `containers`, `files`, `get`. |
 | **Product Families** | Suggests common F5 product families: `BIG-IP`, `NGINX`, `BIG-IQ`. |
-| **Case Actions** | Tab completes `list`, `metadata`, `comment`. |
+| **Case Actions** | Tab completes `list`, `metadata`, `get`, `comment`, `create`, plus `--all` on `cases list`. |
 | **iHealth Actions** | Tab completes `list`, `upload`. |
 | **BIG-IP Actions** | Tab completes `ready`, `qkview`, `push`, `download`. |
 | **BIG-IQ Actions** | Tab completes `ready`, `push`, `download`. |

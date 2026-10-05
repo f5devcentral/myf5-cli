@@ -29,15 +29,24 @@ In accordance with enterprise DevSecOps standards, **passing credentials or toke
 | [`bigip`](#4-myf5-bigip) | Orchestrate BIG-IP TMOS appliances (readiness, QKView generation, push) |
 | [`bigiq`](#5-myf5-bigiq) | Orchestrate BIG-IQ Centralized Management appliances (readiness, push) |
 | [`push`](#6-myf5-push) | Push downloads or files to BIG-IP / BIG-IQ via iControl REST or SCP |
-| [`doctor`](#7-myf5-doctor) | Run connectivity, DNS, egress, and credential diagnostics |
-| [`completion`](#8-myf5-completion) | Generate native shell autocompletion scripts (`bash`, `zsh`, `fish`) |
-| [`version`](#9-myf5-version) | Display application version and toolchain info |
+| [`pull`](#7-myf5-pull) | Pull files or diagnostics from BIG-IP / BIG-IQ via iControl REST or SCP |
+| [`doctor`](#8-myf5-doctor) | Run connectivity, DNS, egress, and credential diagnostics |
+| [`completion`](#9-myf5-completion) | Generate native shell autocompletion scripts (`bash`, `zsh`, `fish`) |
+| [`version`](#10-myf5-version) | Display application version and toolchain info |
 
 ---
 
 ## 1. `myf5 downloads`
 
 Browse the MyF5 software image catalog, query releases, and download images with live streaming progress, cryptographic checksum verification, and optional post-download appliance push.
+
+> **Endpoint:** `api.software.downloads.f5.com`, path prefix
+> `/v1/downloads-management/v1/downloads/...`. The **doubled `v1` is not a
+> typo** — the leading segment is the gateway's route version, the inner one
+> the API's. Omitting the leading `/v1` returns `404` with an empty body on
+> every call, which reads exactly like an outage and was misdiagnosed as one
+> for three days (verified live 2026-10-05: short form `404`, doubled form
+> `200`). This host takes **no** `k` parameter.
 
 ### Actions
 

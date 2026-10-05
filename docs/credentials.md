@@ -70,18 +70,18 @@ export IHEALTH_CLIENT_SECRET="..."
 
 ### The `k` API usage key
 
-Endpoints on `support.apis.f5.com` require a `k` query parameter — an "API usage key" — alongside the OAuth bearer token. F5's OpenAPI specification ([`openapi.json`](./openapi.json)) marks it required on every such operation.
+Endpoints on `support.apis.f5.com` require a `k` query parameter — an "API usage key" — alongside the OAuth bearer token. F5's OpenAPI specification (archived here as [`openapi-outdated-5Oct2026.json`](./openapi-outdated-5Oct2026.json)) marks it required on every such operation.
 
 **You do not normally need to configure this.** Despite the name, it is not a per-user secret — the value is published in F5's specification, and `myf5` ships it.
 
 The specification lists three example values, one per API family, which invites the assumption that each family needs its own. **That assumption is wrong.** Testing on 2026-10-02 found that the single value `myf5` ships is accepted by the Support Case endpoints, while the specification's own Case-specific example is rejected there with `400 Missing or invalid k query parameter`. Trust observed behaviour over the specification's examples.
 
-> [!WARNING]
-> **MyF5 Downloads is offline as of 2026-10-02 — this is F5's cutover, not a fault in this client.** An F5 Digital notification that morning announced the migration from ESDM to ESDP had begun, that ESDM was "now offline", and that MyF5 Downloads would be unavailable until a Go-Live notification is issued.
+> [!NOTE]
+> **Downloads does not use a `k` key at all.** `api.software.downloads.f5.com` takes no `k` parameter; the key applies only to `support.apis.f5.com`. A Downloads failure is therefore never a `k` problem.
 >
-> Do not reconfigure anything to work around it. Support Case commands continue to work on the same gateway with the same key, which confirms your credentials are fine. Wait for Go-Live.
+> This document previously warned that MyF5 Downloads was offline for F5's ESDM-to-ESDP cutover and told readers to wait for Go-Live. That diagnosis was wrong: the `404`s came from this client omitting the gateway's leading `/v1` path segment, fixed on 2026-10-05. Downloads commands work.
 
-If you need to diagnose this yourself, note that **the API is rate limited** — test with single requests spaced out, not loops. Rapid probing produces `400` responses that are easily mistaken for key errors.
+If you need to diagnose a `k` rejection, note that **the API is rate limited** — test with single requests spaced out, not loops. Rapid probing produces `400` responses that are easily mistaken for key errors.
 
 Should F5 rotate a key or issue a tenant-specific one, override it:
 

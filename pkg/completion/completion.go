@@ -36,7 +36,7 @@ _myf5_completions() {
 
     local commands="downloads cases ihealth bigip bigiq push pull doctor completion version help"
     local downloads_actions="browse families lines versions containers files get"
-    local cases_actions="list metadata comment"
+    local cases_actions="list metadata get comment create"
     local ihealth_actions="list upload"
     local bigip_actions="ready qkview push download"
     local bigiq_actions="ready push download"
@@ -70,6 +70,10 @@ _myf5_completions() {
         cases|case)
             if [[ $cword -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "$cases_actions" -- "$cur") )
+                return 0
+            fi
+            if [[ "${words[2]}" == "list" ]]; then
+                COMPREPLY=( $(compgen -W "--all" -- "$cur") )
                 return 0
             fi
             ;;
@@ -202,9 +206,11 @@ _myf5() {
                 cases|case)
                     local -a case_actions
                     case_actions=(
-                        'list:List active support cases'
+                        'list:List support cases (--all includes closed)'
                         'metadata:Retrieve support case schema metadata'
+                        'get:Show one case in full'
                         'comment:Add a note to an existing case'
+                        'create:Open a new support case'
                     )
                     _arguments -C \
                         '1: :->c_action' \
@@ -366,9 +372,12 @@ complete -c myf5 -n "__fish_seen_subcommand_from downloads download" -s o -l out
 complete -c myf5 -n "__fish_seen_subcommand_from downloads download" -l push -d "Push to host after download"
 
 # Cases subcommands
-complete -c myf5 -n "__fish_seen_subcommand_from cases case; and not __fish_seen_subcommand_from list metadata comment" -a list -d "List active support cases"
-complete -c myf5 -n "__fish_seen_subcommand_from cases case; and not __fish_seen_subcommand_from list metadata comment" -a metadata -d "Get case schema metadata"
-complete -c myf5 -n "__fish_seen_subcommand_from cases case; and not __fish_seen_subcommand_from list metadata comment" -a comment -d "Add comment to case"
+complete -c myf5 -n "__fish_seen_subcommand_from cases case; and not __fish_seen_subcommand_from list metadata get comment create" -a list -d "List support cases (--all includes closed)"
+complete -c myf5 -n "__fish_seen_subcommand_from cases case; and not __fish_seen_subcommand_from list metadata get comment create" -a metadata -d "Get case schema metadata"
+complete -c myf5 -n "__fish_seen_subcommand_from cases case; and not __fish_seen_subcommand_from list metadata get comment create" -a get -d "Show one case in full"
+complete -c myf5 -n "__fish_seen_subcommand_from cases case; and not __fish_seen_subcommand_from list metadata get comment create" -a comment -d "Add comment to case"
+complete -c myf5 -n "__fish_seen_subcommand_from cases case; and not __fish_seen_subcommand_from list metadata get comment create" -a create -d "Open a new support case"
+complete -c myf5 -n "__fish_seen_subcommand_from cases case; and __fish_seen_subcommand_from list" -l all -d "Include closed cases"
 
 # iHealth subcommands
 complete -c myf5 -n "__fish_seen_subcommand_from ihealth; and not __fish_seen_subcommand_from list upload" -a list -d "List recent QKView uploads"
