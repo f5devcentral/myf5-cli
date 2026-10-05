@@ -1,8 +1,17 @@
 # Branch Protection for `main`
 
-> **Status: not enabled.** This records the intended configuration and the
-> exact command to apply it. Enabling protection is a repository governance
-> change, so it is left for a repo admin to run deliberately.
+> **Status: enabled.** Protection is active on `main`. It first took effect
+> during the merge of PR #6 on 2026-10-05, which it blocked until the rule
+> was adjusted. This records the configuration and the command to reproduce
+> it.
+>
+> Required reviews were **removed** deliberately. This is a
+> single-maintainer repository, and GitHub refuses to let an author approve
+> their own pull request, so a required-approval rule could never be
+> satisfied — every merge would need an administrator override, and a rule
+> bypassed on every use protects nothing while making the merge log harder
+> to read. The required status checks below are the half that does the work,
+> and they remain enforced.
 
 ## Why
 
@@ -65,10 +74,7 @@ gh api -X PUT repos/SalesAmerSP/myf5-cli/branches/main/protection \
     ]
   },
   "enforce_admins": false,
-  "required_pull_request_reviews": {
-    "required_approving_review_count": 1,
-    "dismiss_stale_reviews": true
-  },
+  "required_pull_request_reviews": null,
   "restrictions": null,
   "allow_force_pushes": false,
   "allow_deletions": false
@@ -85,17 +91,27 @@ JSON
 - **`enforce_admins: false`** lets an admin bypass protection in an emergency.
   Set it to `true` for a stricter posture, accepting that a broken `main`
   then needs a deliberate unprotect step to fix.
-- **`required_approving_review_count: 1`** blocks self-merge. On a
-  single-maintainer repository this stops work entirely, so set it to `0` if
-  that is the situation — the status checks still apply and are the part that
-  matters most here.
+- **`required_pull_request_reviews: null`** is not an oversight. An earlier
+  revision of this document proposed `required_approving_review_count: 1`
+  and warned in the same breath that it "stops work entirely" on a
+  single-maintainer repository. That warning was then ignored when the rule
+  was applied, and PR #6 — 29 commits, all twelve checks green — deadlocked
+  on a review that nobody existed to give. GitHub does not permit an author
+  to approve their own pull request, and there is no flag that relaxes it.
+  Restore this rule only when a second person with write access is actually
+  reviewing; until then it buys nothing and costs an admin override on
+  every merge.
 
 ## Verifying
 
 ```bash
 gh api repos/SalesAmerSP/myf5-cli/branches/main/protection \
-  --jq '{checks: .required_status_checks.contexts, strict: .required_status_checks.strict, reviews: .required_pull_request_reviews.required_approving_review_count}'
+  --jq '{checks: .required_status_checks.contexts, strict: .required_status_checks.strict, reviews: .required_pull_request_reviews}'
 ```
+
+`reviews` should be `null`. If it reports an approving-review count instead,
+the rule has been reinstated and self-merge will deadlock — see the note
+above before working around it.
 
 A direct push to `main` should then be refused:
 
