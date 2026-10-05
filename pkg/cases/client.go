@@ -20,7 +20,7 @@ const (
 	// DefaultKParam is the `k` API usage key sent to Support Case endpoints.
 	//
 	// It is not a per-user secret: this value is published in F5's OpenAPI
-	// specification (docs/openapi-outdated-5Oct2026.json) as the
+	// specification (internal_docs/oas/openapi-outdated-5Oct2026.json) as the
 	// rateLimitParam example.
 	//
 	// VERIFIED 2026-10-02: this value is accepted by GET
@@ -127,7 +127,7 @@ func (c *Client) GetMetadata(ctx context.Context) (*CaseMetadataResponse, error)
 }
 
 // Case list `type` values, per the caseTypeParam enum in the F5 OpenAPI
-// specification (docs/openapi-outdated-5Oct2026.json). `type` is REQUIRED on
+// specification (internal_docs/oas/openapi-outdated-5Oct2026.json). `type` is REQUIRED on
 // GET /case-management/v1/cases; omitting it returns
 // 400 "Missing type in the query params".
 const (
