@@ -1,0 +1,202 @@
+ K000090853: Exchange files with F5 Support
+Published Date: Dec 27, 2022Updated Date: Jun 8, 2026
+
+    Download Article
+
+Topic
+
+F5 Support may require files to diagnose and fix technical support issues.
+
+File sharing tools
+
+F5 Support uses F5 Secure Files (securefiles.f5.com) to securely exchange files with you. This file transfer site complies with global data protection standards to safeguard the data you exchange.
+
+You can also upload a QKView file to F5 iHealth, which enables you to quickly diagnose the health and proper operation of your BIG-IP system and provide diagnostic data to F5 Support when you are working on a case.
+
+Types of Secure Files users
+
+Two categories of Secure Files users provide files about support cases to F5 Support:
+
+    Case owners—Users who are on the MyF5 account to which a support case belongs and have access to the case.
+    Invited users—Associates of support case owners who assist them with uploading or downloading files for a case. They are not on the account to which the support case belongs, and they do not have access to the case. For more information, continue to the Send an associate an email invitation to a support case folder on Secure Files section of this article.
+
+    Note: On or after January 29, 2024, if you are or have an invited user who receives an error while accessing Secure Files, they likely need to be invited to access the support case folder on Secure Files.
+
+Prerequisites
+
+Send an associate an email invitation to a support case folder on Secure Files (optional)
+
+Associates who are not on your MyF5 account can exchange files about a support case with F5 Support on your behalf. They are invited users. You must send them an email invitation to access the folder for the support case on Secure Files.
+
+Invited users must:
+
+    Have their own MyF5 account.
+    Receive an email invitation to access the folder for the support case on Secure Files.
+
+    The following roles on the MyF5 account to which the support case belongs can send invitations to invited users:
+        Case contact—Person whose name is listed under Contact Information on the case page. To see the page, go to MyF5 (my.f5.com) > Support > Case management > case ID.
+        Admin—Role in the account to which the support case belongs*
+        Case Manager—Role in the account to which the support case belongs*
+
+        *Note: For more information about roles associated with MyF5 accounts, refer to K000136095: About MyF5 account user roles and permissions.
+
+For information about the following, refer to K000138087: Give or receive access to a support case folder on Secure Files.
+
+    Give an associate access to a support case folder on Secure Files
+    View invited users who have access to a support case folder on Secure Files
+    Remove an invited user from a support case folder on Secure Files
+    Re-invite an associate you removed from a support case folder on Secure Files
+
+Invited users can access only the folders for support cases to which you invite them. You can also rescind access to support case folders at any time.
+
+Note: On or after January 29, 2024, if you are or have an invited user who receives an error while accessing Secure Files, they likely need to be invited to access the support case folder on Secure Files.
+
+Procedures
+
+To watch a video demo of accessing Secure Files through MyF5 and uploading and downloading files, go to  Securely exchange files with F5 Support using F5 Secure Files through MyF5.
+
+    Exchange files using Secure Files
+        Access Secure Files using MyF5
+        Go directly to the Secure Files site
+        Upload files
+        Download files
+    Exchange files using SFTP to access Secure Files from an F5 device
+    Use iHealth to send a QKView diagnostic file to F5 Support
+
+Exchange files using Secure Files
+
+You can access Secure Files using MyF5 or by going directly to the Secure Files site.
+
+Access Secure Files using MyF5
+
+Case owners and invited users use different procedures to access Secure Files from MyF5. For more information about invited users, refer to the Types of Secure Files users section of this article.
+
+Case owner access to Secure Files using MyF5
+
+For information about case owners, refer to the Types of Secure Files users section of this article.
+
+    Go to MyF5 and sign in to your MyF5 account.
+    Go to Support > Case management
+    Select the support case for which you want to upload or download files.
+    Under Case Invitations to Secure Files, select Upload to Secure Files or Download from Secure Files.
+    Continue to the Upload files or Download files section in this article.
+
+Invited user access to Secure Files using MyF5
+
+For information about invited users, refer to the Types of Secure Files users section of this article.
+
+    Go to MyF5 and sign in to your MyF5 account.
+    Go to Support > Case Invitations to Secure Files.
+    Select the support case for which you want to upload or download files.
+    Continue to the Upload files or Download files section in this article.
+
+Go directly to the Secure Files site
+
+Both case owners and invited users may want to directly access Secure Files to exchange files with F5 Support. For more information about types of users, refer to the Types of Secure Files users section of this article.
+
+    Go to Secure Files.
+    Sign in using your MyF5 account login and password.
+
+    Note: When you log in to Secure Files directly using your MyF5 account credentials, you are prompted to provide multi-factor authentication (MFA). For more information, refer to K000135451: F5 requires multi-factor authentication (MFA) for account login.
+    Select the support case for which you want to upload or download files.
+    Continue to the Upload files or Download files section in this article.
+
+Upload files
+
+If you are using MyF5, skip the first two steps, because the link from MyF5 goes directly to the folder for uploading files for your case.
+
+    On the Home folder page, select the folder for the support case you want.
+    Select Incoming (upload to F5).
+    In the upper-right corner of the Upload to F5 page, select the Upload files icon.
+    In the Upload Files dialog box, select Browse.
+    In the Open dialog box, go to each file you want to upload, point at it with your cursor, select the check box that displays, and when you are finished selecting files, select Open.
+
+    Either a success or failure notification displays. When an upload fails, close the notification and try again.
+    In the Upload Files dialog box, select Done.
+
+Note: You cannot see the files in the folder after uploading them.
+
+Download files
+
+If you are using MyF5, skip the first two steps, because the link from MyF5 goes directly to the folder for downloading files for your case.
+
+    On the Home folder page, select the folder for the service request you want.
+    Select Outgoing (download from F5).
+    Select the check box next to the files you want to download.
+    In the upper-right corner of the Download from F5 page, select the Download selected items icon.
+    Depending on which browser you have, you may be prompted to save your files to the location of your choice, or they may simply download to your Downloads folder.
+
+Exchange files using SFTP to access Secure Files from an F5 device
+
+Secure Files supports the Secure File Transfer Protocol (SFTP) protocol, but only a subset of features provided by many SFTP clients. The SFTP server does not support or allow setting file ownership or permissions, updating timestamps, or creating symlinks.
+
+Important: The sftp feature is not available to internal F5 users.
+Important: Secure Files do not support the Secure Copy (SCP) protocol.
+
+You can also use external SFTP applications to upload or download files if they are on a workstation or other system.
+
+Notes:
+
+    For F5 Secure Files:
+        The RSA server key MD5 fingerprint is: MD5:57:8e:68:2f:0c:0f:e3:d6:f8:16:0a:ca:61:f7:e2:0b.
+        The SHA256 fingerprint is: SHA256:Q6/izJDO1P31iJmtbZI8IdJUXrbOiEgkQwt3+fxiDkc=.
+    On or after January 29, 2024, if you are or have an invited user who receives an error while accessing Secure Files, they likely need to be invited to access the support case folder on Secure Files. For more information, see the Send an associate an email invitation to a support case folder on Secure Files section of this article.
+
+Upload files to Secure Files using SFTP
+
+    From the F5 device, SFTP to the Secure Files site using the following syntax:
+
+    sftp -o User=email host
+
+    For example:
+
+    sftp -o User=john@example.com securefiles.f5.com
+
+    Note: On the first attempt to connect, you must accept the host key. You should compare that output with the fingerprints listed in this article.
+    When prompted for the password, enter the MyF5 account password.
+    To upload the requested files, use the following command syntax for each file:
+
+    put <name_of_file> <SR_number>/INCOMING/
+
+    For example:
+
+    put mybigip.conf 00123456/INCOMING/
+    To exit the SFTP utility when all files have been uploaded, enter the following command:
+
+    quit
+
+For more information, refer to the manual or man pages for the SFTP utility by entering man sftp at the command line.
+
+Download files to Secure Files using SFTP
+
+To download a file from Secure Files, you must use the exact file name and location (path) provided by your F5 Support representative.
+
+    From the F5 device, SFTP to the Secure Files site using the following syntax:
+
+    sftp -o User=email host
+
+    For example:
+
+    sftp -o User=john@example.com securefiles.f5.com
+    When prompted for the password, enter the MyF5 account password.
+    To list the files available for download, enter the following command:
+
+    ls 00123456/OUTGOING
+    To download the requested files, use the following command syntax for each file:
+
+    Note: The <full_path_to_file> section indicates the full path to the file.
+
+    get <full_path_to_file>
+
+    For example:
+
+    get 00123456/OUTGOING/Hotfix-BIGIP-12.1.0.0.40.1434-ENG.iso
+    To exit the SFTP utility when all files have been downloaded, enter the following command:
+
+    quit
+
+Use iHealth to send a QKView file to F5 Support
+
+iHealth enables you to quickly diagnose the health and proper operation of your BIG-IP system and provides a convenient method for you to send diagnostic data when you are working on a case with F5 Support.
+
+If you are running BIG-IP 10.x or later and need to provide a QKView diagnostic file to F5, the preferred way to do so is to upload the file to the iHealth site. For more information, refer to K12878: Generating diagnostic data using the qkview utility.

@@ -12,7 +12,7 @@ myf5 <command> [subcommand] [arguments...] [options]
 
 ### Zero-Secret Security Enforcement
 In accordance with enterprise DevSecOps standards, **passing credentials or tokens via command-line flags is strictly prohibited**. 
-- Flags like `--password`, `-p`, `--client-secret`, or `--token` are trapped prior to command dispatch.
+- Flags like `--password`, `-pw`, `--client-secret`, or `--token` are trapped prior to command dispatch. (Note that `-p` is *not* trapped — on appliance commands it is the port flag.)
 - When detected, `myf5` immediately terminates with exit code `2` to prevent credentials from leaking into process tables (`/proc/$PID/cmdline`, `ps aux`), system audit logs (auditd, Falco), and shell histories (`.zsh_history`, `.bash_history`).
 - Store cloud credentials in `~/.f5api_credentials` or set `F5_CLIENT_ID` / `F5_CLIENT_SECRET` in the environment.
 - Appliance passwords are provided via environment variables (`BIGIP_PASSWORD`, `BIGIQ_PASSWORD`), SSH keys/agents, or entered interactively at the masked terminal prompt.
@@ -29,15 +29,24 @@ In accordance with enterprise DevSecOps standards, **passing credentials or toke
 | [`bigip`](#4-myf5-bigip) | Orchestrate BIG-IP TMOS appliances (readiness, QKView generation, push) |
 | [`bigiq`](#5-myf5-bigiq) | Orchestrate BIG-IQ Centralized Management appliances (readiness, push) |
 | [`push`](#6-myf5-push) | Push downloads or files to BIG-IP / BIG-IQ via iControl REST or SCP |
-| [`doctor`](#7-myf5-doctor) | Run connectivity, DNS, egress, and credential diagnostics |
-| [`completion`](#8-myf5-completion) | Generate native shell autocompletion scripts (`bash`, `zsh`, `fish`) |
-| [`version`](#9-myf5-version) | Display application version and toolchain info |
+| [`pull`](#7-myf5-pull) | Pull files or diagnostics from BIG-IP / BIG-IQ via iControl REST or SCP |
+| [`doctor`](#8-myf5-doctor) | Run connectivity, DNS, egress, and credential diagnostics |
+| [`completion`](#9-myf5-completion) | Generate native shell autocompletion scripts (`bash`, `zsh`, `fish`) |
+| [`version`](#10-myf5-version) | Display application version and toolchain info |
 
 ---
 
 ## 1. `myf5 downloads`
 
 Browse the MyF5 software image catalog, query releases, and download images with live streaming progress, cryptographic checksum verification, and optional post-download appliance push.
+
+> **Endpoint:** `api.software.downloads.f5.com`, path prefix
+> `/v1/downloads-management/v1/downloads/...`. The **doubled `v1` is not a
+> typo** — the leading segment is the gateway's route version, the inner one
+> the API's. Omitting the leading `/v1` returns `404` with an empty body on
+> every call, which reads exactly like an outage and was misdiagnosed as one
+> for three days (verified live 2026-10-05: short form `404`, doubled form
+> `200`). This host takes **no** `k` parameter.
 
 ### Actions
 
@@ -107,14 +116,27 @@ myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 "Base Software & ISO Releases" BIG
 
 ## 2. `myf5 cases`
 
-Manage and inspect MyF5 technical support cases via the Support Case API (`support.apis.f5.com`, endpoints: `/case-management/v1/cases` and `/support/case-management/v1/cases`).
+Manage and inspect MyF5 technical support cases via the Support Case API
+(`support.apis.f5.com`, endpoint prefix `/case-management/v1/cases`).
+
+> **Case numbers are 8 digits with no prefix** — for example `01287164`.
+> Earlier revisions of this document used a `C1000234` form, which the API
+> does not accept. Use the number exactly as MyF5 displays it.
+
+> **There is no `/support/case-management/v1/...` prefix.** It was documented
+> here previously but returns
+> `404 "Unable to identify proxy for host"` (verified 2026-10-05). The only
+> working prefix is `/case-management/v1/...`.
 
 ### Actions
 
-#### `list`
-Lists active support cases for the authenticated account, displaying case number, status, severity, and subject.
+#### `list [--all]`
+Lists support cases for the authenticated account, displaying case number,
+status, priority, and subject. Open cases only by default; `--all` includes
+closed ones.
 ```bash
 myf5 cases list
+myf5 cases list --all
 ```
 
 #### `metadata`
@@ -123,11 +145,91 @@ Retrieves the authoritative schema metadata and valid values for case creation.
 myf5 cases metadata
 ```
 
+> **Known outage (2026-10-05):** this endpoint returns
+> `500 "Malformed JSON: Expected '{' at the beginning of object"` for every
+> request, including a plain `GET` with no body. The fault is server-side at
+> F5 and there is no client-side workaround. It is the documented source of
+> valid `productFamily`, `priority`, `timezone` and `reasonForContact` values,
+> so those values currently cannot be enumerated from the API.
+>
+> Until it recovers, see [Valid Case Field Values](./case_field_values.md),
+> recovered from the MyF5 web UI, or copy values from an existing case with
+> `myf5 cases get <num>`.
+
 #### `comment <case-number> <note>`
 Appends a status comment or investigation update to an open support case.
 ```bash
-myf5 cases comment C1000234 "Uploaded new diagnostic packet captures."
+myf5 cases comment 01287164 "Uploaded new diagnostic packet captures."
 ```
+
+> The API reports failure in the response body (`isError`) as well as by
+> status code, so a `2xx` alone does not mean the comment landed. The CLI
+> checks both. Confirm in the MyF5 web UI when it matters.
+
+#### `get <case-number>`
+Shows one case in full: status, priority, product, account, contacts, the
+description, and a list of the messages on the email thread.
+```bash
+myf5 cases get 01287164
+```
+
+> `dateOpened` is deliberately not shown. The detail endpoint returns the
+> priority string in that field (a server-side defect); `cases list` reports
+> the real timestamp.
+
+#### `create [flags]`
+Opens a support case. Run with no flags for the full list.
+```bash
+myf5 cases create \
+  --family BIG-IP --product "BIG-IP LTM" --version 17.5.1 \
+  --serial ABC1234 \
+  --subject "SSL handshake failures after upgrade" \
+  --description "Full description of the problem." \
+  --priority "4 - General Assistance" \
+  --reason "General Problem" \
+  --email you@example.com \
+  --timezone "(GMT -5:00) US/Eastern - Eastern Standard Time"
+```
+
+Use `--dry-run` to print the payload and check for missing fields without
+contacting the API — useful while assembling a command, and it costs nothing
+against the rate limit.
+
+> **An entitlement identifier is required, and which one depends on the
+> product family.** BIG-IP and other hardware families are verified by
+> `--serial`; NGINX and Aspen Mesh by `--subscription` instead. The published
+> OpenAPI document marks both optional. The live API does not.
+>
+> The rejections differ by family, and neither message is much help on its own:
+>
+> | Family | Missing | Response |
+> |---|---|---|
+> | BIG-IP | `--serial` | `400 "Serial Number,Product Family and Product are required to create Case."` |
+> | NGINX | `--subscription` | `403 "Unable to verify Subscription. Please make sure Subscription Number and Product Family vaules are provided."` |
+>
+> The BIG-IP message names three fields no matter which one is actually
+> missing, and is phrased for BIG-IP even when a different family was sent.
+> That is why the CLI validates locally first and names the field it actually
+> wants.
+>
+> An identifier the API does not recognise, or one without active support,
+> returns `403 "The value entered is invalid or out of Support."` That 403 is
+> a **data** error, not a credentials error: reaching it means every other
+> field validated.
+
+> **This requirement belongs to the API, not to support cases.** A HAR capture
+> of the MyF5 web UI opening case `01292481` on 2026-10-05 shows a BIG-IP
+> presales case created with the serial field **empty**. The web UI does not
+> use this API at all — it writes to Salesforce directly through an internal
+> Aura endpoint and validates differently.
+>
+> So if you have no serial or subscription to hand, the case is not
+> impossible: open it at [my.f5.com](https://my.f5.com) and use
+> `cases comment` or `ihealth upload` with the number afterwards.
+
+> **`--reason "Pre Sales"` is for F5 Systems Engineers.** A customer account
+> cannot open a presales case; use `"General Problem"` or another reason from
+> case metadata.
 
 ---
 
@@ -146,7 +248,7 @@ myf5 ihealth list
 #### `upload <file.qkview> [case-number] [description]`
 Uploads a local diagnostic QKView bundle to iHealth with a real-time progress bar.
 ```bash
-myf5 ihealth upload /path/to/appliance.qkview "C1000234" "Initial triage bundle"
+myf5 ihealth upload /path/to/appliance.qkview "01287164" "Initial triage bundle"
 ```
 
 ---

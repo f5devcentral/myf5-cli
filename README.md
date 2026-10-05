@@ -15,7 +15,7 @@ A high-performance, memory-safe, zero-dependency Go CLI and client library for *
 - **Wire-Speed Multi-GB Streaming**: Streams 2.5 GB – 10+ GB BIG-IP ISOs, OVAs, and qcow2 images directly to disk using `io.TeeReader` with simultaneous SHA-256 verification and minimal RAM footprint (< 10 MB).
 - **Direct Appliance Push & Pull Engine**: Transfers software ISOs, engineering hotfixes, diagnostic QKViews, and configuration files directly between local systems and BIG-IP / BIG-IQ appliances with **automatic seamless failover** between **iControl REST chunked transfer** (HTTPS) and **native Go SCP streaming** (SSH).
 - **End-to-End Download & Deploy**: Downloads an image from MyF5, cryptographically verifies its SHA-256 checksum, and immediately pushes it to target appliances in a single atomic pipeline (`myf5 downloads get ... --push <host>`).
-- **MyF5 Downloads Migration Ready**: Defaults to the new October 2, 2026 endpoint (`api.software.downloads.f5.com`) without the legacy `k` query parameter, with automatic pre-cutover fallback and HTTP 429 rate-limit backoff.
+- **MyF5 Downloads (ESDP) Ready**: Targets `api.software.downloads.f5.com` without the legacy `k` query parameter, over the gateway's doubled-`v1` path prefix (`/v1/downloads-management/v1/...` — not a typo; see `pkg/downloads`), with a legacy fallback and HTTP 429 rate-limit backoff.
 - **Strict Zero-Secret CLI Security**: Rejects plaintext secret arguments (`--password`, `--client-secret`) with exit code `2` to protect against process table (`ps aux`) and shell history leaks.
 - **Multiple Credential Formats**: Automatically discovers credentials in `F5_CLIENT_ID` / `F5_CLIENT_SECRET` environment variables or `~/.f5api_credentials` (both `KEY=VALUE` and `[profile]` INI formats).
 - **Interactive Console Browser**: Menu-driven terminal TUI for exploring product families, branches, release versions, and signed CDN download links.
@@ -53,7 +53,12 @@ myf5-cli/
 │   ├── downloads.md            # Downloads catalog taxonomy, GeoDB automation & direct push
 │   ├── credentials.md          # Zero-Secret policy & credential management
 │   ├── shell_completion.md     # Shell tab autocompletion guide (zsh, bash, fish)
-│   └── network_and_firewall.md # Egress firewall rules and DNS cutover documentation
+│   ├── network_and_firewall.md # Egress firewall rules and DNS cutover documentation
+│   ├── logging.md              # Audit & debug logging design notes (NOT yet implemented)
+│   ├── branch_protection.md    # Intended `main` branch protection config (NOT yet enabled)
+│   ├── openapi-observed.json   # The APIs as they actually behave, from live requests
+│   ├── openapi-outdated-5Oct2026.json # F5's published spec, archived — wrong in several places
+│   └── K*.txt                  # Archived F5 reference articles, verbatim
 ├── Makefile                    # Developer build, test, and release automation
 ├── SECURITY.md                 # Security & vulnerability reporting policy
 ├── CONTRIBUTING.md             # Developer workflow & coding standards
@@ -90,6 +95,9 @@ make cross-compile
 ## Credential Configuration
 
 In accordance with the **Zero-Secret CLI Policy**, secret flags are prohibited on the command line. Provide credentials using either method:
+
+> [!IMPORTANT]
+> **Don't have a `client_id` and `client_secret` yet?** They are issued from MyF5, but only after your account is granted API Catalog access. In short: log in at [my.f5.com](https://my.f5.com), request API Catalog access from F5 Support, then create an API key once the grant lands. Full steps are in [Obtaining API Credentials](./docs/credentials.md#obtaining-api-credentials).
 
 ### 1. `~/.f5api_credentials` (Recommended for Local Dev)
 Create `~/.f5api_credentials` with mode `0600`:
@@ -164,14 +172,32 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
 
 ### 3. MyF5 Support Cases
 ```bash
-# List active cases
+# List open cases (add --all to include closed ones)
 ./bin/myf5 cases list
+./bin/myf5 cases list --all
 
 # Retrieve case creation schema metadata
 ./bin/myf5 cases metadata
 
+# Show one case in full, including contacts and the email thread
+./bin/myf5 cases get 01287164
+
 # Add a note or comment to a case
-./bin/myf5 cases comment C1000234 "Investigating packet captures."
+# Case numbers are 8 digits, no prefix - exactly as MyF5 displays them.
+./bin/myf5 cases comment 01287164 "Investigating packet captures."
+
+# Open a case. An entitlement identifier is required and is validated against
+# F5's records, but WHICH one depends on the product family: BIG-IP and other
+# hardware families use --serial, NGINX and Aspen Mesh use --subscription.
+# This is a constraint of the API, not of support cases — the MyF5 web UI
+# opens cases without one. See docs/cli.md for the full caveat.
+# Use --dry-run first to check the payload without calling the API.
+./bin/myf5 cases create --family BIG-IP --product "BIG-IP LTM" \
+  --version 17.5.1 --serial ABC1234 \
+  --subject "SSL handshake failures" --description "Details here." \
+  --priority "4 - General Assistance" --reason "General Problem" \
+  --email you@example.com \
+  --timezone "(GMT -5:00) US/Eastern - Eastern Standard Time"
 ```
 
 ### 4. F5 iHealth
@@ -179,8 +205,8 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
 # List previously uploaded QKViews
 ./bin/myf5 ihealth list
 
-# Upload a local QKView bundle to iHealth
-./bin/myf5 ihealth upload /path/to/appliance.qkview "C1000234" "Initial triage bundle"
+# Upload a local QKView bundle to iHealth, optionally attaching it to a case
+./bin/myf5 ihealth upload /path/to/appliance.qkview "01287164" "Initial triage bundle"
 ```
 
 ### 5. BIG-IP Appliance Management & Image Transfer (Auto Failover)
@@ -293,6 +319,7 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
 | **[Zero-Secret Security Architecture](docs/credentials.md)** | Process isolation, credentials file permissions, SSH keys, and environment setup. |
 | **[Shell Tab Autocompletion](docs/shell_completion.md)** | Setup instructions and completion features for Zsh, Bash, and Fish. |
 | **[Network, DNS & Firewall Architecture](docs/network_and_firewall.md)** | Egress firewall requirements (TCP 443) and F5 infrastructure cutover notices. |
+| **[Observed API Behaviour](docs/openapi-observed.json)** | OpenAPI description of what the MyF5 APIs actually do, where that differs from F5's published spec. |
 
 ---
 

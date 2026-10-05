@@ -11,7 +11,10 @@ import (
 
 func TestGetMetadata(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/downloads-management/v1/downloads/metadata" {
+		// The leading /v1 is required by the gateway. Serving the path without
+		// it returns 404 live, so this assertion pins the doubled-v1 shape
+		// deliberately; see DownloadsPrefix.
+		if r.URL.Path != "/v1/downloads-management/v1/downloads/metadata" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		if r.Header.Get("Authorization") != "Bearer test-tok" {

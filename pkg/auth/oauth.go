@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -20,7 +21,28 @@ const (
 	OktaAuthServerID = "ausp95yxb4ShxMGvW357" // Authoritative Okta CIAM Authorization Server ID for identity.account.f5.com
 	DefaultAudience  = "api://ciam-api-myf5"
 	DefaultScope     = "myf5_scope"
+
+	// IHealthAudience is the resource server for the iHealth APIs, per F5
+	// article K000130498. A client is only authorized for audiences it holds a
+	// grant on, so requesting the MyF5 audience with iHealth credentials fails
+	// with 403 "... is not authorized to access resource server ...".
+	IHealthAudience = "api://ciam-api-ihealth"
+
+	// IHealthScope is empty deliberately. K000130498's token request sends
+	// only client_id, client_secret, audience and grant_type — no scope. The
+	// iHealth client is not granted "ihealth" as a scope; access is conveyed
+	// by the audience.
+	IHealthScope = ""
 )
+
+// AudienceForScope maps a requested scope to the OAuth audience that issues
+// tokens for it. Unknown scopes fall back to the MyF5 audience.
+func AudienceForScope(scope string) string {
+	if scope == "ihealth" || scope == IHealthAudience {
+		return IHealthAudience
+	}
+	return DefaultAudience
+}
 
 // TokenResponse represents the OAuth2 token endpoint JSON response.
 type TokenResponse struct {
@@ -69,9 +91,28 @@ func AuthenticateWithClient(ctx context.Context, httpClient *http.Client, authFQ
 		tokenURL = fmt.Sprintf("%s://%s/oauth/token", scheme, authFQDN)
 	}
 
+	// The audience names the resource server the token is for, and a client is
+	// only authorized for audiences it holds a grant on. Requesting the MyF5
+	// audience with an iHealth client fails with
+	//   403 "Client ... is not authorized to access resource server
+	//        api://ciam-api-myf5. You need to create a client-grant ..."
+	// so the audience is derived from the requested scope. F5_OAUTH_AUDIENCE
+	// overrides it if F5 introduces another resource server.
+	audience := os.Getenv("F5_OAUTH_AUDIENCE")
+	if audience == "" {
+		audience = AudienceForScope(scope)
+	}
+
+	// iHealth tokens are requested WITHOUT a scope parameter (K000130498);
+	// access is conveyed by the audience alone. Sending scope=ihealth yields
+	// 403 "Client has not been granted scopes: ihealth".
+	if audience == IHealthAudience {
+		scope = IHealthScope
+	}
+
 	data := url.Values{}
 	data.Set("grant_type", "client_credentials")
-	data.Set("audience", DefaultAudience)
+	data.Set("audience", audience)
 	if scope != "" {
 		data.Set("scope", scope)
 	}

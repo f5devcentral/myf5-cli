@@ -1,0 +1,76 @@
+ K15202: IP addresses for F5 hosted services
+Published Date: Sep 18, 2015Updated Date: Oct 2, 2026
+
+    Download Article
+
+Topic
+
+Best practices may dictate that you use fixed IP addresses when setting firewall policies, instead of using host names that are resolved by DNS. The table in the following section includes ranges of IP addresses that network administrators can use to correctly configure firewalls, allowing access to F5 services.
+Description
+
+F5 services are not bound to a single IP address only. You can perform a name resolution (for example, using nslookup) to verify the IP address of the desired F5 service at any given time. The output of the nslookup command should display an IP address that is within the specified range.
+
+The following table displays the IP address ranges for the various types of F5 services.
+Host name	IP address range
+(network address/mask bits)	Service/port	Service
+activate.f5.com	107.162.235.62	HTTPS / 443	BIG-IP license activation
+BIG-IQ license activation
+BIG-IP Automatic Update Check
+BIG-IP Automatic Phone Home
+api.f5.com	
+
+185.56.152.63
+	HTTPS / 443	BIG-IP Automatic Phone Home
+Uploads to F5 iHealth
+BIG-IQ license usage reporting
+api.software.downloads.f5.com	
+
+159.60.134.92
+	HTTPS / 443	
+
+ 
+
+F5 software downloads
+
+ 
+callhome.f5.com	
+
+159.60.134.923
+	HTTPS / 443	BIG-IP ASM attack signature updates
+BIG-IP Automatic Update Check
+BIG-IP FPS malware and fraud signature updates
+ihealth-api.f5.com1
+ihealth2-api.f5.com1	185.56.152.6	HTTPS / 443	Uploads to F5 iHealth
+idp.identity.f5.com	
+
+Primary Egress IPs:
+34.223.200.228
+44.253.79.202
+35.83.64.18
+44.254.167.76
+
+Failover Egress IPs:
+100.30.52.61
+98.95.15.62
+44.214.121.49
+98.89.114.213
+54.211.123.113
+	HTTPS / 443	F5 authentication service for MyF5, iHealth, and Securefiles
+product.apis.f5.com	35.199.173.84	HTTPS / 443	BIG-IQ usage data collection2
+BIG-IP Next instance license activation through BIG-IP Next Central Manager
+securefiles.f5.com	107.162.254.234	HTTPS / 443
+SSH / 22	Uploads to F5 Technical Support
+
+1The BIG-IQ system uses F5 iHealth services to transfer BIG-IP QKView files and manage iHealth tasks. Allowing access to these F5 services is required for performing iHealth tasks on the BIG-IQ system.
+
+2For more information about BIG-IQ usage data collection, refer to K20357352: Overview of BIG-IQ usage data collection.
+
+3IP address changes: Effective October 2, 2026, F5 updated the IP addresses associated with api.f5.com to 185.56.152.6 and callhome.f5.com to 159.60.134.92. For more information, refer to K000163521: Troubleshooting connectivity after api.f5.com and callhome.f5.com IP address changes.
+
+Note: The F5 product downloads on MyF5 are hosted with AWS, for IP address information about AWS, refer to AWS IP address ranges.
+
+Recommendations
+
+When you configure firewalls to allow external access to external F5 services, you should consider the following factor:
+
+    IP address ranges may change or be amended in the future.

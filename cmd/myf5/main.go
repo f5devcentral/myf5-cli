@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -66,6 +67,15 @@ func main() {
 	subcommand := os.Args[1]
 	args := os.Args[2:]
 
+	// The top-level usage tells people to run `myf5 <command> --help`, so every
+	// command has to honour it. Most handlers print their usage when given no
+	// arguments, so a help request becomes an empty argument list. Without
+	// this, `--help` fell through to each handler's action switch and was
+	// reported as an unknown action — and `doctor --help` was worse, running a
+	// live credential and network audit instead of explaining itself.
+	//
+	args = normalizeHelpArgs(subcommand, args)
+
 	switch subcommand {
 	case "downloads", "download":
 		handleDownloads(ctx, args)
@@ -92,6 +102,37 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command '%s'. Run 'myf5 help' for usage.\n", subcommand)
 		os.Exit(1)
+	}
+}
+
+// isHelpFlag reports whether an argument asks for usage.
+func isHelpFlag(a string) bool {
+	return a == "--help" || a == "-h" || a == "help"
+}
+
+// normalizeHelpArgs turns `myf5 <command> --help` into the bare invocation
+// that each handler already answers with its own usage text.
+//
+// The top-level usage tells people to run `myf5 <command> --help`, so every
+// command has to honour it. Most handlers print usage when given no arguments,
+// so a help request is best expressed by dropping the argument. Without this,
+// `--help` fell through to each handler's action switch and came back as
+// "Unknown cases action '--help'".
+//
+// `completion` and `doctor` are returned untouched: `completion` takes a shell
+// name and documents itself when called bare, while `doctor` runs its audit on
+// a bare invocation — blanking its arguments would make `doctor --help`
+// perform a live credential and network audit instead of explaining itself.
+// Both inspect the flag themselves.
+func normalizeHelpArgs(subcommand string, args []string) []string {
+	if len(args) != 1 || !isHelpFlag(args[0]) {
+		return args
+	}
+	switch subcommand {
+	case "completion", "doctor":
+		return args
+	default:
+		return nil
 	}
 }
 
@@ -253,7 +294,7 @@ func handleDownloads(ctx context.Context, args []string) {
 		}
 		token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
 		checkErr(ctx, err, "Authentication failed")
-		return downloads.NewClient(token, "")
+		return downloads.NewClientWithKey(token, "", creds.APIKey)
 	}
 
 	switch action {
@@ -965,7 +1006,9 @@ func getDefaultDownloadsDir() string {
 
 func handleCases(ctx context.Context, args []string) {
 	if len(args) == 0 {
-		fmt.Println("Usage: myf5 cases [list | metadata | comment <case-num> <note>]")
+		fmt.Println("Usage: myf5 cases [list [--all] | metadata | get <case-num> | comment <case-num> <note> | create <flags>]")
+		fmt.Println()
+		fmt.Println("Run 'myf5 cases create' with no flags for the full create usage.")
 		os.Exit(1)
 	}
 
@@ -978,15 +1021,41 @@ func handleCases(ctx context.Context, args []string) {
 	}
 	token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
 	checkErr(ctx, err, "Authentication failed")
-	client := cases.NewClient(token, "")
+	client := cases.NewClientWithKey(token, "", creds.APIKey)
 
 	switch action {
 	case "list":
-		resp, err := client.ListCases(ctx, false)
+		// Closed cases are hidden by default because the open ones are what a
+		// person normally wants. Without --all there was no way to see a closed
+		// case at all, which looked identical to the tool failing to find it.
+		showClosed := false
+		for _, a := range args[1:] {
+			switch a {
+			case "--all", "-a":
+				showClosed = true
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown flag %q\n\nUsage: myf5 cases list [--all]\n", a)
+				os.Exit(1)
+			}
+		}
+		resp, err := client.ListCases(ctx, showClosed)
 		checkErr(ctx, err, "Failed to list cases")
-		fmt.Println("MyF5 Support Cases:")
+		if showClosed {
+			fmt.Println("MyF5 Support Cases (open and closed):")
+		} else {
+			fmt.Println("MyF5 Support Cases (open only — use --all to include closed):")
+		}
 		for _, c := range resp.Data {
-			fmt.Printf("  Case #%-10s [%-8s] [%-6s] %s\n", c.CaseNumber, c.Status, c.Severity, c.Subject)
+			// Priority values are long ("2 - Site At Risk"), so the column is
+			// wider than the old 6-wide severity field it replaced.
+			fmt.Printf("  Case #%-10s [%-20s] [%-18s] %s\n", c.CaseNumber, c.Status, c.Priority, c.Subject)
+		}
+		if len(resp.Data) == 0 {
+			if showClosed {
+				fmt.Println("  (no cases)")
+			} else {
+				fmt.Println("  (no open cases — closed ones are hidden; use --all)")
+			}
 		}
 	case "metadata":
 		resp, err := client.GetMetadata(ctx)
@@ -997,12 +1066,230 @@ func handleCases(ctx context.Context, args []string) {
 			fmt.Fprintln(os.Stderr, "Usage: myf5 cases comment <case-number> <note>")
 			os.Exit(1)
 		}
-		_, err := client.AddComment(ctx, args[1], args[2])
+		resp, err := client.AddComment(ctx, args[1], args[2])
 		checkErr(ctx, err, "Failed to add comment")
-		fmt.Println("Comment added successfully.")
+		// The API carries an isError flag in the body, so a 2xx does not by
+		// itself mean the comment landed. Discarding the response here would
+		// report success for a server-side failure.
+		if resp.IsError {
+			msg := resp.Message
+			if msg == "" {
+				msg = "the API reported an error without a message"
+			}
+			fmt.Fprintf(os.Stderr, "[ERROR] Failed to add comment: %s\n", msg)
+			os.Exit(1)
+		}
+		if resp.Data.CaseNumber != "" {
+			fmt.Printf("Comment added to case %s (updated %s).\n", resp.Data.CaseNumber, resp.Data.UpdatedDate)
+		} else {
+			fmt.Println("Comment added successfully.")
+		}
+	case "get", "show", "detail":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "Usage: myf5 cases get <case-number>")
+			os.Exit(1)
+		}
+		detail, err := client.GetCase(ctx, args[1])
+		checkErr(ctx, err, "Failed to retrieve case")
+		printCaseDetail(detail)
+	case "create":
+		handleCaseCreate(ctx, client, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown cases action '%s'\n", action)
 		os.Exit(1)
+	}
+}
+
+func printCaseDetail(d *cases.CaseDetail) {
+	fmt.Printf("Case %s - %s\n", d.CaseNumber, d.Subject)
+	fmt.Printf("  Status     : %s\n", d.Status)
+	fmt.Printf("  Priority   : %s\n", d.Priority)
+	fmt.Printf("  Product    : %s %s\n", d.Product, d.Version)
+	if d.ReasonForContact != "" {
+		fmt.Printf("  Reason     : %s\n", d.ReasonForContact)
+	}
+	if d.SerialNumber != "" {
+		fmt.Printf("  Serial     : %s\n", d.SerialNumber)
+	}
+	if d.HostName != "" {
+		fmt.Printf("  Hostname   : %s\n", d.HostName)
+	}
+	if d.Account.AccountName != "" {
+		fmt.Printf("  Account    : %s (%s)\n", d.Account.AccountName, d.Account.AccountID)
+	}
+	if n := d.CaseOwnerContact.DisplayName(); n != "" {
+		fmt.Printf("  Owner      : %s <%s>\n", n, d.CaseOwnerContact.Email)
+	}
+	if n := d.AlternateContact.DisplayName(); n != "" {
+		fmt.Printf("  Alternate  : %s <%s>\n", n, d.AlternateContact.Email)
+	}
+	// dateOpened is deliberately not printed: the detail endpoint returns the
+	// priority string in that field. See CaseDetail.
+	for _, l := range d.Links {
+		if l.Rel == "case-detail" {
+			fmt.Printf("  Web        : %s\n", l.Href)
+		}
+	}
+	if d.Description != "" {
+		fmt.Println("\nDescription:")
+		for _, line := range strings.Split(strings.TrimRight(d.Description, "\n"), "\n") {
+			fmt.Printf("  %s\n", line)
+		}
+	}
+	if n := len(d.Activity.EmailActivities); n > 0 {
+		fmt.Printf("\nEmail thread (%d message(s), newest first):\n", n)
+		for _, e := range d.Activity.EmailActivities {
+			who := e.Contact.Name
+			if who == "" {
+				who = e.FromAddress
+			}
+			fmt.Printf("  [%s] %s\n", e.ActivityDate, who)
+		}
+	}
+}
+
+const caseCreateUsage = `Usage: myf5 cases create [flags]
+
+Opens a MyF5 support case. All flags below are required by the API.
+
+  --family <s>        Product family, e.g. "BIG-IP"
+  --product <s>       Product within the family, e.g. "BIG-IP LTM"
+  --version <s>       Product version, e.g. "17.5.1"
+
+  One entitlement identifier is required, and which one depends on the family:
+  --serial <s>        Serial number, or the last 7 of a registration key.
+                      Required for BIG-IP and other hardware families.
+  --subscription <s>  Subscription number, e.g. "A-S00038458".
+                      Required for NGINX and Aspen Mesh instead of --serial.
+                      Either way the API verifies it and rejects anything it
+                      does not recognise or that lacks active support.
+  --subject <s>       One-line summary
+  --description <s>   Full problem description
+  --priority <s>      e.g. "4 - General Assistance", "1 - Site Down"
+  --reason <s>        Reason for contact, e.g. "General Problem".
+                      "Pre Sales" is available to F5 Systems Engineers; a
+                      customer account cannot open a presales case.
+  --email <s>         Case owner email
+  --contact-method <s>  Preferred contact method (default "Email")
+  --timezone <s>      e.g. "(GMT -5:00) US/Eastern - Eastern Standard Time"
+
+Optional:
+  --hostname <s>            Affected hostname
+  --customer-ticket <s>     Your own ticket reference
+  --dry-run                 Print the payload and exit without creating
+
+Valid values for --family, --product, --priority, --reason and --timezone
+come from 'myf5 cases metadata'. NOTE: that endpoint is returning HTTP 500
+server-side as of 2026-10-05, so values cannot currently be enumerated.
+Copy them from an existing case ('myf5 cases get <num>') until it returns.`
+
+func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) {
+	if len(args) == 0 {
+		fmt.Println(caseCreateUsage)
+		os.Exit(1)
+	}
+
+	payload := map[string]interface{}{}
+	dryRun := false
+
+	flagToField := map[string]string{
+		"--family":          "productFamily",
+		"--product":         "product",
+		"--version":         "version",
+		"--serial":          "serialNumber",
+		"--subscription":    "subscriptionId",
+		"--subject":         "subject",
+		"--description":     "description",
+		"--priority":        "priority",
+		"--reason":          "reasonForContact",
+		"--email":           "caseOwnerEmail",
+		"--contact-method":  "preferredContactMethod",
+		"--timezone":        "timezone",
+		"--hostname":        "hostName",
+		"--customer-ticket": "customerTicketNumber",
+	}
+
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--dry-run" {
+			dryRun = true
+			continue
+		}
+		if a == "-h" || a == "--help" {
+			fmt.Println(caseCreateUsage)
+			return
+		}
+		field, known := flagToField[a]
+		if !known {
+			fmt.Fprintf(os.Stderr, "Unknown flag %q\n\n%s\n", a, caseCreateUsage)
+			os.Exit(1)
+		}
+		if i+1 >= len(args) {
+			fmt.Fprintf(os.Stderr, "Flag %s requires a value\n", a)
+			os.Exit(1)
+		}
+		payload[field] = args[i+1]
+		i++
+	}
+
+	// The API rejects a missing contact method, but it has one sane default.
+	if _, ok := payload["preferredContactMethod"]; !ok {
+		payload["preferredContactMethod"] = "Email"
+	}
+
+	if dryRun {
+		out, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] failed to render payload: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("Dry run — the following payload would be POSTed:")
+		fmt.Println(string(out))
+		required := cases.RequiredCreateFields()
+		// The entitlement identifier depends on the product family: BIG-IP is
+		// verified by serial number, NGINX and Aspen Mesh by subscription.
+		family, _ := payload["productFamily"].(string)
+		required = append(required, cases.EntitlementFieldFor(family))
+
+		var missing []string
+		for _, f := range required {
+			if v, ok := payload[f].(string); !ok || strings.TrimSpace(v) == "" {
+				missing = append(missing, f)
+			}
+		}
+		if len(missing) > 0 {
+			// Reuse the real error so a dry run explains a missing entitlement
+			// identifier exactly as a live attempt would. Printing a bare field
+			// list here sent people to look for a serial number without saying
+			// that the web UI opens such cases without one.
+			fmt.Printf("\nIncomplete: %v\n", &cases.ErrMissingCreateFields{Missing: missing})
+			os.Exit(1)
+		}
+		fmt.Println("\nAll required fields present.")
+		return
+	}
+
+	resp, err := client.CreateCase(ctx, payload)
+	if err != nil {
+		var missingErr *cases.ErrMissingCreateFields
+		if errors.As(err, &missingErr) {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n\n%s\n", err, caseCreateUsage)
+			os.Exit(1)
+		}
+		checkErr(ctx, err, "Failed to create case")
+	}
+	if resp.IsError {
+		msg := resp.Message
+		if msg == "" {
+			msg = "the API reported an error without a message"
+		}
+		fmt.Fprintf(os.Stderr, "[ERROR] Failed to create case: %s\n", msg)
+		os.Exit(1)
+	}
+	if resp.Data.CaseNumber != "" {
+		fmt.Printf("Case %s created.\n", resp.Data.CaseNumber)
+	} else {
+		fmt.Println("Case created, but the API returned no case number.")
 	}
 }
 
@@ -1018,7 +1305,9 @@ func handleIHealth(ctx context.Context, args []string) {
 
 	action := args[0]
 
-	creds, err := auth.ResolveCredentials("default")
+	// iHealth needs an OAuth client granted the "ihealth" scope, which is
+	// usually a different client from the general MyF5 one.
+	creds, err := auth.ResolveCredentialsForService("default", "ihealth")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
 		os.Exit(1)
@@ -1031,9 +1320,29 @@ func handleIHealth(ctx context.Context, args []string) {
 	case "list":
 		summaries, err := client.ListQKViews(ctx)
 		checkErr(ctx, err, "Failed to list iHealth QKViews")
+		if len(summaries) == 0 {
+			fmt.Println("No QKViews found.")
+			break
+		}
 		fmt.Println("iHealth QKViews:")
 		for _, q := range summaries {
 			fmt.Printf("  ID: %-12s Status: %-10s File: %s\n", q.ID, q.Status, q.FileName)
+			if q.Hostname != "" {
+				fmt.Printf("    Host: %s\n", q.Hostname)
+			}
+			if q.UploadDate != "" {
+				fmt.Printf("    Uploaded: %s", q.UploadDate)
+				if q.FileSize > 0 {
+					fmt.Printf("  (%.1f MB)", float64(q.FileSize)/(1024*1024))
+				}
+				fmt.Println()
+			}
+			if q.CaseNumber != "" {
+				fmt.Printf("    Case: %s\n", q.CaseNumber)
+			}
+			if q.GUIURL != "" {
+				fmt.Printf("    %s\n", q.GUIURL)
+			}
 		}
 	case "upload":
 		if len(args) < 2 {
@@ -1766,6 +2075,25 @@ func executeDownloadFromAppliance(
 // ----------------------------------------------------------------------------
 
 func handleDoctor(ctx context.Context, args []string) {
+	// doctor takes no arguments and runs on a bare invocation, so a help
+	// request cannot be inferred from an empty argument list the way it is for
+	// the other commands. Without this, `doctor --help` performed a live
+	// credential and network audit instead of describing itself.
+	for _, a := range args {
+		if isHelpFlag(a) {
+			fmt.Print(`myf5 doctor - Verify credentials, DNS, and firewall egress
+
+USAGE:
+    myf5 doctor
+
+Runs a read-only diagnostic: audits ~/.f5api_credentials permissions and
+environment variables, resolves the MyF5 API hostnames, and checks outbound
+HTTPS reachability. Takes no arguments and changes nothing.
+`)
+			return
+		}
+	}
+
 	fmt.Println("=== myf5 System Doctor & Security Audit ===")
 	fmt.Printf("Timestamp: %s\n\n", time.Now().Format(time.RFC3339))
 

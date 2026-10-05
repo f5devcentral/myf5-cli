@@ -1,0 +1,3916 @@
+{
+  "openapi": "3.0.2",
+  "info": {
+    "version": "1.0.0",
+    "title": "OAuth APIs"
+  },
+  "tags": [
+    {
+      "name": "Customer",
+      "description": "Authentication API End Points",
+      "x-displayName": "Customer"
+    },
+    {
+      "name": "Support Case",
+      "description": "Support Case API End Points",
+      "x-displayName": "Support Case"
+    },
+    {
+      "name": "Downloads",
+      "description": "Downloads API End Points",
+      "x-displayName": "Downloads"
+    },
+    {
+      "name": "Knowledge Article",
+      "description": "Knowledge Article API Endpoints",
+      "x-displayName": "Knowledge Article"
+    }
+  ],
+  "paths": {
+    "/oauth/token": {
+      "servers": [
+        {
+          "url": "https://identity.stage.f5networks.net",
+          "description": "Authentication URL to generate access token (Stage)"
+        },
+        {
+          "url": "https://idp.identity.f5.com",
+          "description": "Authentication URL to generate access token (Production)"
+        }
+      ],
+      "post": {
+        "summary": "Get Access Token (Customer)",
+        "operationId": "getAccessTokenCustomer",
+        "tags": [
+          "Customer"
+        ],
+        "security": [
+          {
+            "basicAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/GetAccessTokenRequestCustomer"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/200_CustomerGetAccessTokenResponseMyF5"
+          },
+          "400": {
+            "$ref": "#/components/responses/400_CustomerGetAccessTokenResponseMyF5"
+          },
+          "401": {
+            "$ref": "#/components/responses/401_CustomerGetAccessTokenResponseMyF5"
+          }
+        },
+        "servers": [
+          {
+            "url": "https://idp.identity.f5.com",
+            "description": "Authentication URL to generate access token"
+          }
+        ]
+      }
+    },
+    "/case-management/v1/cases/metadata": {
+      "servers": [
+        {
+          "url": "https://support.apis.f5.com",
+          "description": "Support API URL"
+        }
+      ],
+      "get": {
+        "summary": "API to get Case Metadata for creating Cases",
+        "operationId": "getCaseMetadataApigee",
+        "tags": [
+          "Support Case"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rateLimitParam_Cases"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/200_CASE_METADATA_Respone"
+          },
+          "400": {
+            "$ref": "#/components/responses/400_Response_Cases"
+          },
+          "401": {
+            "$ref": "#/components/responses/401_Response_Cases"
+          },
+          "403": {
+            "$ref": "#/components/responses/403_Response_Cases"
+          },
+          "404": {
+            "$ref": "#/components/responses/404_Response_Cases"
+          },
+          "405": {
+            "$ref": "#/components/responses/405_Response_Cases"
+          },
+          "429": {
+            "$ref": "#/components/responses/429_Response_Cases"
+          },
+          "500": {
+            "$ref": "#/components/responses/500_Response_Cases"
+          },
+          "502": {
+            "$ref": "#/components/responses/502_Response_Cases"
+          }
+        }
+      }
+    },
+    "/case-management/v1/cases": {
+      "servers": [
+        {
+          "url": "https://support.apis.f5.com",
+          "description": "Support API URL"
+        }
+      ],
+      "post": {
+        "summary": "API to create Case",
+        "operationId": "createCaseApigee",
+        "tags": [
+          "Support Case"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rateLimitParam_Cases"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/CASE_CREATE_REQUEST"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/201_CASE_CREATE_Response"
+          },
+          "400": {
+            "$ref": "#/components/responses/400_Response_Cases"
+          },
+          "401": {
+            "$ref": "#/components/responses/401_Response_Cases"
+          },
+          "403": {
+            "$ref": "#/components/responses/403_Response_Cases"
+          },
+          "404": {
+            "$ref": "#/components/responses/404_Response_Cases"
+          },
+          "405": {
+            "$ref": "#/components/responses/405_Response_Cases"
+          },
+          "413": {
+            "$ref": "#/components/responses/413_Response"
+          },
+          "429": {
+            "$ref": "#/components/responses/429_Response_Cases"
+          },
+          "500": {
+            "$ref": "#/components/responses/500_Response_Cases"
+          },
+          "502": {
+            "$ref": "#/components/responses/502_Response_Cases"
+          }
+        }
+      },
+      "get": {
+        "summary": "API to list Cases",
+        "operationId": "listCasesApigee",
+        "tags": [
+          "Support Case"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rateLimitParam_Cases"
+          },
+          {
+            "$ref": "#/components/parameters/caseTypeParam"
+          },
+          {
+            "$ref": "#/components/parameters/caseDurationParam"
+          },
+          {
+            "$ref": "#/components/parameters/caseNumbersParam"
+          },
+          {
+            "$ref": "#/components/parameters/accountIdsParam"
+          },
+          {
+            "$ref": "#/components/parameters/contactIdsParam"
+          },
+          {
+            "$ref": "#/components/parameters/caseStatusParam"
+          },
+          {
+            "$ref": "#/components/parameters/casePriorityParam"
+          },
+          {
+            "$ref": "#/components/parameters/limitParam"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/200_CASES_GET_Response"
+          },
+          "400": {
+            "$ref": "#/components/responses/400_Response_Cases"
+          },
+          "401": {
+            "$ref": "#/components/responses/401_Response_Cases"
+          },
+          "403": {
+            "$ref": "#/components/responses/403_Response_Cases"
+          },
+          "404": {
+            "$ref": "#/components/responses/404_Response_Cases"
+          },
+          "405": {
+            "$ref": "#/components/responses/405_Response_Cases"
+          },
+          "500": {
+            "$ref": "#/components/responses/500_Response_Cases"
+          },
+          "502": {
+            "$ref": "#/components/responses/502_Response_Cases"
+          }
+        }
+      }
+    },
+    "/case-management/v1/cases/{caseNumber}": {
+      "servers": [
+        {
+          "url": "https://support.apis.f5.com",
+          "description": "Support API URL"
+        }
+      ],
+      "patch": {
+        "summary": "API to update Case (Add Comments)",
+        "operationId": "patchCaseApigee",
+        "tags": [
+          "Support Case"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rateLimitParam_Cases"
+          },
+          {
+            "$ref": "#/components/parameters/caseNumberParam"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/CASE_PATCH_REQUEST"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/200_CASE_UPDATE_Response"
+          },
+          "400": {
+            "$ref": "#/components/responses/400_Response_Cases"
+          },
+          "401": {
+            "$ref": "#/components/responses/401_Response_Cases"
+          },
+          "403": {
+            "$ref": "#/components/responses/403_Response_Cases"
+          },
+          "404": {
+            "$ref": "#/components/responses/404_Response_Cases"
+          },
+          "405": {
+            "$ref": "#/components/responses/405_Response_Cases"
+          },
+          "413": {
+            "$ref": "#/components/responses/413_Response"
+          },
+          "429": {
+            "$ref": "#/components/responses/429_Response_Cases"
+          },
+          "500": {
+            "$ref": "#/components/responses/500_Response_Cases"
+          },
+          "502": {
+            "$ref": "#/components/responses/502_Response_Cases"
+          }
+        }
+      },
+      "get": {
+        "summary": "API to get Case details",
+        "operationId": "getCaseApigee",
+        "tags": [
+          "Support Case"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rateLimitParam_Cases"
+          },
+          {
+            "$ref": "#/components/parameters/caseNumberParam"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/200_CASE_GET_Response"
+          },
+          "400": {
+            "$ref": "#/components/responses/400_Response_Cases"
+          },
+          "401": {
+            "$ref": "#/components/responses/401_Response_Cases"
+          },
+          "403": {
+            "$ref": "#/components/responses/403_Response_Cases"
+          },
+          "404": {
+            "$ref": "#/components/responses/404_Response_Cases"
+          },
+          "405": {
+            "$ref": "#/components/responses/405_Response_Cases"
+          },
+          "500": {
+            "$ref": "#/components/responses/500_Response_Cases"
+          },
+          "502": {
+            "$ref": "#/components/responses/502_Response_Cases"
+          }
+        }
+      }
+    },
+    "/downloads-management/v1/downloads/metadata": {
+      "servers": [
+        {
+          "url": "https://support.apis.f5.com",
+          "description": "Support API URL"
+        }
+      ],
+      "get": {
+        "summary": "API to get Downloads Metadata for downloading software",
+        "operationId": "getDownloadsMetadataApigee",
+        "tags": [
+          "Downloads"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/rateLimitParam"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/200_DOWNLOADS_METDATA_RESPONSE"
+          },
+          "400": {
+            "$ref": "#/components/responses/downloads_400_Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/401_Response"
+          },
+          "403": {
+            "$ref": "#/components/responses/downloads_403_Response"
+          },
+          "405": {
+            "$ref": "#/components/responses/405_Response"
+          },
+          "429": {
+            "$ref": "#/components/responses/429_Response"
+          },
+          "500": {
+            "$ref": "#/components/responses/downloads_500_Response"
+          },
+          "502": {
+            "$ref": "#/components/responses/502_Response"
+          }
+        }
+      }
+    },
+    "/downloads-management/v1/downloads/product/{productFamily}/{productLine}": {
+      "servers": [
+        {
+          "url": "https://support.apis.f5.com",
+          "description": "Support API URL"
+        }
+      ],
+      "get": {
+        "summary": "API to get Product Versions",
+        "operationId": "getProductVersionsApigee",
+        "tags": [
+          "Downloads"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/productFamilyParam"
+          },
+          {
+            "$ref": "#/components/parameters/productLineParam"
+          },
+          {
+            "$ref": "#/components/parameters/rateLimitParam"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/200_DOWNLOADS_PRODUCT_VERSIONS_RESPONSE"
+          },
+          "400": {
+            "$ref": "#/components/responses/downloads_400_Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/401_Response"
+          },
+          "403": {
+            "$ref": "#/components/responses/downloads_403_Response"
+          },
+          "405": {
+            "$ref": "#/components/responses/405_Response"
+          },
+          "429": {
+            "$ref": "#/components/responses/429_Response"
+          },
+          "500": {
+            "$ref": "#/components/responses/downloads_500_Response"
+          },
+          "502": {
+            "$ref": "#/components/responses/502_Response"
+          }
+        }
+      }
+    },
+    "/downloads-management/v1/downloads/product/{productFamily}/{productLine}/{productVersion}/{language}/{container}/{fileName}": {
+      "servers": [
+        {
+          "url": "https://support.apis.f5.com",
+          "description": "Support API URL"
+        }
+      ],
+      "get": {
+        "summary": "API to get Product File Paths to download Software",
+        "operationId": "getProductFilePathsApigee",
+        "tags": [
+          "Downloads"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/productFamilyParam"
+          },
+          {
+            "$ref": "#/components/parameters/productLineParam"
+          },
+          {
+            "$ref": "#/components/parameters/productVersionParam"
+          },
+          {
+            "$ref": "#/components/parameters/languageParam"
+          },
+          {
+            "$ref": "#/components/parameters/containerParam"
+          },
+          {
+            "$ref": "#/components/parameters/fileNameParam"
+          },
+          {
+            "$ref": "#/components/parameters/rateLimitParam"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/200_DOWNLOADS_FILE_PATHS_RESPONSE"
+          },
+          "400": {
+            "$ref": "#/components/responses/downloads_400_Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/401_Response"
+          },
+          "403": {
+            "$ref": "#/components/responses/downloads_403_Response"
+          },
+          "405": {
+            "$ref": "#/components/responses/405_Response"
+          },
+          "429": {
+            "$ref": "#/components/responses/429_Response"
+          },
+          "500": {
+            "$ref": "#/components/responses/downloads_500_Response"
+          },
+          "502": {
+            "$ref": "#/components/responses/502_Response"
+          }
+        }
+      }
+    },
+    "/knowledge-management/v1/security-advisories/{kbId}?k={kvalue}": {
+      "servers": [
+        {
+          "url": "https://support-stg.apis.f5networks.net",
+          "description": "Support API URL (Stage)"
+        },
+        {
+          "url": "https://support.apis.f5.com",
+          "description": "Support API URL (Production)"
+        }
+      ],
+      "get": {
+        "summary": "API to get Security Advisory Knowledge Article",
+        "operationId": "getSecurityAdvisoryKBApigee",
+        "tags": [
+          "Knowledge Article"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/kbIdParam"
+          },
+          {
+            "$ref": "#/components/parameters/rateLimitParam_Knowledge"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/200_SA_GET_Response"
+          },
+          "400": {
+            "$ref": "#/components/responses/400_Response"
+          },
+          "401": {
+            "$ref": "#/components/responses/401_Response_KB"
+          },
+          "403": {
+            "$ref": "#/components/responses/403_Response"
+          },
+          "404": {
+            "$ref": "#/components/responses/404_Response"
+          },
+          "405": {
+            "$ref": "#/components/responses/405_Response_KB"
+          },
+          "429": {
+            "$ref": "#/components/responses/429_Response_KB"
+          },
+          "500": {
+            "$ref": "#/components/responses/500_Response"
+          },
+          "502": {
+            "$ref": "#/components/responses/502_Response_KB"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      },
+      "basicAuth": {
+        "type": "http",
+        "scheme": "basic"
+      }
+    },
+    "parameters": {
+      "appIdParam": {
+        "name": "appId",
+        "description": "App Id (MyF5)",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "default": "aus19gt5bu0jGw9Fi358"
+        }
+      },
+      "clientIdParam": {
+        "name": "clientid",
+        "description": "Client Id to delete",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "resourceParam": {
+        "name": "resource",
+        "description": "Resource provided by OKTA",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "rateLimitParam_Cases": {
+        "name": "k",
+        "description": "API usage key",
+        "required": true,
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "example": "X4Y6fGWJdC1qLhTsCSDW4lPcqKvF5g5r"
+        }
+      },
+      "rateLimitParam_Knowledge": {
+        "name": "k",
+        "description": "API usage key",
+        "required": true,
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "default": "MyXvn2pU13AL8OMP9RSJw9QwNhAR0RbU"
+        }
+      },
+      "caseTypeParam": {
+        "name": "type",
+        "description": "type of cases to fetch",
+        "in": "query",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "ALL_CASES",
+            "ALL_OPEN_CASES",
+            "ALL_CLOSED_CASES",
+            "MY_OPEN_CASES",
+            "MY_CLOSED_CASES",
+            "MY_ALL_CASES"
+          ],
+          "default": "ALL_CASES",
+          "example": "ALL_CASES"
+        }
+      },
+      "caseDurationParam": {
+        "name": "duration",
+        "description": "Number of days in the past to fetch cases for. The number of days will be queried using UTC timezone.",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "ALL_DATES",
+            "LAST_7_DAYS",
+            "LAST_14_DAYS",
+            "LAST_30_DAYS",
+            "LAST90_DAYS",
+            "LAST_180_DAYS",
+            "LAST_365_DAYS"
+          ],
+          "default": "ALL_DATES",
+          "example": "ALL_DATES"
+        }
+      },
+      "caseNumberParam": {
+        "name": "caseNumber",
+        "description": "Case Number of the Case",
+        "required": true,
+        "in": "path",
+        "schema": {
+          "type": "string",
+          "example": 439123
+        }
+      },
+      "caseNumbersParam": {
+        "name": "caseNumbers",
+        "description": "comma seperated Case Ids",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "00439123, 00439125"
+        }
+      },
+      "accountIdsParam": {
+        "name": "accountids",
+        "description": "comma seperated Account Ids",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "SFA-123456"
+        }
+      },
+      "contactIdsParam": {
+        "name": "contactids",
+        "description": "comma seperated Contact Emails",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "test1@mail.com"
+        }
+      },
+      "caseStatusParam": {
+        "name": "status",
+        "description": "comma seperated Status values returned via Case Metadata API",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "New,Solving"
+        }
+      },
+      "casePriorityParam": {
+        "name": "priority",
+        "description": "comma seperated Priority values returned via Case Metadata API",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "example": "2 - Site At Risk"
+        }
+      },
+      "limitParam": {
+        "name": "limit",
+        "description": "Number of records to be limited. A maximum of 100 records can be retrieved in response.",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "format": "int32",
+          "example": 100,
+          "default": 100,
+          "maximum": 100
+        }
+      },
+      "apiNameParam": {
+        "name": "apiName",
+        "description": "Unique API Name of the API",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "example": "CASE_CREATE"
+        }
+      },
+      "apiVersionParam": {
+        "name": "apiVersion",
+        "description": "Version of the API",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "example": 1
+        }
+      },
+      "apiActionParam": {
+        "name": "action",
+        "description": "Action API need to perform",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "enum": [
+            "Authenticate",
+            "Authorize",
+            "AuthenticateAndAuthorize"
+          ],
+          "example": "AuthenticateAndAuthorize"
+        }
+      },
+      "customerAccessTokenParam": {
+        "name": "accessToken",
+        "description": "Access Token (JWT) obtianed by Customer from Oauth Server",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "example": "eyJraWQiOiJvalhpd1N4bll6ekRBVU5ENXl0N2prTjJEUnJJRFgxaEFuNWJzZm1rakc0IiwiYWxnIjoiUlMyNTYifQ.eyJ2ZXIiOjEsImp0aSI6IkFULnlONTNhZXpiTk5BOFdScUdLOXJwM2dMR21BSGl6NVdPT21UeTU4djlZNzgiLCJpc3MiOiJodHRwczovL2lkZW50aXR5LnByZXByb2QyLmFjY291bnQuZjVuZXR3b3Jrcy5uZXQvb2F1dGgyL2F1c3kyc2k1a3lLejdLdTR2MGg3IiwiYXVkIjoiYXBpOi8vaWhlYWx0aCIsImlhdCI6MTcwMjQ5Njg1NSwiZXhwIjoxNzAyNDk4NjU1LCJjaWQiOiIwb2ExeDh6Mjl3Z0Rkd2U1QjBoOCIsInNjcCI6WyJpaGVhbHRoIl0sInN1YiI6IjBvYTF4OHoyOXdnRGR3ZTVCMGg4In0.e3Rg_-iv3rLLkfz923KbboJncfcU1gBhk8lVJQV_SfZRZ_Xoiri7oo0wiAWwWnMauupMDt7oL8bZtytaJMycPrEzsQlyhYD0QaR2a0YK1B0TPeBvvbQGuDXVIgVgc51OY26MAL_OvwWKlM1mS9w0nRsIdfat-OMbPktryLgzBYapj9b_8xMTg34gNOabMk9-ghvQxq7zUGkDXySrOuBHQfEtyOavAyQxMoAQyNFSPENIyQuy6UUPGqdHvzV8UuniL4j2R3TT8DhrQIe-ZQ1CFVJT-Qrv1V9yDNbSyC4I619fPwJdoRpXEEP7G06pxREjC0Kt5i1lUAN99hwxLgCReA"
+        }
+      },
+      "rateLimitParam": {
+        "name": "k",
+        "description": "API usage key",
+        "required": true,
+        "in": "query",
+        "schema": {
+          "type": "string",
+          "example": "UKKD3Vxv7NHrM3QmYk8Fk2mZnLtljAKX"
+        }
+      },
+      "productFamilyParam": {
+        "name": "productFamily",
+        "description": "Product Family of the Product",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "productLineParam": {
+        "name": "productLine",
+        "description": "Product Line of a Product Family of the Product",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "productVersionParam": {
+        "name": "productVersion",
+        "description": "Product Version of a Product Line",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "languageParam": {
+        "name": "language",
+        "description": "Language of the Product Software",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "containerParam": {
+        "name": "container",
+        "description": "Container of the Product Line",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "fileNameParam": {
+        "name": "fileName",
+        "description": "File Name of the Software to download",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "kbIdParam": {
+        "name": "kbId",
+        "in": "path",
+        "description": "Knowledge Article ID",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "example": "K82008830"
+        }
+      }
+    },
+    "schemas": {
+      "AccessTokenResponseMyF5_Success": {
+        "type": "object",
+        "properties": {
+          "token_type": {
+            "type": "string",
+            "example": "Bearer"
+          },
+          "expires_in": {
+            "type": "integer",
+            "format": "int32",
+            "example": 1800
+          },
+          "access_token": {
+            "type": "string",
+            "example": "dyJraWQiOiJsc1didVctc2o1RVZYLVMtbUNlZjVjZnM2ZFg5SWthT0Z6YWNQZTkwckkvIiwiYWxnIjoiUlMyNTYifQ"
+          },
+          "scope": {
+            "type": "string",
+            "example": "myf5_scope"
+          }
+        }
+      },
+      "AccessTokenResponseMyF5_Failure": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error code",
+            "enum": [
+              "unsupported_grant_type",
+              "invalid_grant",
+              "invalid_client",
+              "invalid_resource"
+            ]
+          },
+          "error_description": {
+            "type": "string",
+            "description": "Detailed error description"
+          }
+        }
+      },
+      "AccessTokenResponseMyF5_Unauthorized": {
+        "type": "object",
+        "properties": {
+          "errorCode": {
+            "type": "string",
+            "description": "Error code"
+          },
+          "errorSummary": {
+            "type": "string",
+            "description": "Summary of the error"
+          },
+          "errorLink": {
+            "type": "string",
+            "description": "Reference to the error link"
+          },
+          "errorId": {
+            "type": "string",
+            "description": "Authorization error ID"
+          },
+          "errorCauses": {
+            "type": "array",
+            "description": "Causes of the error",
+            "items": {
+              "type": "object",
+              "properties": {
+                "errorSummary": {
+                  "type": "string",
+                  "description": "Summary of specific error cause"
+                }
+              }
+            }
+          }
+        }
+      },
+      "Error": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "code2": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "GatewayError": {
+        "properties": {
+          "errors": {
+            "type": "array"
+          },
+          "items": {
+            "$ref": "#/components/schemas/Error"
+          }
+        }
+      },
+      "ApiErrorResponse": {
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "links": {
+            "type": "object"
+          },
+          "isError": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object"
+          },
+          "code": {
+            "type": "integer",
+            "description": "HTTP Status code",
+            "enum": [
+              400,
+              403,
+              500
+            ]
+          }
+        }
+      },
+      "Subscription": {
+        "properties": {
+          "subscriptionId": {
+            "type": "string"
+          },
+          "productFamily": {
+            "type": "string"
+          }
+        }
+      },
+      "Contact": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "accountContactRole": {
+            "type": "string"
+          }
+        }
+      },
+      "AlternateContact": {
+        "type": "object",
+        "required": [
+          "firstName",
+          "lastName",
+          "email",
+          "phoneNumber"
+        ],
+        "description": "Alternate Contact to create Case",
+        "properties": {
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "phoneNumber": {
+            "type": "string"
+          }
+        }
+      },
+      "Account": {
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "accountName": {
+            "type": "string"
+          },
+          "accountContactRole": {
+            "type": "string"
+          },
+          "subscriptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Subscription"
+            }
+          },
+          "contacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Contact"
+            }
+          }
+        }
+      },
+      "Product": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ProductFamily": {
+        "properties": {
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Product"
+            }
+          }
+        }
+      },
+      "Link": {
+        "properties": {
+          "href": {
+            "type": "string"
+          },
+          "rel": {
+            "type": "string"
+          }
+        }
+      },
+      "CaseAccount": {
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "accountName": {
+            "type": "string"
+          }
+        }
+      },
+      "CaseContact": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      },
+      "Activity": {
+        "properties": {
+          "activityDate": {
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "contact": {
+            "$ref": "#/components/schemas/CaseContact"
+          }
+        }
+      },
+      "CaseMetadataApiResponse": {
+        "properties": {
+          "productFamilies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProductFamily"
+            }
+          },
+          "priorities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reasonForContacts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "preferredContactMethods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timezones": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "nginxPlusVersions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "linuxDistributions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cloudProviders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Account"
+            }
+          }
+        }
+      },
+      "CaseCreateApiRequest": {
+        "type": "object",
+        "required": [
+          "productFamily",
+          "product",
+          "version",
+          "subject",
+          "description",
+          "priority",
+          "reasonForContact",
+          "caseOwnerEmail",
+          "preferredContactMethod",
+          "timezone"
+        ],
+        "properties": {
+          "productFamily": {
+            "type": "string",
+            "description": "Product Family returned via Case Metdata API"
+          },
+          "product": {
+            "type": "string",
+            "description": "Product associated to a Product Family returned via Case Metdata API"
+          },
+          "version": {
+            "type": "string",
+            "description": "Version of a Product returned via Case Metdata API"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "serialNumber": {
+            "type": "string",
+            "description": "Serial number or last 7 digits of registration key and applicable for only BIG-IP products"
+          },
+          "subscriptionId": {
+            "type": "string",
+            "description": "Id of the Subscription and returned via Case Metadata API"
+          },
+          "nginxPlusVersion": {
+            "type": "string"
+          },
+          "linuxDistribution": {
+            "type": "string"
+          },
+          "hostName": {
+            "type": "string",
+            "description": "Provide any Hostnames for systems that are pertinent for this case. Having the Hostname helps us with initial search of the logs for the affected system"
+          },
+          "cloudProvider": {
+            "type": "string",
+            "description": "Cloud Providers returned via Case Metdata API."
+          },
+          "priority": {
+            "type": "string",
+            "description": "Priority returned via Case Metdata API. Gauge your priority using the following range (Site Down is a confirmed outage and General Assistance is scheduled maintenance or information needed)."
+          },
+          "reasonForContact": {
+            "type": "string",
+            "description": "Reason For Conatcts returned via Case Metdata API."
+          },
+          "customerTicketNumber": {
+            "type": "string",
+            "description": "Customer Ticket Number"
+          },
+          "caseOwnerEmail": {
+            "type": "string",
+            "format": "email"
+          },
+          "preferredContactMethod": {
+            "type": "string",
+            "description": "Contact Methods returned via Case Metdata API."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "Time Zone returned via Case Metdata API."
+          },
+          "alternateContact": {
+            "$ref": "#/components/schemas/AlternateContact"
+          }
+        }
+      },
+      "CasePatchApiRequest": {
+        "type": "object",
+        "properties": {
+          "comments": {
+            "type": "string"
+          }
+        }
+      },
+      "CaseCreateApiResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "default": "success"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "caseNumber": {
+                "type": "string"
+              },
+              "createdDate": {
+                "type": "string"
+              }
+            }
+          },
+          "message": {
+            "type": "string",
+            "default": "Case Created Successfully"
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Link"
+            }
+          }
+        }
+      },
+      "GetCaseApiResponse": {
+        "properties": {
+          "caseNumber": {
+            "type": "string",
+            "description": "Case Details"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "product": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "hostName": {
+            "type": "string"
+          },
+          "cloudProvider": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "reasonForContact": {
+            "type": "string"
+          },
+          "customerTicketNumber": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "serialNumber": {
+            "type": "string"
+          },
+          "subscriptionId": {
+            "type": "string"
+          },
+          "dateOpened": {
+            "type": "string"
+          },
+          "preferredContactMethod": {
+            "type": "string"
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "nginxPlusVersion": {
+            "type": "string"
+          },
+          "linuxDistribution": {
+            "type": "string"
+          },
+          "caseOwnercontact": {
+            "$ref": "#/components/schemas/CaseContact"
+          },
+          "account": {
+            "$ref": "#/components/schemas/CaseAccount"
+          },
+          "alternateContact": {
+            "$ref": "#/components/schemas/AlternateContact"
+          },
+          "activities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Activity"
+            }
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Link"
+            }
+          }
+        }
+      },
+      "GetCasesApiResponse": {
+        "properties": {
+          "cases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GetCaseApiResponse"
+            },
+            "description": "List of Cases"
+          }
+        }
+      },
+      "DownloadsApiErrorResponse": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "code2": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "DownloadsApiServerErrorResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "object",
+            "properties": {
+              "error": {
+                "type": "string"
+              }
+            }
+          },
+          "isError": {
+            "type": "boolean"
+          },
+          "code": {
+            "type": "integer"
+          }
+        }
+      },
+      "DownloadProductLine": {
+        "properties": {
+          "productFamily": {
+            "type": "string",
+            "description": "Product Family (Group on MyF5 UI)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the Software"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "Display Name on MyF5 UI"
+          },
+          "helpText": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "getFileDownloadPathPattern": {
+            "type": "string",
+            "description": "Container - Every Product Version can have multiple containers e.g. BIG-IP -> \"BIG-IP v16.x\" have containers like \"ServerTechnologiesUpdates\", \"GeoLocationUpdates_Puls\" etc. <br> <br> Version First - Every Product Version will only have one container e.g. NGINX -> \"NGINX Service Mesh\" has only one container \"NGINX_Service_Mesh\" <br> <br> Distribution First - container value should be split with \"-\" to get <br> Linux Distribution <br> Distribution Version <br> Architecture <br> <br> e.g. NGINX -> \"NGINX App Protect\" has conatiner value \"alpine-3.10-x86_64\" from which <br> Linux Distribution is \"alpine\" <br> Distribution Version is \"3.10\" <br> Architecture is \"x86_64\"",
+            "enum": [
+              "Container",
+              "Distribution First",
+              "Version First"
+            ]
+          }
+        }
+      },
+      "DownloadProductFamily": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "productLines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DownloadProductLine"
+            }
+          }
+        }
+      },
+      "DownloadsGetMetadataApiResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "isError": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "productFamilies": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/DownloadProductFamily"
+                }
+              }
+            }
+          },
+          "code": {
+            "type": "number"
+          }
+        }
+      },
+      "DownloadFile": {
+        "type": "object",
+        "properties": {
+          "bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "description": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "href": {
+            "type": "string",
+            "description": "Should be used to get region specific file paths"
+          }
+        }
+      },
+      "DownloadContainerItem": {
+        "type": "object",
+        "properties": {
+          "container": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "releaseDate": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DownloadFile"
+            }
+          }
+        }
+      },
+      "DownloadVersionItem": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "releaseDate": {
+            "type": "string"
+          },
+          "containers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DownloadContainerItem"
+            }
+          }
+        }
+      },
+      "DownloadsGetProductVersionsApiResponse": {
+        "type": "object",
+        "properties": {
+          "family": {
+            "type": "string"
+          },
+          "product": {
+            "type": "string"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DownloadVersionItem"
+            }
+          }
+        }
+      },
+      "DownloadLink": {
+        "properties": {
+          "etag": {
+            "type": "string"
+          },
+          "hosting": {
+            "type": "string"
+          },
+          "href": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string",
+            "enum": [
+              "USA - EAST COAST",
+              "IRELAND"
+            ]
+          }
+        }
+      },
+      "DownloadsGetFileLinksApiResponse": {
+        "type": "object",
+        "properties": {
+          "downloadLinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DownloadLink"
+            }
+          },
+          "bytes": {
+            "type": "string"
+          },
+          "container": {
+            "type": "string"
+          },
+          "containerType": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "family": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "md5": {
+            "type": "string"
+          },
+          "meta": {
+            "type": "object",
+            "properties": {
+              "etagAws": {
+                "type": "string"
+              },
+              "md5": {
+                "type": "string"
+              },
+              "sha1": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "sha384": {
+                "type": "string"
+              },
+              "sha512": {
+                "type": "string"
+              },
+              "uploadDate": {
+                "type": "string"
+              }
+            }
+          },
+          "product": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "KnowledgeArticleError": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "code2": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "KnowledgeArticleGatewayError": {
+        "type": "object",
+        "properties": {
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeArticleError"
+            }
+          }
+        }
+      },
+      "KnowledgeArticleApiErrorResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "links": {
+            "type": "object",
+            "nullable": true
+          },
+          "isError": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "nullable": true
+          },
+          "code": {
+            "type": "integer",
+            "description": "HTTP status code",
+            "enum": [
+              400,
+              403,
+              500
+            ]
+          }
+        }
+      },
+      "GetSecurityAdvisoryKBApiResponse": {
+        "type": "object",
+        "properties": {
+          "kbId": {
+            "type": "string",
+            "description": "Knowledge article ID",
+            "example": "K82008830"
+          },
+          "firstPublishedDate": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2024-05-21T10:45:00Z"
+          },
+          "lastPublishedDate": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2025-01-10T14:30:00Z"
+          },
+          "title": {
+            "type": "string",
+            "example": "Security Advisory for F5 BIG-IP"
+          },
+          "publishStatus": {
+            "type": "string",
+            "example": "Published"
+          },
+          "contentType": {
+            "type": "string",
+            "example": "Security Advisory"
+          },
+          "relatedContent": {
+            "type": "string",
+            "example": "K82004567"
+          },
+          "details": {
+            "type": "string",
+            "example": "This advisory provides mitigation guidance for affected versions."
+          },
+          "appliesToProducts": {
+            "type": "string",
+            "example": "BIG-IP, BIG-IQ"
+          }
+        }
+      }
+    },
+    "requestBodies": {
+      "GetAccessTokenRequestCustomer": {
+        "description": "Get Access Token (Customer)",
+        "required": true,
+        "content": {
+          "application/x-www-form-urlencoded": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "grant_type": {
+                  "type": "string",
+                  "default": "client_credentials"
+                },
+                "audience": {
+                  "type": "string",
+                  "default": "api://ciam-api-myf5"
+                },
+                "scope": {
+                  "type": "string",
+                  "default": "myf5_scope"
+                }
+              },
+              "required": [
+                "grant_type",
+                "audience",
+                "scope"
+              ]
+            }
+          }
+        }
+      },
+      "CASE_CREATE_REQUEST": {
+        "description": "Case Create Request",
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CaseCreateApiRequest"
+            },
+            "examples": {
+              "bigip": {
+                "summary": "BIG-IP Case create request",
+                "value": {
+                  "productFamily": "BIG-IP",
+                  "product": "BIG-IP AFM",
+                  "productVersion": "11.1.0",
+                  "subject": "Testing Create Case via API",
+                  "description": "Testing Create Case via API",
+                  "hostName": "Machine Name",
+                  "priority": "1 - Site Down",
+                  "reasonForContact": "General Problem",
+                  "cloudProvider": "AWS",
+                  "customerTicketNumber": "12345678890",
+                  "preferredContactMethod": "Email",
+                  "timezone": "(GMT +14:00) GMT+14:00",
+                  "alternateContact": {
+                    "firstName": "Test1",
+                    "lastName": "Test2",
+                    "email": "test@domain.com",
+                    "phoneNumber": "1234567890",
+                    "timezone": "(GMT +10:00) GMT+10:00"
+                  },
+                  "serialNumber": "YSQAUPS"
+                }
+              },
+              "nginx": {
+                "summary": "NGINX Case create request",
+                "value": {
+                  "productFamily": "NGINX",
+                  "product": "NGINX Controller",
+                  "productVersion": "2.7",
+                  "subject": "Testing Create Case via API",
+                  "description": "Testing Create Case via API",
+                  "hostName": "Machine Name",
+                  "priority": "1 - Site Down",
+                  "reasonForContact": "General Problem",
+                  "cloudProvider": "AWS",
+                  "customerTicketNumber": "12345678890",
+                  "nginxPlusVersion": "R28",
+                  "linuxDistribution": "Debian",
+                  "preferredContactMethod": "Email",
+                  "timezone": "(GMT +10:00) GMT+10:00",
+                  "alternateContact": {
+                    "firstName": "Test1",
+                    "lastName": "Test2",
+                    "email": "test@domain.com",
+                    "phoneNumber": "1234567890",
+                    "timezone": "(GMT +10:00) GMT+10:00"
+                  },
+                  "subscriptionId": "A-S00038458"
+                }
+              },
+              "aspenmesh": {
+                "summary": "Aspen Mesh Case create request",
+                "value": {
+                  "productFamily": "Aspen Mesh",
+                  "product": "Aspen Mesh",
+                  "productVersion": "1.11x",
+                  "subject": "Testing Create Case via API",
+                  "description": "Testing Create Case via API",
+                  "hostName": "Machine Name",
+                  "priority": "1 - Site Down",
+                  "reasonForContact": "General Problem",
+                  "cloudProvider": "AWS",
+                  "customerTicketNumber": "12345678890",
+                  "nginxPlusVersion": "R28",
+                  "linuxDistribution": "Debian",
+                  "preferredContactMethod": "Email",
+                  "timezone": "(GMT +10:00) GMT+10:00",
+                  "alternateContact": {
+                    "firstName": "Test1",
+                    "lastName": "Test2",
+                    "email": "test@domain.com",
+                    "phoneNumber": "1234567890",
+                    "timezone": "(GMT +10:00) GMT+10:00"
+                  },
+                  "subscriptionId": "A-S00038458"
+                }
+              }
+            }
+          }
+        }
+      },
+      "CASE_PATCH_REQUEST": {
+        "description": "Case Add Comment Request.",
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CasePatchApiRequest"
+            },
+            "examples": {
+              "addComments": {
+                "summary": "Adding comments to Case",
+                "value": {
+                  "comments": "Adding test comments"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "200_CustomerGetAccessTokenResponseMyF5": {
+        "description": "Access Token retrieved successfully",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AccessTokenResponseMyF5_Success"
+            }
+          }
+        }
+      },
+      "400_CustomerGetAccessTokenResponseMyF5": {
+        "description": "Bad Request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/AccessTokenResponseMyF5_Failure"
+            },
+            "example": {
+              "error": "invalid_request",
+              "error_description": "The authorization server id is invalid."
+            }
+          }
+        }
+      },
+      "401_CustomerGetAccessTokenResponseMyF5": {
+        "description": "Unauthorized",
+        "content": {
+          "application/json": {
+            "schema": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/AccessTokenResponseMyF5_Failure"
+                },
+                {
+                  "$ref": "#/components/schemas/AccessTokenResponseMyF5_Unauthorized"
+                }
+              ]
+            },
+            "examples": {
+              "invalidClientId": {
+                "summary": "Invalid Client Id",
+                "value": {
+                  "errorCode": "invalid_client",
+                  "errorSummary": "Invalid value for 'client_id' parameter.",
+                  "errorLink": "invalid_client",
+                  "errorId": "oaeyZAY6KwkT5GJIxLmQS6FYg",
+                  "errorCauses": []
+                }
+              },
+              "invalidClientSecret": {
+                "summary": "Invalid Client Secret",
+                "value": {
+                  "error": "invalid_client",
+                  "error_description": "The client secret supplied for a confidential client is invalid."
+                }
+              }
+            }
+          }
+        }
+      },
+      "201_CASE_CREATE_Response": {
+        "description": "Case creation Succesful",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CaseCreateApiResponse"
+            },
+            "example": {
+              "status": "Success",
+              "message": "Case created successfully.",
+              "links": [
+                {
+                  "rel": "case-detail",
+                  "href": "https://f5--test.sandbox.my.site.com/manage/s/case/500D600000D8cKM"
+                }
+              ],
+              "isError": false,
+              "data": {
+                "updatedDate": "05/28/2024 20:14:15",
+                "caseNumber": "00449105"
+              },
+              "code": 200
+            }
+          }
+        }
+      },
+      "200_CASE_UPDATE_Response": {
+        "description": "Adding comments to Case Succesful",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CaseCreateApiResponse"
+            },
+            "example": {
+              "status": "Success",
+              "message": "Comments added to Case.",
+              "links": [
+                {
+                  "rel": "case-detail",
+                  "href": "https://f5--test.sandbox.my.site.com/manage/s/case/500D600000D8cKM"
+                }
+              ],
+              "isError": false,
+              "data": {
+                "updatedDate": "05/28/2024 20:14:15",
+                "caseNumber": "00449105"
+              },
+              "code": 200
+            }
+          }
+        }
+      },
+      "200_CASE_GET_Response": {
+        "description": "Get Case details response",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GetCaseApiResponse"
+            },
+            "example": {
+              "status": "Success",
+              "message": "Case details retrieved successfully",
+              "isError": false,
+              "data": [
+                {
+                  "version": "",
+                  "subscriptionId": "A-S00040004",
+                  "subject": "Testing Create NGINX Case via API",
+                  "status": "Needs Attention",
+                  "serialNumber": "",
+                  "reasonForContact": "General Problem",
+                  "product": "NGINX Amplify",
+                  "priority": "1 - Site Down",
+                  "nginxPlusVersion": "",
+                  "linuxDistribution": "",
+                  "links": [
+                    {
+                      "rel": "case-detail",
+                      "href": "https://f5--test.sandbox.my.site.com/manage/s/case/500D600000D8cKM"
+                    }
+                  ],
+                  "hostName": "Machine Name",
+                  "description": "Testing Create Case via API",
+                  "dateOpened": "1 - Site Down",
+                  "customerTicketNumber": "12345678890",
+                  "cloudProvider": "AWS",
+                  "caseOwnercontact": {
+                    "timeZone": "(GMT -12:00) GMT-12:00",
+                    "preferredContactMethod": "Email",
+                    "name": "SDET TestAPI5",
+                    "email": "servicecloudtestf5+api5@gmail.com"
+                  },
+                  "caseNumber": "00449105",
+                  "alternateContact": {
+                    "timeZone": "",
+                    "phoneNumber": "",
+                    "lastName": "",
+                    "firstName": "",
+                    "email": ""
+                  },
+                  "activity": {
+                    "emailActivities": [],
+                    "commentActivities": [
+                      {
+                        "comment": "Added by Swetha using CASE_ADD_COMMENT Case API - May 5/20",
+                        "activityDate": "05/20/2024 23:21:35",
+                        "activityContact": {
+                          "name": "SDET TestAPI5",
+                          "email": "servicecloudtestf5+api5@gmail.com"
+                        }
+                      }
+                    ]
+                  },
+                  "account": {
+                    "accountName": "SC_API_Test5",
+                    "accountId": "SFA-1538293"
+                  }
+                }
+              ],
+              "code": 200
+            }
+          }
+        }
+      },
+      "200_CASES_GET_Response": {
+        "description": "Get Cases based on filter criteria",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GetCasesApiResponse"
+            },
+            "example": {
+              "status": "Success",
+              "message": "Cases retrieved successfully",
+              "isError": false,
+              "data": [
+                {
+                  "version": "11.4.0",
+                  "subscriptionId": "A-S00013767",
+                  "subject": "Testing Create Case via API",
+                  "status": "New",
+                  "serialNumber": "DTOGCUN",
+                  "reasonForContact": "General Problem",
+                  "product": "BIG-IP AFM",
+                  "priority": "1 - Site Down",
+                  "nginxPlusVersion": "",
+                  "linuxDistribution": "",
+                  "links": [
+                    {
+                      "rel": "case-detail",
+                      "href": "https://f5--test.sandbox.my.site.com/manage/s/case/500D600000D94F8"
+                    }
+                  ],
+                  "hostName": "Machine Name",
+                  "description": "Testing Create Case via API",
+                  "dateOpened": "05/22/2024 05:43:13",
+                  "customerTicketNumber": "12345678890",
+                  "cloudProvider": "AWS",
+                  "caseOwnercontact": {
+                    "timeZone": "(GMT -12:00) GMT-12:00",
+                    "preferredContactMethod": "Email",
+                    "name": "SDET TestAPI5",
+                    "email": "servicecloudtestf5+api5@gmail.com"
+                  },
+                  "caseNumber": "00449377",
+                  "alternateContact": {
+                    "timeZone": "",
+                    "phoneNumber": "",
+                    "lastName": "",
+                    "firstName": "",
+                    "email": ""
+                  },
+                  "account": {
+                    "accountName": "Universal Orlando",
+                    "accountId": "SFA-1441119"
+                  }
+                },
+                {
+                  "version": "11.4.0",
+                  "subscriptionId": "A-S00013767",
+                  "subject": "Testing Create Case via API",
+                  "status": "New",
+                  "serialNumber": "DTOGCUN",
+                  "reasonForContact": "General Problem",
+                  "product": "BIG-IP AFM",
+                  "priority": "1 - Site Down",
+                  "nginxPlusVersion": "",
+                  "linuxDistribution": "",
+                  "links": [
+                    {
+                      "rel": "case-detail",
+                      "href": "https://f5--test.sandbox.my.site.com/manage/s/case/500D600000D94E1"
+                    }
+                  ],
+                  "hostName": "Machine Name",
+                  "description": "Testing Create Case via API",
+                  "dateOpened": "05/22/2024 05:41:27",
+                  "customerTicketNumber": "12345678890",
+                  "cloudProvider": "AWS",
+                  "caseOwnercontact": {
+                    "timeZone": "(GMT -12:00) GMT-12:00",
+                    "preferredContactMethod": "Email",
+                    "name": "SDET TestAPI5",
+                    "email": "servicecloudtestf5+api5@gmail.com"
+                  },
+                  "caseNumber": "00449376",
+                  "alternateContact": {
+                    "timeZone": "",
+                    "phoneNumber": "",
+                    "lastName": "",
+                    "firstName": "",
+                    "email": ""
+                  },
+                  "account": {
+                    "accountName": "Universal Orlando",
+                    "accountId": "SFA-1441119"
+                  }
+                },
+                {
+                  "version": "12.1.0",
+                  "subscriptionId": "A-S00013767",
+                  "subject": "Ryan Postman - Testing Create Case via API",
+                  "status": "New",
+                  "serialNumber": "DTOGCUN",
+                  "reasonForContact": "General Problem",
+                  "product": "BIG-IP AFM VE",
+                  "priority": "3 - Performance Degraded",
+                  "nginxPlusVersion": "",
+                  "linuxDistribution": "",
+                  "links": [
+                    {
+                      "rel": "case-detail",
+                      "href": "https://f5--test.sandbox.my.site.com/manage/s/case/500D600000D8dXC"
+                    }
+                  ],
+                  "hostName": "",
+                  "description": "Ryan Postman - Testing Create Case via API",
+                  "dateOpened": "05/16/2024 21:56:00",
+                  "customerTicketNumber": "12345678890",
+                  "cloudProvider": "AWS",
+                  "caseOwnercontact": {
+                    "timeZone": "(GMT -8:00) US/Pacific - Pacific Standard Time",
+                    "preferredContactMethod": "Email",
+                    "name": "SDET TestAPI5",
+                    "email": "servicecloudtestf5+api5@gmail.com"
+                  },
+                  "caseNumber": "00449114",
+                  "alternateContact": {
+                    "timeZone": "",
+                    "phoneNumber": "1234567890",
+                    "lastName": "Test2",
+                    "firstName": "Test1",
+                    "email": "test@domain.com"
+                  },
+                  "account": {
+                    "accountName": "Universal Orlando",
+                    "accountId": "SFA-1441119"
+                  }
+                },
+                {
+                  "version": "",
+                  "subscriptionId": "A-S00040004",
+                  "subject": "Testing Create NGINX Case via API",
+                  "status": "Solving",
+                  "serialNumber": "",
+                  "reasonForContact": "General Problem",
+                  "product": "NGINX Amplify",
+                  "priority": "1 - Site Down",
+                  "nginxPlusVersion": "",
+                  "linuxDistribution": "",
+                  "links": [
+                    {
+                      "rel": "case-detail",
+                      "href": "https://f5--test.sandbox.my.site.com/manage/s/case/500D600000D8cKM"
+                    }
+                  ],
+                  "hostName": "Machine Name",
+                  "description": "Testing Create Case via API",
+                  "dateOpened": "05/16/2024 14:44:28",
+                  "customerTicketNumber": "12345678890",
+                  "cloudProvider": "AWS",
+                  "caseOwnercontact": {
+                    "timeZone": "(GMT -12:00) GMT-12:00",
+                    "preferredContactMethod": "Email",
+                    "name": "SDET TestAPI5",
+                    "email": "servicecloudtestf5+api5@gmail.com"
+                  },
+                  "caseNumber": "00449105",
+                  "alternateContact": {
+                    "timeZone": "",
+                    "phoneNumber": "",
+                    "lastName": "",
+                    "firstName": "",
+                    "email": ""
+                  },
+                  "account": {
+                    "accountName": "SC_API_Test5",
+                    "accountId": "SFA-1538293"
+                  }
+                }
+              ],
+              "count": 10,
+              "code": 200
+            }
+          }
+        }
+      },
+      "200_CASE_METADATA_Respone": {
+        "description": "Case Metadata Retrieved Succesfully",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/CaseMetadataApiResponse"
+            },
+            "example": {
+              "status": "Success",
+              "message": "Case metadata retrieved successfully",
+              "isError": false,
+              "data": {
+                "timeZones": [
+                  "GMT+14:00",
+                  "(GMT -12:00) GMT-12:00",
+                  "(GMT -11:00) GMT-11:00",
+                  "(GMT -11:00) US/Samoa - Samoa Standard Time",
+                  "(GMT +12:00) GMT+12:00",
+                  "(GMT +12:00) NST - New Zealand Daylight Time",
+                  "(GMT +12:45) NZ-CHAT - Chatham Daylight Time",
+                  "(GMT +13:00) GMT+13:00"
+                ],
+                "status": [
+                  "New",
+                  "Solving",
+                  "Needs Information",
+                  "Resolution Provided",
+                  "Closed"
+                ],
+                "reasonsForContact": [
+                  "Account Related",
+                  "General Problem",
+                  "Informational",
+                  "Other",
+                  "Proactive",
+                  "Security Related",
+                  "Subscription / Licensing"
+                ],
+                "prodFamilies": [
+                  {
+                    "products": [
+                      {
+                        "versions": [],
+                        "name": "Marketplace/Cloud"
+                      },
+                      {
+                        "versions": [],
+                        "name": "NGINXaaS for Azure"
+                      },
+                      {
+                        "versions": [],
+                        "name": "NGINX Amplify"
+                      },
+                      {
+                        "versions": [
+                          "1.0.0",
+                          "1.6.0"
+                        ],
+                        "name": "NGINX API Connectivity Manager"
+                      },
+                      {
+                        "versions": [
+                          "1.0.0",
+                          "4.8.0",
+                          "4.9.0"
+                        ],
+                        "name": "NGINX App Protect"
+                      },
+                      {
+                        "versions": [
+                          "1.0.0",
+                          "4.1",
+                          "4.1.2"
+                        ],
+                        "name": "NGINX App Protect Denial of Service"
+                      },
+                      {
+                        "versions": [
+                          "2.7",
+                          "pre-2.x"
+                        ],
+                        "name": "NGINX Controller"
+                      },
+                      {
+                        "versions": [
+                          "1.10",
+                          "1.11",
+                          "3.5.0"
+                        ],
+                        "name": "NGINX Ingress Controller"
+                      },
+                      {
+                        "versions": [
+                          "0.9.0",
+                          "0.9.1",
+                          "2.15.1"
+                        ],
+                        "name": "NGINX Instance Manager"
+                      },
+                      {
+                        "versions": [
+                          "1.0.0",
+                          "1.1.0",
+                          "1.2.0",
+                          "1.3.0",
+                          "1.4.0",
+                          "1.5.0"
+                        ],
+                        "name": "NGINX Management Suite Security Monitoring"
+                      },
+                      {
+                        "versions": [],
+                        "name": "NGINX ModSecurity WAF"
+                      },
+                      {
+                        "versions": [
+                          "R1",
+                          "R2",
+                          "R3",
+                          "1.20.0",
+                          "1.20.1",
+                          "1.24.0"
+                        ],
+                        "name": "NGINX Open Source Subscription"
+                      },
+                      {
+                        "versions": [
+                          "pre-R.14",
+                          "R.x",
+                          "R14",
+                          "R29",
+                          "R30"
+                        ],
+                        "name": "NGINX Plus"
+                      },
+                      {
+                        "versions": [
+                          "1.0.0",
+                          "1.4.0"
+                        ],
+                        "name": "NGINX Security Monitoring"
+                      },
+                      {
+                        "versions": [
+                          "1.0.0",
+                          "1.1.0",
+                          "1.7.0",
+                          "2.0.0"
+                        ],
+                        "name": "NGINX Service Mesh"
+                      },
+                      {
+                        "versions": [
+                          "1.24.0",
+                          "1.25.0"
+                        ],
+                        "name": "NGINX Unit"
+                      }
+                    ],
+                    "name": "NGINX"
+                  },
+                  {
+                    "products": [
+                      {
+                        "versions": [],
+                        "name": "AOM"
+                      },
+                      {
+                        "versions": [
+                          "1.0.0",
+                          "1.1.0",
+                          "Pre 1.0.0"
+                        ],
+                        "name": "ASP"
+                      },
+                      {
+                        "versions": [
+                          "1.0",
+                          "Pre 1.0"
+                        ],
+                        "name": "AWS WAF Rules"
+                      },
+                      {
+                        "versions": [
+                          "12.1.6",
+                          "13.1.4",
+                          "Pre 12.1.6"
+                        ],
+                        "name": "BIG-IP AAM"
+                      },
+                      {
+                        "versions": [
+                          "12.1.6",
+                          "13.1.4",
+                          "16.1.3",
+                          "Pre 12.1.6"
+                        ],
+                        "name": "BIG-IP AAM VE"
+                      },
+                      {
+                        "versions": [
+                          "12.1.6",
+                          "13.1.1",
+                          "17.1.0",
+                          "Pre 13.1.1"
+                        ],
+                        "name": "BIG-IP Advanced WAF"
+                      },
+                      {
+                        "versions": [
+                          "11.3.0",
+                          "11.4.0",
+                          "17.1.0",
+                          "Pre 11.3.0"
+                        ],
+                        "name": "BIG-IP AFM"
+                      },
+                      {
+                        "versions": [
+                          "11.3.0",
+                          "11.4.0",
+                          "11.4.1",
+                          "11.5.0",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 11.3.0"
+                        ],
+                        "name": "BIG-IP AFM VE"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "17.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP APM"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "15.0.1",
+                          "16.1.3",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP APM VE"
+                      },
+                      {
+                        "versions": [
+                          "16.1.2",
+                          "16.1.3",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP ASM"
+                      },
+                      {
+                        "versions": [
+                          "15.1.7",
+                          "16.1.3",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP ASM VE"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "17.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP AVR"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "16.1.0",
+                          "16.1.1",
+                          "16.1.2",
+                          "16.1.3",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP AVR VE"
+                      },
+                      {
+                        "versions": [
+                          "12.1.6",
+                          "13.1.4",
+                          "13.1.5",
+                          "14.1.5",
+                          "16.1.3",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 12.1.6"
+                        ],
+                        "name": "BIG-IP Datasafe"
+                      },
+                      {
+                        "versions": [
+                          "16.1.0",
+                          "16.1.1",
+                          "16.1.2",
+                          "16.1.3",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 12.0.0"
+                        ],
+                        "name": "BIG-IP DDoS"
+                      },
+                      {
+                        "versions": [
+                          "12.0.0",
+                          "12.1.0",
+                          "16.1.2",
+                          "16.1.3",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 12.0.0"
+                        ],
+                        "name": "BIG-IP DNS"
+                      },
+                      {
+                        "versions": [
+                          "15.1.6",
+                          "15.1.7",
+                          "16.1.3",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 12.0.0"
+                        ],
+                        "name": "BIG-IP DNS VE"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "11.2.0",
+                          "16.0.0",
+                          "16.0.1",
+                          "16.1.0",
+                          "16.1.1",
+                          "16.1.2",
+                          "16.1.3",
+                          "17.1.0",
+                          "EQX",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP EDGE"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "15.1.4",
+                          "16.1.1",
+                          "16.1.2",
+                          "17.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP GTM"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "11.2.0",
+                          "15.1.4",
+                          "16.1.1",
+                          "16.1.2",
+                          "17.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP GTM VE"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "16.1.0",
+                          "16.1.1",
+                          "16.1.2",
+                          "16.1.3",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP LC"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "11.2.0",
+                          "16.1.2",
+                          "16.1.3",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP LTM"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP LTM VE"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "17.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP MSM"
+                      },
+                      {
+                        "versions": [
+                          "20.0.0",
+                          "20.0.1",
+                          "20.1.0",
+                          "20.2.0"
+                        ],
+                        "name": "BIG-IP Next Central Manager"
+                      },
+                      {
+                        "versions": [
+                          "1.1.0",
+                          "1.1.1",
+                          "1.2.0",
+                          "1.2.1",
+                          "1.3.0"
+                        ],
+                        "name": "BIG-IP Next CGNAT CNF"
+                      },
+                      {
+                        "versions": [
+                          "1.1.0",
+                          "1.1.1",
+                          "1.2.0",
+                          "1.2.1",
+                          "1.3.0"
+                        ],
+                        "name": "BIG-IP Next DNS CNF"
+                      },
+                      {
+                        "versions": [
+                          "1.1.0",
+                          "1.1.1",
+                          "1.2.0",
+                          "1.2.1",
+                          "1.3.0"
+                        ],
+                        "name": "BIG-IP Next Edge Firewall CNF"
+                      },
+                      {
+                        "versions": [
+                          "1.0.0",
+                          "20.1.0",
+                          "20.2.0"
+                        ],
+                        "name": "BIG-IP Next LTM"
+                      },
+                      {
+                        "versions": [
+                          "1.1.0",
+                          "1.1.1",
+                          "1.2.0",
+                          "1.2.1",
+                          "1.3.0"
+                        ],
+                        "name": "BIG-IP Next Policy Enforcer CNF"
+                      },
+                      {
+                        "versions": [
+                          "1.0.0",
+                          "1.0.1",
+                          "1.0.2",
+                          "1.0.3",
+                          "17.1.0"
+                        ],
+                        "name": "BIG-IP Next Service Communication Proxy(SCP)"
+                      },
+                      {
+                        "versions": null,
+                        "name": "BIG-IP Next SPK"
+                      },
+                      {
+                        "versions": [
+                          "1.0.0",
+                          "20.1.0",
+                          "20.2.0"
+                        ],
+                        "name": "BIG-IP Next WAF"
+                      },
+                      {
+                        "versions": [
+                          "11.3.0",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 11.3.0"
+                        ],
+                        "name": "BIG-IP PEM"
+                      },
+                      {
+                        "versions": [
+                          "11.3.0",
+                          "11.4.0",
+                          "16.1.1",
+                          "16.1.2",
+                          "16.1.3",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 11.3.0"
+                        ],
+                        "name": "BIG-IP PEM VE"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "16.1.3",
+                          "17.1.0",
+                          "Pre 11.1.0"
+                        ],
+                        "name": "BIG-IP PSM"
+                      },
+                      {
+                        "versions": [
+                          "12.0.0",
+                          "16.1.3",
+                          "17.0.0",
+                          "17.1.0",
+                          "Pre 12.0.0"
+                        ],
+                        "name": "BIG-IP SSLO"
+                      },
+                      {
+                        "versions": [
+                          "11.5.0",
+                          "15.1.6",
+                          "15.1.7",
+                          "15.1.8",
+                          "16.1.1",
+                          "16.1.2",
+                          "17.1.0",
+                          "Pre 11.5.0"
+                        ],
+                        "name": "BIG-IP SWG"
+                      },
+                      {
+                        "versions": [
+                          "5.0.0",
+                          "8.3.0",
+                          "Pre 5.0.0"
+                        ],
+                        "name": "BIG-IQ"
+                      },
+                      {
+                        "versions": [
+                          "5.0.0",
+                          "8.3.0",
+                          "Pre 5.0.0"
+                        ],
+                        "name": "BIG-IQ VE"
+                      },
+                      {
+                        "versions": [
+                          "1.1.1",
+                          "1.2.0",
+                          "1.2.1",
+                          "Pre 1.1.1"
+                        ],
+                        "name": "CF-BIGIP-Ctlr"
+                      },
+                      {
+                        "versions": [
+                          "3.1.8",
+                          "4.1.5.0",
+                          "4.2.6.0",
+                          "Pre 3.1.8"
+                        ],
+                        "name": "Dashboard"
+                      },
+                      {
+                        "versions": [
+                          "2.5.0",
+                          "Pre 2.5.0"
+                        ],
+                        "name": "F5 Modules - Ansible"
+                      },
+                      {
+                        "versions": [
+                          "1.0.0",
+                          "1.5.0",
+                          "1.5.1"
+                        ],
+                        "name": "F5OS - Appliance"
+                      },
+                      {
+                        "versions": [
+                          "1.0.0",
+                          "1.6.1",
+                          "Pre 1.0.0"
+                        ],
+                        "name": "F5OS - Chassis"
+                      },
+                      {
+                        "versions": [
+                          "13.1.5",
+                          "16.1.3",
+                          "Pre 13.1.5"
+                        ],
+                        "name": "Herculon DDoS"
+                      },
+                      {
+                        "versions": [
+                          "13.1.5",
+                          "16.1.3",
+                          "Pre 13.1.5"
+                        ],
+                        "name": "Herculon SSLO"
+                      },
+                      {
+                        "versions": [
+                          "All Versions"
+                        ],
+                        "name": "Internal-Traffix"
+                      },
+                      {
+                        "versions": [
+                          "1.8.1",
+                          "2.11.1",
+                          "1.14.2",
+                          "1.14.1",
+                          "2.8.1"
+                        ],
+                        "name": "K8S-BIGIP-Ctlr"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "14.1.5",
+                          "Pre 11.1.0",
+                          "SDK"
+                        ],
+                        "name": "MobileSafe"
+                      },
+                      {
+                        "versions": [
+                          "1.2.0",
+                          "1.2.1",
+                          "1.3.0.0",
+                          "Pre 1.2.0"
+                        ],
+                        "name": "NFV Gi FW Solution"
+                      },
+                      {
+                        "versions": [
+                          "1.2.0",
+                          "1.2.1",
+                          "1.3.0.0",
+                          "Pre 1.2.0"
+                        ],
+                        "name": "NFV Gi LAN Solution"
+                      },
+                      {
+                        "versions": [
+                          "1.2.0",
+                          "1.2.1",
+                          "1.3.0.0",
+                          "2.0",
+                          "Pre 1.2.0"
+                        ],
+                        "name": "NFV VNF Manager"
+                      },
+                      {
+                        "versions": [
+                          "5.1.0",
+                          "5.2.0",
+                          "Pre 5.1"
+                        ],
+                        "name": "SDC"
+                      },
+                      {
+                        "versions": [
+                          "11.6.0",
+                          "15.1.0",
+                          "Pre 11.6.0"
+                        ],
+                        "name": "Shape Security"
+                      },
+                      {
+                        "versions": [
+                          "11.1.0",
+                          "15.1.7",
+                          "15.1.8",
+                          "16.0.0",
+                          "16.0.1",
+                          "16.1.0",
+                          "16.1.3",
+                          "Pre 11.1.0",
+                          "SDK"
+                        ],
+                        "name": "WebSafe"
+                      }
+                    ],
+                    "name": "BIG-IP"
+                  },
+                  {
+                    "products": [
+                      {
+                        "versions": [
+                          "1.11.x",
+                          "1.14.x",
+                          "1.6.x",
+                          "1.9.x",
+                          "pre 1.5x",
+                          "1.18.x"
+                        ],
+                        "name": "Aspen Mesh"
+                      }
+                    ],
+                    "name": "Aspen Mesh"
+                  }
+                ],
+                "priorities": [
+                  "1 - Site Down",
+                  "2 - Site At Risk",
+                  "3 - Performance Degraded",
+                  "4 - General Assistance"
+                ],
+                "preferredContactMethods": [
+                  "Email",
+                  "Mobile",
+                  "Phone"
+                ],
+                "nginxPlusVersions": [
+                  "R31",
+                  "R20",
+                  "R19"
+                ],
+                "linuxDistributions": [
+                  "Debian",
+                  "CentOS"
+                ],
+                "cloudProviders": [
+                  "AWS",
+                  "Azure",
+                  "Google",
+                  "Private",
+                  "Other"
+                ],
+                "accounts": [
+                  {
+                    "subscriptions": [
+                      {
+                        "subscriptionId": "A-S00000000",
+                        "productFamily": "BIG-IP"
+                      },
+                      {
+                        "subscriptionId": "A-S00000002",
+                        "productFamily": "BIG-IP"
+                      }
+                    ],
+                    "accountName": "Test_DATA_SC_API_Test5",
+                    "accountId": "SFA-0000000"
+                  },
+                  {
+                    "subscriptions": [],
+                    "accountName": "SC_API_Test5",
+                    "accountId": "SFA-0000001"
+                  }
+                ]
+              },
+              "code": 200
+            }
+          }
+        }
+      },
+      "400_Response_Cases": {
+        "description": "Mandatory fields not passed or Business Rules validaiton failed",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiErrorResponse"
+            },
+            "example": {
+              "status": "Error",
+              "message": "Valid Case Number is required to add case comments.",
+              "links": null,
+              "isError": true,
+              "data": null,
+              "code": 400
+            }
+          }
+        }
+      },
+      "401_Response_Cases": {
+        "description": "Client Id or Access Token is Invalid",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GatewayError"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "rrt-3421070165942696681-b-gwo1-28072-29990115-3",
+                  "code": "authentication",
+                  "code2": "",
+                  "message": "Malformed, invalid, or expired token specified in (or missing from) Authorization header."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "403_Response_Cases": {
+        "description": "Not Authorized to access resource",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiErrorResponse"
+            },
+            "example": {
+              "status": "Error",
+              "message": "The Contact, Subscription, and Account combination is not valid, please ensure the Contact is authorized to create a Case for this Account and Subscription",
+              "links": null,
+              "isError": true,
+              "data": null,
+              "code": 403
+            }
+          }
+        }
+      },
+      "404_Response_Cases": {
+        "description": "Resource requested doesn't exist",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GatewayError"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "rrt-5493483253101984484-c-gwo1-16704-30653717-1",
+                  "code": "not-found",
+                  "code2": "",
+                  "message": "Resource not found, see API documentation for valid URLs."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "405_Response_Cases": {
+        "description": "Method not Allowed except POST",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GatewayError"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "rrt-8810518325805389989-b-gwo1-14180-30966180-1",
+                  "code": "method-not-allowed",
+                  "code2": "",
+                  "message": "HTTP method specified is not supported, see API documentation for methods allowed to the requested URL."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "413_Response": {
+        "description": "Request Payload Limitations (Array Element Count= 100, Container Depth = 10, Object Entry Count = 100, Object Entry Name Length = 64, String Value Length = 3000)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GatewayError"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "rrt-3421070165942696681-b-gwo1-28072-29990115-3",
+                  "code": "entity-size",
+                  "code2": "",
+                  "message": "See API documentation for maximum request payload sizes."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "429_Response_Cases": {
+        "description": "RateLimit or Quota exceeded",
+        "headers": {
+          "X-RateLimit-Limit": {
+            "schema": {
+              "type": "integer",
+              "example": 60
+            },
+            "description": "The Total number of requests allowed per time period."
+          },
+          "X-RateLimit-Remaining": {
+            "schema": {
+              "type": "integer",
+              "example": 1
+            },
+            "description": "The number of requests remaining in the time period."
+          },
+          "X-RateLimit-Reset": {
+            "schema": {
+              "type": "integer",
+              "example": 1574813041591
+            },
+            "description": "The time in milliseconds UTC until the next time period begins"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GatewayError"
+            },
+            "examples": {
+              "rateLimit": {
+                "summary": "Too many calls within Short Span of time SPIKE Arrest",
+                "value": {
+                  "errors": [
+                    {
+                      "id": "rrt-2025773701088352430-c-gwo1-8342-25600318-1",
+                      "code": "rate-limit",
+                      "code2": "",
+                      "message": "Request rate exceeded 5ps"
+                    }
+                  ]
+                }
+              },
+              "quotaExceeded": {
+                "summary": "Exceeded your Quota per Day",
+                "value": {
+                  "errors": [
+                    {
+                      "id": "rrt-8810518325805389989-b-gwo1-11191-21315777-1",
+                      "code": "quota-exceeded",
+                      "code2": "",
+                      "message": "Too many requests received in a given amount of time."
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "500_Response_Cases": {
+        "description": "Unhandled exception occured",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiErrorResponse"
+            },
+            "example": {
+              "status": "Error",
+              "message": "An unhandled exception occurred and please try again",
+              "links": null,
+              "isError": true,
+              "data": null,
+              "code": 500
+            }
+          }
+        }
+      },
+      "502_Response_Cases": {
+        "description": "Unhandled exception occured",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GatewayError"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "rrt-7598577119180327598-c-gwo1-18956-16081777-1",
+                  "code": "external-resource",
+                  "code2": "iam",
+                  "message": "Error processing request. Contact support and provide the error id specified."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "401_Response": {
+        "description": "Client Id or Access Token is Invalid",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DownloadsApiErrorResponse"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "rrt-7400944380344152353-c-gwo1-1364-43593246-1",
+                  "code": "authentication",
+                  "code2": "",
+                  "message": "Malformed, invalid, or expired token specified in (or missing from) Authorization header."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "downloads_403_Response": {
+        "description": "Authorization Failure Cases",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DownloadsApiErrorResponse"
+            },
+            "examples": {
+              "noAccessToResource": {
+                "summary": "No access to resource",
+                "value": {
+                  "message": "Not Authorized to access resource.",
+                  "isError": false,
+                  "data": null,
+                  "code": 403
+                }
+              },
+              "contactNotActiveMyF5Contact": {
+                "summary": "Contact is not an active MyF5 contact",
+                "value": {
+                  "message": "The contact is not an active MyF5 contact.",
+                  "isError": false,
+                  "data": null,
+                  "code": 403
+                }
+              },
+              "contactNoAPIAccess": {
+                "summary": "Contact does not have API access",
+                "value": {
+                  "message": "The contact does not have api access.",
+                  "isError": false,
+                  "data": null,
+                  "code": 403
+                }
+              },
+              "apiOrProductInactive": {
+                "summary": "API or API Product is inactive",
+                "value": {
+                  "message": "The requested API or API Product is inactive.",
+                  "isError": false,
+                  "data": null,
+                  "code": 403
+                }
+              },
+              "apiKeyInactiveOrDeleted": {
+                "summary": "API Key is not active or is deleted",
+                "value": {
+                  "message": "The API Key is not active or is deleted.",
+                  "isError": false,
+                  "data": null,
+                  "code": 403
+                }
+              },
+              "apiKeyToAPIAssociationNotExist": {
+                "summary": "API Key to API association not exist",
+                "value": {
+                  "message": "The API Key to API association not exist.",
+                  "isError": false,
+                  "data": null,
+                  "code": 403
+                }
+              },
+              "noApiKeyAssociation": {
+                "summary": "No API Key association",
+                "value": {
+                  "message": "No active Api key to Api association.",
+                  "isError": false,
+                  "data": null,
+                  "code": 403
+                }
+              }
+            }
+          }
+        }
+      },
+      "downloads_400_Response": {
+        "description": "Bad Request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DownloadsApiErrorResponse"
+            },
+            "examples": {
+              "missingQueryParameter": {
+                "summary": "Missing query parameter",
+                "value": {
+                  "errors": [
+                    {
+                      "id": "rrt-8470993670649476026-b-gwo1-52962-6039289-1",
+                      "code": "bad-request",
+                      "code2": "",
+                      "message": "Missing or invalid k query parameter."
+                    }
+                  ]
+                }
+              },
+              "notAcceptedEULA": {
+                "summary": "When user did not accepted the latest EULA",
+                "value": {
+                  "message": "You haven't accepted the latest End User License Agreement (EULA). Log in to MyF5 and accept the latest version of the EULA.",
+                  "isError": false,
+                  "data": null,
+                  "code": 400
+                }
+              },
+              "eccFailure": {
+                "summary": "When user have ECC failure",
+                "value": {
+                  "message": "There was a failure during the download process. Please log in to MyF5 and complete the required form on the downloads page.",
+                  "isError": false,
+                  "data": null,
+                  "code": 400
+                }
+              },
+              "nginxNoPurchase": {
+                "summary": "When user tries to access NGINX without purchasing",
+                "value": {
+                  "message": "It appears that NGINX products are not available for your account. Please verify if you've purchased NGINX products.",
+                  "isError": false,
+                  "data": null,
+                  "code": 400
+                }
+              }
+            }
+          }
+        }
+      },
+      "405_Response": {
+        "description": "Method not Allowed except POST",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DownloadsApiErrorResponse"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "rrt-6977615000442908989-b-gwo1-14280-43555806-6",
+                  "code": "method-not-allowed",
+                  "code2": "",
+                  "message": "HTTP method specified is not supported, see API documentation for methods allowed to the requested URL."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "downloads_500_Response": {
+        "description": "Unhandled exception occured",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DownloadsApiServerErrorResponse"
+            },
+            "example": {
+              "message": {
+                "error": "An unhandled exception occurred"
+              },
+              "isError": true,
+              "code": 500
+            }
+          }
+        }
+      },
+      "502_Response": {
+        "description": "Unhandled exception occured",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DownloadsApiErrorResponse"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "rrt-7598577119180327598-c-gwo1-18956-16081777-1",
+                  "code": "external-resource",
+                  "code2": "iam",
+                  "message": "Error processing request. Contact support and provide the error id specified."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "429_Response": {
+        "description": "Rate Limiting Exception",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DownloadsApiErrorResponse"
+            },
+            "examples": {
+              "rateLimit": {
+                "summary": "Too many calls within Short Span of time SPIKE Arrest",
+                "value": {
+                  "errors": [
+                    {
+                      "id": "rrt-2025773701088352430-c-gwo1-8342-25600318-1",
+                      "code": "rate-limit",
+                      "code2": "",
+                      "message": "Request rate exceeded 5ps"
+                    }
+                  ]
+                }
+              },
+              "quotaExceeded": {
+                "summary": "Exceeded your Quota per Day",
+                "value": {
+                  "errors": [
+                    {
+                      "id": "rrt-8810518325805389989-b-gwo1-11191-21315777-1",
+                      "code": "quota-exceeded",
+                      "code2": "",
+                      "message": "Too many requests received in a given amount of time."
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "200_DOWNLOADS_METDATA_RESPONSE": {
+        "description": "Downloads Metdata Response",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DownloadsGetMetadataApiResponse"
+            },
+            "example": {
+              "message": "success",
+              "isError": false,
+              "data": {
+                "productFamilies": [
+                  {
+                    "productLines": [
+                      {
+                        "productFamily": "BIG-IP",
+                        "name": "big-ip_v13.x",
+                        "instructions": "",
+                        "helpText": "",
+                        "getFileDownloadPathPattern": "container",
+                        "displayName": "BIG-IP v13.x / Virtual Edition with Traffic Management Operating System® (TMOS®)"
+                      },
+                      {
+                        "productFamily": "BIG-IP",
+                        "name": "iAppLX_Templates",
+                        "instructions": "",
+                        "helpText": "",
+                        "getFileDownloadPathPattern": "container",
+                        "displayName": "iAppLX Templates"
+                      }
+                    ],
+                    "name": "BIG-IP"
+                  },
+                  {
+                    "productLines": [
+                      {
+                        "productFamily": "BIG-IQ",
+                        "name": "big-iq_OR",
+                        "instructions": "",
+                        "helpText": "",
+                        "getFileDownloadPathPattern": "container",
+                        "displayName": "Cloud & Orchestration"
+                      },
+                      {
+                        "productFamily": "BIG-IQ",
+                        "name": "big-iq_CM",
+                        "instructions": "",
+                        "helpText": "",
+                        "getFileDownloadPathPattern": "container",
+                        "displayName": "Centralized Management"
+                      }
+                    ],
+                    "name": "BIG-IQ"
+                  }
+                ]
+              },
+              "code": 200
+            }
+          }
+        }
+      },
+      "200_DOWNLOADS_PRODUCT_VERSIONS_RESPONSE": {
+        "description": "Downloads Product Versions Response",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DownloadsGetProductVersionsApiResponse"
+            },
+            "example": {
+              "family": "BIG-IP",
+              "product": "big-ip_v16.x",
+              "versions": [
+                {
+                  "version": "16.1.2",
+                  "releaseDate": "2021-11-02",
+                  "containers": [
+                    {
+                      "container": "16.1.2",
+                      "version": "16.1.2",
+                      "releaseDate": "2021-11-02",
+                      "type": "Release",
+                      "description": "16.1.2 Release",
+                      "files": [
+                        {
+                          "bytes": "2447558656",
+                          "description": "Use for upgrades. Does not include EUD.",
+                          "filename": "BIGIP-16.1.2-0.0.18.iso",
+                          "href": "/downloads-management/v1/downloads/product/BIG-IP/big-ip_v16.x/16.1.2/English/16.1.2/BIGIP-16.1.2-0.0.18.iso"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      },
+      "200_DOWNLOADS_FILE_PATHS_RESPONSE": {
+        "description": "Downloads FilePaths Response",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/DownloadsGetFileLinksApiResponse"
+            },
+            "example": {
+              "downloadLinks": [
+                {
+                  "etag": "7ac9c61ef52b3ee2becddb0ea9727d70-292",
+                  "hosting": "AWS",
+                  "href": "https://downloads-usw-f5.s3.us-west-1.amazonaws.com/big-ip/big-ip_v16.x/16.1.2/english/16.1.2/BIGIP-16.1.2-0.0.18.iso?response-content-disposition=attachment%3B%20filename%3DBIGIP-16.1.2-0.0.18.iso&X-Amz-Security-Token=FwoGZXIvYXdzEPv%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaDHoxRow6FWvC%2BVC7ACKCAXM1ZOIfK7ar2ygBZCqa8zA9cmrPiitfEAX%2FaO7%2Bwwsz3mvu533p0khwpQ82%2F8xTMNLA8CGRrA6tyUgROm0%2BaP2iZjlbvsBhul%2FPaTG%2F%2FhLZ9Op9VA5wEpG0S5l9LUklLintrtagiJXYgtTEEVD%2F7Ml8MLWelVC1O%2FlUguug5mM1UX8ozPyytgYyKC%2B3MmHX%2Fvh6WIyBL6E31EWs7Wp%2FiuuicmK6IW%2FkKcwq0Ep3apsIkHI%3D&X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20240826T174136Z&X-Amz-SignedHeaders=host&X-Amz-Expires=86395&X-Amz-Credential=ASIAWZEHK3GDDKZUVQ4E%2F20240826%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Signature=4628fdcb932ebedfd42c980ee0f15cd47a256adc37b637887a33b34b75e8837c",
+                  "location": "USA - WEST COAST"
+                }
+              ],
+              "bytes": "2447558656",
+              "container": "16.1.2",
+              "containerType": "Release",
+              "description": "Use for upgrades. Does not include EUD.",
+              "family": "BIG-IP",
+              "filename": "BIGIP-16.1.2-0.0.18.iso",
+              "language": "English",
+              "md5": "5fa0b038547df8d0e2c344c23d0325fa",
+              "meta": {
+                "etagAws": "7ac9c61ef52b3ee2becddb0ea9727d70-292",
+                "md5": "5fa0b038547df8d0e2c344c23d0325fa",
+                "sha1": "2e833a7bc016d7b5b8e5a75fd0610ea6b8003901",
+                "sha256": "89aa067637a57277c7826285c9d16285048080aec8ca1bc3ec7423e287089c94",
+                "sha384": "45b8b01e658ebbe6a1fce6e433487db705c7d48d759e2388110fc75c535dc82042f8a540c36d99cb9ba601f7d351036e",
+                "sha512": "1be954bd3e402bc6d8e4279bb1af6b4a82125535e67bc5f34f9f7df00c8e1d9251847dd9f87edc5b93afaa84832388c0ce88115d1f36c2312fe5527ab412994e",
+                "uploadDate": "2021-11-02T16:01:04Z"
+              },
+              "product": "big-ip_v16.x",
+              "version": "16.1.2"
+            }
+          }
+        }
+      },
+      "200_SA_GET_Response": {
+        "description": "Successfully retrieved the details of the knowledge article",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/GetSecurityAdvisoryKBApiResponse"
+            }
+          }
+        }
+      },
+      "400_Response": {
+        "description": "Mandatory fields missing or business logic validation failed",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/KnowledgeArticleApiErrorResponse"
+            },
+            "example": {
+              "status": "Error",
+              "message": "Valid Knowledge Article Number is required to get the response.",
+              "links": null,
+              "isError": true,
+              "data": null,
+              "code": 400
+            }
+          }
+        }
+      },
+      "401_Response_KB": {
+        "description": "Invalid or missing client ID or access token",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/KnowledgeArticleGatewayError"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "error-id-12345",
+                  "code": "authentication",
+                  "code2": "",
+                  "message": "Malformed, invalid, or expired token in the Authorization header."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "403_Response": {
+        "description": "Unauthorized",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/KnowledgeArticleApiErrorResponse"
+            },
+            "example": {
+              "status": "Error",
+              "message": "The contact is not authorized to retrieve knowledge articles.",
+              "links": null,
+              "isError": true,
+              "data": null,
+              "code": 403
+            }
+          }
+        }
+      },
+      "404_Response": {
+        "description": "The requested resource does not exist",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/KnowledgeArticleGatewayError"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "error-id-67890",
+                  "code": "not-found",
+                  "code2": "",
+                  "message": "Resource not found. See API documentation for valid URLs."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "405_Response_KB": {
+        "description": "HTTP method not allowed",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/KnowledgeArticleGatewayError"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "error-id-54321",
+                  "code": "method-not-allowed",
+                  "code2": "",
+                  "message": "HTTP method not supported. Please see API documentation for allowed methods."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "413_Response_KB": {
+        "description": "Request payload exceeds limitations",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/KnowledgeArticleGatewayError"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "error-id-98765",
+                  "code": "entity-size",
+                  "code2": "",
+                  "message": "Request payload too large. See API documentation for limitations."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "429_Response_KB": {
+        "description": "Rate limit or quota exceeded",
+        "headers": {
+          "X-RateLimit-Limit": {
+            "schema": {
+              "type": "integer",
+              "example": 60
+            }
+          },
+          "X-RateLimit-Remaining": {
+            "schema": {
+              "type": "integer",
+              "example": 1
+            }
+          },
+          "X-RateLimit-Reset": {
+            "schema": {
+              "type": "integer",
+              "example": 1632378455
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/KnowledgeArticleGatewayError"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "error-id-54321",
+                  "code": "rate-limit",
+                  "code2": "",
+                  "message": "Request rate exceeded. Please retry later."
+                }
+              ]
+            }
+          }
+        }
+      },
+      "500_Response": {
+        "description": "Unhandled server exception",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/KnowledgeArticleApiErrorResponse"
+            },
+            "example": {
+              "status": "Error",
+              "message": "Unexpected server error. Please try again later.",
+              "links": null,
+              "isError": true,
+              "data": null,
+              "code": 500
+            }
+          }
+        }
+      },
+      "502_Response_KB": {
+        "description": "Bad gateway error due to external service failure",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/KnowledgeArticleGatewayError"
+            },
+            "example": {
+              "errors": [
+                {
+                  "id": "error-id-19283",
+                  "code": "external-resource",
+                  "code2": "IAM",
+                  "message": "Failed to process request due to an external service error."
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}
