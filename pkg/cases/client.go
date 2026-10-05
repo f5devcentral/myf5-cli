@@ -169,7 +169,35 @@ var requiredCreateFields = []string{
 	"caseOwnerEmail",
 	"preferredContactMethod",
 	"timezone",
-	"serialNumber",
+}
+
+// EntitlementFieldFor names the identifier a product family is verified by.
+//
+// Every family requires one, but not the same one, and the API's messages make
+// this clear only after the fact (verified live 2026-10-05):
+//
+//	BIG-IP, no serialNumber    -> 400 "Serial Number,Product Family and Product
+//	                                   are required to create Case."
+//	NGINX,  no subscriptionId  -> 403 "Unable to verify Subscription. Please make
+//	                                   sure Subscription Number and Product
+//	                                   Family vaules are provided." [sic]
+//
+// Note the BIG-IP message names three fields whatever is actually missing, and
+// is phrased for BIG-IP even when another family was sent — so it cannot be
+// used to work out which identifier a family wants. That is why this mapping
+// exists rather than relying on the server to say.
+//
+// Families not listed here fall back to serialNumber, which is the BIG-IP
+// behaviour and the most common case. A family whose requirement we have not
+// confirmed is better served by a local error naming the likely field than by
+// a server round trip returning a message about a different one.
+func EntitlementFieldFor(productFamily string) string {
+	switch productFamily {
+	case "NGINX", "Aspen Mesh":
+		return "subscriptionId"
+	default:
+		return "serialNumber"
+	}
 }
 
 // RequiredCreateFields returns the fields CreateCase requires, so callers can
@@ -228,20 +256,42 @@ func (c *Client) GetCase(ctx context.Context, caseNumber string) (*CaseDetail, e
 // catching it here gives the caller something accurate to act on and costs
 // nothing against a 10-requests-per-minute rate limit.
 func (c *Client) CreateCase(ctx context.Context, payload map[string]interface{}) (*CreateCaseResponse, error) {
-	var missing []string
-	for _, f := range requiredCreateFields {
+	present := func(f string) bool {
 		v, ok := payload[f]
 		if !ok {
-			missing = append(missing, f)
-			continue
+			return false
 		}
-		if s, isStr := v.(string); isStr && strings.TrimSpace(s) == "" {
+		s, isStr := v.(string)
+		return !isStr || strings.TrimSpace(s) != ""
+	}
+
+	var missing []string
+	for _, f := range requiredCreateFields {
+		if !present(f) {
 			missing = append(missing, f)
 		}
+	}
+	// The entitlement identifier depends on the family, so it is checked
+	// separately rather than living in the fixed list.
+	family, _ := payload["productFamily"].(string)
+	if ent := EntitlementFieldFor(family); !present(ent) {
+		missing = append(missing, ent)
 	}
 	if len(missing) > 0 {
 		return nil, &ErrMissingCreateFields{Missing: missing}
 	}
+	return c.createCase(ctx, payload)
+}
+
+// CreateCaseUnchecked submits a payload without the local required-field
+// check.
+//
+// The required fields differ by product family — BIG-IP is identified by
+// serialNumber, NGINX and Aspen Mesh by subscriptionId — and the API's own
+// error message is phrased for BIG-IP whatever family was sent. This exists so
+// those per-family rules can be probed against the live API rather than
+// guessed at. Prefer CreateCase everywhere else.
+func (c *Client) CreateCaseUnchecked(ctx context.Context, payload map[string]interface{}) (*CreateCaseResponse, error) {
 	return c.createCase(ctx, payload)
 }
 
@@ -363,13 +413,18 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 			// only offer the key explanation when the body does not already
 			// carry a specific grievance.
 			body := string(respBytes)
-			if strings.Contains(body, "out of Support") || strings.Contains(body, "value entered is invalid") {
+			if strings.Contains(body, "out of Support") ||
+				strings.Contains(body, "value entered is invalid") ||
+				strings.Contains(body, "Unable to verify") {
 				return nil, fmt.Errorf(
 					"request to %s failed with status 403: %s\n"+
-						"The API accepted the request but rejected one of its values — most often a\n"+
-						"serial number or registration key that it does not recognise, or that is not\n"+
-						"covered by an active support contract. This is a data problem, not a\n"+
-						"credentials problem: your OAuth token and `k` key both worked.",
+						"The API accepted the request but could not verify the entitlement it names —\n"+
+						"a serial number, registration key or subscription number it does not\n"+
+						"recognise, or one not covered by active support. Which identifier is needed\n"+
+						"depends on the product family: BIG-IP uses a serial number, NGINX and Aspen\n"+
+						"Mesh use a subscription number.\n"+
+						"This is a data problem, not a credentials problem: your OAuth token and `k`\n"+
+						"key both worked.",
 					redactedURL, body,
 				)
 			}

@@ -1131,13 +1131,20 @@ Opens a MyF5 support case. All flags below are required by the API.
   --family <s>        Product family, e.g. "BIG-IP"
   --product <s>       Product within the family, e.g. "BIG-IP LTM"
   --version <s>       Product version, e.g. "17.5.1"
+
+  One entitlement identifier is required, and which one depends on the family:
   --serial <s>        Serial number, or the last 7 of a registration key.
-                      Must be a real, in-support unit: the API looks it up
-                      and rejects anything it does not recognise.
+                      Required for BIG-IP and other hardware families.
+  --subscription <s>  Subscription number, e.g. "A-S00038458".
+                      Required for NGINX and Aspen Mesh instead of --serial.
+                      Either way the API verifies it and rejects anything it
+                      does not recognise or that lacks active support.
   --subject <s>       One-line summary
   --description <s>   Full problem description
   --priority <s>      e.g. "4 - General Assistance", "1 - Site Down"
-  --reason <s>        Reason for contact, e.g. "General Problem", "Pre Sales"
+  --reason <s>        Reason for contact, e.g. "General Problem".
+                      "Pre Sales" is available to F5 Systems Engineers; a
+                      customer account cannot open a presales case.
   --email <s>         Case owner email
   --contact-method <s>  Preferred contact method (default "Email")
   --timezone <s>      e.g. "(GMT -5:00) US/Eastern - Eastern Standard Time"
@@ -1166,6 +1173,7 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 		"--product":         "product",
 		"--version":         "version",
 		"--serial":          "serialNumber",
+		"--subscription":    "subscriptionId",
 		"--subject":         "subject",
 		"--description":     "description",
 		"--priority":        "priority",
@@ -1213,8 +1221,14 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 		}
 		fmt.Println("Dry run — the following payload would be POSTed:")
 		fmt.Println(string(out))
+		required := cases.RequiredCreateFields()
+		// The entitlement identifier depends on the product family: BIG-IP is
+		// verified by serial number, NGINX and Aspen Mesh by subscription.
+		family, _ := payload["productFamily"].(string)
+		required = append(required, cases.EntitlementFieldFor(family))
+
 		var missing []string
-		for _, f := range cases.RequiredCreateFields() {
+		for _, f := range required {
 			if v, ok := payload[f].(string); !ok || strings.TrimSpace(v) == "" {
 				missing = append(missing, f)
 			}

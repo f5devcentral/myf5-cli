@@ -49,26 +49,22 @@ func TestNormalizeHelpArgs(t *testing.T) {
 }
 
 // CreateCase must reject an incomplete payload locally. The API's own message
-// names three fields regardless of what is actually missing, so local
-// validation is what gives the user an accurate list — and it costs nothing
-// against a 10-requests-per-minute rate limit.
+// names three fields regardless of what is actually missing, and is phrased
+// for BIG-IP even when another family was sent, so local validation is what
+// gives the user an accurate list — and it costs nothing against a
+// 10-requests-per-minute rate limit.
 func TestCaseCreateRequiredFields(t *testing.T) {
 	required := cases.RequiredCreateFields()
 	if len(required) == 0 {
 		t.Fatal("RequiredCreateFields returned nothing")
 	}
 
-	// serialNumber is the field the published OpenAPI document calls optional
-	// and the live API demands. If it ever leaves this list, `cases create`
-	// starts failing against the real API with a misleading message.
-	var hasSerial bool
+	// The entitlement identifier is NOT in the fixed list, because which one
+	// the API demands depends on the product family.
 	for _, f := range required {
-		if f == "serialNumber" {
-			hasSerial = true
+		if f == "serialNumber" || f == "subscriptionId" {
+			t.Errorf("%q must not be in the fixed required list: the identifier is family-dependent, so a fixed entry would demand a serial from NGINX", f)
 		}
-	}
-	if !hasSerial {
-		t.Error("serialNumber must be required: the live API rejects a create without it, despite the spec calling it optional")
 	}
 
 	// The returned slice must be a copy; mutating it must not affect the next
@@ -76,5 +72,31 @@ func TestCaseCreateRequiredFields(t *testing.T) {
 	required[0] = "mutated"
 	if cases.RequiredCreateFields()[0] == "mutated" {
 		t.Error("RequiredCreateFields leaked its backing array")
+	}
+}
+
+// Each product family is verified by a different entitlement identifier.
+// Both rules below were observed live on 2026-10-05:
+//
+//	BIG-IP without serialNumber   -> 400 "Serial Number,Product Family and
+//	                                      Product are required to create Case."
+//	NGINX  without subscriptionId -> 403 "Unable to verify Subscription..."
+//
+// Getting this wrong means demanding a serial number from an NGINX user who
+// does not have one, so it is pinned.
+func TestEntitlementFieldPerFamily(t *testing.T) {
+	cases_ := map[string]string{
+		"BIG-IP":     "serialNumber",
+		"F5OS":       "serialNumber",
+		"NGINX":      "subscriptionId",
+		"Aspen Mesh": "subscriptionId",
+		// An unknown family falls back to the most common case rather than
+		// skipping the check entirely.
+		"Something New": "serialNumber",
+	}
+	for family, want := range cases_ {
+		if got := cases.EntitlementFieldFor(family); got != want {
+			t.Errorf("EntitlementFieldFor(%q) = %q, want %q", family, got, want)
+		}
 	}
 }

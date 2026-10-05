@@ -182,18 +182,31 @@ Use `--dry-run` to print the payload and check for missing fields without
 contacting the API — useful while assembling a command, and it costs nothing
 against the rate limit.
 
-> **`--serial` is required and is checked against F5's records.** The
-> published OpenAPI document marks `serialNumber` optional; the live API does
-> not. Omitting it returns
-> `400 "Serial Number,Product Family and Product are required to create Case."`
-> — a message that names those three fields no matter which one is actually
-> missing, which is why the CLI validates locally first and tells you exactly
-> what is absent.
+> **An entitlement identifier is required, and which one depends on the
+> product family.** BIG-IP and other hardware families are verified by
+> `--serial`; NGINX and Aspen Mesh by `--subscription` instead. The published
+> OpenAPI document marks both optional. The live API does not.
 >
-> A serial the API does not recognise, or one not covered by an active support
-> contract, returns `403 "The value entered is invalid or out of Support."`
-> That 403 is a **data** error, not a credentials error: reaching it means
-> every other field validated.
+> The rejections differ by family, and neither message is much help on its own:
+>
+> | Family | Missing | Response |
+> |---|---|---|
+> | BIG-IP | `--serial` | `400 "Serial Number,Product Family and Product are required to create Case."` |
+> | NGINX | `--subscription` | `403 "Unable to verify Subscription. Please make sure Subscription Number and Product Family vaules are provided."` |
+>
+> The BIG-IP message names three fields no matter which one is actually
+> missing, and is phrased for BIG-IP even when a different family was sent.
+> That is why the CLI validates locally first and names the field it actually
+> wants.
+>
+> An identifier the API does not recognise, or one without active support,
+> returns `403 "The value entered is invalid or out of Support."` That 403 is
+> a **data** error, not a credentials error: reaching it means every other
+> field validated.
+
+> **`--reason "Pre Sales"` is for F5 Systems Engineers.** A customer account
+> cannot open a presales case; use `"General Problem"` or another reason from
+> case metadata.
 
 ---
 

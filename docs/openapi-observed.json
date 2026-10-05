@@ -122,11 +122,12 @@
       "post": {
         "tags": ["cases"],
         "summary": "Create a support case",
-        "description": "Opens a case.\n\nThe required-field list below is what the SERVER enforces, which is not what\nthe published specification says. `serialNumber` is documented as optional\nand \"applicable for only BIG-IP products\"; in practice the API refuses to\ncreate any case without it — including a Pre Sales case, and even though\nexisting cases are readable with `serialNumber: \"\"`.\n\nThe serial is looked up, not merely checked for presence. The two rejections\ndiffer and that difference is diagnostic:\n\n  - omitted       -> 400 \"Serial Number,Product Family and Product are required to create Case.\"\n  - present, bogus -> 403 \"The value entered is invalid or out of Support.\"\n\nA 403 therefore means every OTHER field validated and the API got as far as\nresolving the serial. Note that this 403 is about DATA, not credentials — the\nsame status code the gateway uses to reject a bad `k` key.\n\nThe 400 message always names the same three fields regardless of which one is\nactually missing, so it cannot be used to identify the offending field.\n",
-        "x-verified": "2026-10-05 — rejection behaviour only. NO case was successfully created; a create needs a real in-support serial number. The 2xx response shape below is UNVERIFIED.",
+        "description": "Opens a case.\n\nEvery case requires an ENTITLEMENT IDENTIFIER, but not the same one: which\nfield the API verifies depends on the product family.\n\n  - BIG-IP and other hardware families -> serialNumber\n  - NGINX, Aspen Mesh                  -> subscriptionId\n\nBoth are documented as optional in the published specification. Neither is.\nThe rejections differ by family, and the messages are misleading:\n\n  - BIG-IP, no serialNumber   -> 400 \"Serial Number,Product Family and Product\n                                      are required to create Case.\"\n  - NGINX,  no subscriptionId -> 403 \"Unable to verify Subscription. Please make\n                                      sure Subscription Number and Product\n                                      Family vaules are provided.\" [sic]\n\nThe 400 names the same three fields regardless of which one is actually\nmissing, and is phrased for BIG-IP even when a different family was sent, so\nit cannot be used to identify either the offending field or the right one.\n\nThe identifier is looked up, not merely checked for presence. A value that is\npresent but unrecognised returns 403 \"The value entered is invalid or out of\nSupport.\" Reaching that means every OTHER field validated. Note this 403 is\nabout DATA, not credentials — the same status code the gateway uses for a bad\n`k` key.\n\nAn invalid productFamily/product pair returns 400 \"Valid Product Family and\nProduct are required to create Case.\", which is a DIFFERENT message from the\nmissing-identifier 400 above.\n\nNote on reasonForContact: \"Pre Sales\" is available to F5 Systems Engineers.\nA customer account cannot open a presales case.\n",
+        "x-verified": "2026-10-05 — rejection behaviour only, probed across BIG-IP, NGINX and an invalid family. NO case was successfully created; a create needs a real in-support serial number or subscription. The 2xx response shape below is UNVERIFIED.",
         "x-observed-divergence": [
-          "Published spec marks serialNumber optional; the live API requires it.",
-          "Published schema's required list names `version`, while every example in the same document sends `productVersion`. `version` is what the API accepts."
+          "Published spec marks serialNumber and subscriptionId optional; the live API requires one of them, chosen by product family.",
+          "Published schema's required list names `version`, while every example in the same document sends `productVersion`. `version` is what the API accepts.",
+          "The missing-identifier 400 is phrased for BIG-IP regardless of the productFamily submitted."
         ],
         "parameters": [{ "$ref": "#/components/parameters/KParam" }],
         "requestBody": {
@@ -577,7 +578,6 @@
           "productFamily",
           "product",
           "version",
-          "serialNumber",
           "subject",
           "description",
           "priority",
@@ -590,7 +590,7 @@
           "productFamily": { "type": "string", "example": "BIG-IP", "description": "From case metadata. Known-good values seen in F5's own examples: BIG-IP, NGINX, Aspen Mesh." },
           "product": { "type": "string", "example": "BIG-IP LTM" },
           "version": { "type": "string", "example": "17.5.1", "description": "The published spec's examples call this `productVersion`; the schema and the API call it `version`." },
-          "serialNumber": { "type": "string", "description": "Serial number, or the last 7 of a registration key. REQUIRED despite the published spec marking it optional. Looked up server-side: an unknown or out-of-support value returns 403." },
+          "serialNumber": { "type": "string", "description": "Serial number, or the last 7 of a registration key. REQUIRED for BIG-IP and other hardware families despite the published spec marking it optional. Looked up server-side: an unknown or out-of-support value returns 403. NGINX and Aspen Mesh use subscriptionId instead." },
           "subject": { "type": "string" },
           "description": { "type": "string" },
           "priority": { "type": "string", "enum": ["1 - Site Down", "2 - Site At Risk", "3 - Performance Degraded", "4 - General Assistance"], "description": "Per F5 article K2633. MyF5 may also display a \"Low\" option; K2633 states that is shown in error and is not valid." },
@@ -601,7 +601,7 @@
           "hostName": { "type": "string" },
           "cloudProvider": { "type": "string" },
           "customerTicketNumber": { "type": "string" },
-          "subscriptionId": { "type": "string" },
+          "subscriptionId": { "type": "string", "example": "A-S00038458", "description": "REQUIRED for NGINX and Aspen Mesh, in place of serialNumber. Verified server-side: omitting it returns 403 \"Unable to verify Subscription\"." },
           "nginxPlusVersion": { "type": "string" },
           "linuxDistribution": { "type": "string" },
           "alternateContact": {

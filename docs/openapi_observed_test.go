@@ -399,20 +399,44 @@ func TestObservedSpecRecordsVerifiedFindings(t *testing.T) {
 		t.Error("Downloads metadata path must keep its leading /v1: without it the gateway returns 404")
 	}
 
-	// serialNumber is required on create despite the published spec calling it
-	// optional. This is the single thing blocking case creation.
 	comps := doc["components"].(map[string]interface{})
 	schemas := comps["schemas"].(map[string]interface{})
 	create := schemas["CaseCreateRequest"].(map[string]interface{})
+
+	// Neither entitlement identifier belongs in the required list: which one
+	// the API demands depends on the product family (BIG-IP wants
+	// serialNumber, NGINX wants subscriptionId), and OpenAPI's `required`
+	// cannot express that. The constraint is documented in the operation
+	// description instead, so a fixed entry here would be wrong rather than
+	// merely incomplete.
 	req, _ := create["required"].([]interface{})
-	var hasSerial bool
 	for _, f := range req {
-		if f == "serialNumber" {
-			hasSerial = true
+		if f == "serialNumber" || f == "subscriptionId" {
+			t.Errorf("CaseCreateRequest must not list %q as unconditionally required: the identifier is family-dependent", f)
 		}
 	}
-	if !hasSerial {
-		t.Error("CaseCreateRequest must list serialNumber as required: the live API rejects creates without it")
+
+	// Both identifiers must still be DESCRIBED, or the document loses the
+	// finding that cost the most to establish.
+	props, _ := create["properties"].(map[string]interface{})
+	for _, f := range []string{"serialNumber", "subscriptionId"} {
+		p, ok := props[f].(map[string]interface{})
+		if !ok {
+			t.Errorf("CaseCreateRequest is missing the %q property", f)
+			continue
+		}
+		if d, _ := p["description"].(string); !strings.Contains(d, "REQUIRED") {
+			t.Errorf("%q must document when it is required; the published spec wrongly calls it optional", f)
+		}
+	}
+
+	// The per-family rule itself must survive in the operation description.
+	post := paths["/case-management/v1/cases"].(map[string]interface{})["post"].(map[string]interface{})
+	desc, _ := post["description"].(string)
+	for _, want := range []string{"serialNumber", "subscriptionId", "NGINX"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("POST /cases description must explain the per-family identifier rule; missing %q", want)
+		}
 	}
 }
 
