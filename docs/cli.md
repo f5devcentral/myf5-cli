@@ -153,13 +153,47 @@ myf5 cases comment 01287164 "Uploaded new diagnostic packet captures."
 > status code, so a `2xx` alone does not mean the comment landed. The CLI
 > checks both. Confirm in the MyF5 web UI when it matters.
 
-### Creating cases
+#### `get <case-number>`
+Shows one case in full: status, priority, product, account, contacts, the
+description, and a list of the messages on the email thread.
+```bash
+myf5 cases get 01287164
+```
 
-There is **no `create` action**. Open cases in the MyF5 web UI, then pass the
-case number to `comment` or `ihealth upload`. A `CreateCase` method exists in
-`pkg/cases` but is not wired to the CLI and has not completed successfully
-against the live API — see `POST /case-management/v1/cases` notes in that
-package.
+> `dateOpened` is deliberately not shown. The detail endpoint returns the
+> priority string in that field (a server-side defect); `cases list` reports
+> the real timestamp.
+
+#### `create [flags]`
+Opens a support case. Run with no flags for the full list.
+```bash
+myf5 cases create \
+  --family BIG-IP --product "BIG-IP LTM" --version 17.5.1 \
+  --serial ABC1234 \
+  --subject "SSL handshake failures after upgrade" \
+  --description "Full description of the problem." \
+  --priority "4 - General Assistance" \
+  --reason "General Problem" \
+  --email you@example.com \
+  --timezone "(GMT -5:00) US/Eastern - Eastern Standard Time"
+```
+
+Use `--dry-run` to print the payload and check for missing fields without
+contacting the API — useful while assembling a command, and it costs nothing
+against the rate limit.
+
+> **`--serial` is required and is checked against F5's records.** The
+> published OpenAPI document marks `serialNumber` optional; the live API does
+> not. Omitting it returns
+> `400 "Serial Number,Product Family and Product are required to create Case."`
+> — a message that names those three fields no matter which one is actually
+> missing, which is why the CLI validates locally first and tells you exactly
+> what is absent.
+>
+> A serial the API does not recognise, or one not covered by an active support
+> contract, returns `403 "The value entered is invalid or out of Support."`
+> That 403 is a **data** error, not a credentials error: reaching it means
+> every other field validated.
 
 ---
 

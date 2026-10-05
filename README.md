@@ -173,9 +173,21 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
 # Retrieve case creation schema metadata
 ./bin/myf5 cases metadata
 
+# Show one case in full, including contacts and the email thread
+./bin/myf5 cases get 01287164
+
 # Add a note or comment to a case
 # Case numbers are 8 digits, no prefix - exactly as MyF5 displays them.
 ./bin/myf5 cases comment 01287164 "Investigating packet captures."
+
+# Open a case. --serial is required and is validated against F5's records.
+# Use --dry-run first to check the payload without calling the API.
+./bin/myf5 cases create --family BIG-IP --product "BIG-IP LTM" \
+  --version 17.5.1 --serial ABC1234 \
+  --subject "SSL handshake failures" --description "Details here." \
+  --priority "4 - General Assistance" --reason "General Problem" \
+  --email you@example.com \
+  --timezone "(GMT -5:00) US/Eastern - Eastern Standard Time"
 ```
 
 ### 4. F5 iHealth
