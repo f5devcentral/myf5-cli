@@ -90,6 +90,23 @@ func NewClientWithKey(token, baseFQDN, apiKey string) *Client {
 	}
 }
 
+// apiError converts a body-reported failure into an error.
+//
+// The Case API signals failure in the response body via isError as well as by
+// HTTP status, and the two do not always agree: a 2xx can carry isError true
+// with a null data field. Decoding only `data` in that case yields an empty
+// result that reads as success, which is how a failure becomes a silent
+// "0 cases found".
+func apiError(action string, isError bool, message string) error {
+	if !isError {
+		return nil
+	}
+	if message == "" {
+		message = "the API reported an error without a message"
+	}
+	return fmt.Errorf("failed to %s: %s", action, message)
+}
+
 // GetMetadata retrieves valid case creation schema metadata (products, versions, severities).
 func (c *Client) GetMetadata(ctx context.Context) (*CaseMetadataResponse, error) {
 	path := "/case-management/v1/cases/metadata"
@@ -101,6 +118,9 @@ func (c *Client) GetMetadata(ctx context.Context) (*CaseMetadataResponse, error)
 	var resp CaseMetadataResponse
 	if err := json.Unmarshal(bodyBytes, &resp); err != nil {
 		return nil, fmt.Errorf("failed to decode case metadata: %w", err)
+	}
+	if err := apiError("retrieve case metadata", resp.IsError, resp.Message); err != nil {
+		return nil, err
 	}
 	return &resp, nil
 }
@@ -138,6 +158,9 @@ func (c *Client) ListCases(ctx context.Context, showClosed bool) (*ListCasesResp
 	var resp ListCasesResponse
 	if err := json.Unmarshal(bodyBytes, &resp); err != nil {
 		return nil, fmt.Errorf("failed to decode cases list: %w", err)
+	}
+	if err := apiError("list cases", resp.IsError, resp.Message); err != nil {
+		return nil, err
 	}
 	return &resp, nil
 }
@@ -236,12 +259,8 @@ func (c *Client) GetCase(ctx context.Context, caseNumber string) (*CaseDetail, e
 	if err := json.Unmarshal(bodyBytes, &resp); err != nil {
 		return nil, fmt.Errorf("failed to decode case detail: %w", err)
 	}
-	if resp.IsError {
-		msg := resp.Message
-		if msg == "" {
-			msg = "the API reported an error without a message"
-		}
-		return nil, fmt.Errorf("failed to retrieve case %s: %s", caseNumber, msg)
+	if err := apiError("retrieve case "+caseNumber, resp.IsError, resp.Message); err != nil {
+		return nil, err
 	}
 	if len(resp.Data) == 0 {
 		return nil, fmt.Errorf("case %s not found", caseNumber)

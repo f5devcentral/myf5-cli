@@ -140,3 +140,86 @@ func TestListCasesDecodesLiveFieldNames(t *testing.T) {
 		t.Errorf("Status = %q", got.Status)
 	}
 }
+
+// A 2xx carrying isError:true is a FAILURE, not an empty result.
+//
+// The Case API reports failure in the body as well as by status code, and the
+// two do not always agree. Before the envelope was modelled on these types, a
+// body-reported failure decoded as a successful response with no data — so
+// `cases list` printed a cheerful empty list and `cases metadata` reported
+// "0 root keys" when the call had actually failed. Silent wrong answers are
+// worse than errors, so each read path is pinned here.
+func TestBodyReportedErrorsBecomeErrors(t *testing.T) {
+	const payload = `{"status":"Error","message":"Something went wrong upstream","isError":true,"data":null}`
+
+	t.Run("ListCases", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK) // 2xx despite the failure
+			io.WriteString(w, payload)
+		}))
+		defer server.Close()
+
+		c := NewClientWithKey("tok", server.URL, "key")
+		c.HTTPClient = server.Client()
+
+		_, err := c.ListCases(context.Background(), false)
+		if err == nil {
+			t.Fatal("a 2xx with isError:true must be an error, not an empty case list")
+		}
+		if !strings.Contains(err.Error(), "Something went wrong upstream") {
+			t.Errorf("error should carry the API's message, got: %v", err)
+		}
+	})
+
+	t.Run("GetMetadata", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			io.WriteString(w, payload)
+		}))
+		defer server.Close()
+
+		c := NewClientWithKey("tok", server.URL, "key")
+		c.HTTPClient = server.Client()
+
+		_, err := c.GetMetadata(context.Background())
+		if err == nil {
+			t.Fatal("a 2xx with isError:true must be an error, not metadata with 0 keys")
+		}
+	})
+
+	t.Run("GetCase", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			io.WriteString(w, payload)
+		}))
+		defer server.Close()
+
+		c := NewClientWithKey("tok", server.URL, "key")
+		c.HTTPClient = server.Client()
+
+		_, err := c.GetCase(context.Background(), "01287164")
+		if err == nil {
+			t.Fatal("a 2xx with isError:true must be an error")
+		}
+	})
+
+	// A healthy response must still succeed: the check must not reject
+	// everything.
+	t.Run("success is unaffected", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"status":"Success","isError":false,"data":[]}`)
+		}))
+		defer server.Close()
+
+		c := NewClientWithKey("tok", server.URL, "key")
+		c.HTTPClient = server.Client()
+
+		if _, err := c.ListCases(context.Background(), false); err != nil {
+			t.Errorf("a genuinely empty list is not an error: %v", err)
+		}
+	})
+}

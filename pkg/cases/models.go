@@ -1,8 +1,16 @@
 package cases
 
 // CaseMetadataResponse represents valid products, versions, severities, etc.
+//
+// Carries the status envelope: this API reports failure in the body as well as
+// by status code, so a 2xx with isError true is possible and `data` would then
+// be null. Without these fields such a response decoded as an empty-but-
+// successful result and reported "0 root keys" rather than an error.
 type CaseMetadataResponse struct {
-	Data map[string]interface{} `json:"data"`
+	Status  string                 `json:"status"`
+	Message string                 `json:"message"`
+	IsError bool                   `json:"isError"`
+	Data    map[string]interface{} `json:"data"`
 }
 
 // Support case priority levels, per F5 article K2633 (docs/K2633.txt).
@@ -148,8 +156,11 @@ type GetCaseResponse struct {
 
 // ListCasesResponse is the response from GET /case-management/v1/cases.
 type ListCasesResponse struct {
-	Data  []CaseSummary `json:"data"`
-	Links []struct {
+	Status  string        `json:"status"`
+	Message string        `json:"message"`
+	IsError bool          `json:"isError"`
+	Data    []CaseSummary `json:"data"`
+	Links   []struct {
 		Rel  string `json:"rel"`
 		Href string `json:"href"`
 	} `json:"links,omitempty"`
