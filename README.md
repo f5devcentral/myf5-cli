@@ -57,6 +57,7 @@ myf5-cli/
 ├── Makefile                    # Developer build, test, and release automation
 ├── SECURITY.md                 # Security & vulnerability reporting policy
 ├── CONTRIBUTING.md             # Developer workflow & coding standards
+├── CONTRIBUTING_AI.md          # Rules for AI assistants — this tool writes to live F5 Support
 ├── LICENSE                     # F5 Proprietary & Confidential Internal License
 ├── go.mod
 └── README.md
