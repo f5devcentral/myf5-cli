@@ -13,7 +13,7 @@ type CaseMetadataResponse struct {
 	Data    map[string]interface{} `json:"data"`
 }
 
-// Support case priority levels, per F5 article K2633 (docs/K2633.txt).
+// Support case priority levels, per F5 article K2633 <https://my.f5.com/manage/s/article/K2633>.
 //
 // These are PRIORITY values, not "severity" — F5 retired that terminology and
 // the API returns this field as `priority`. The live API returns them in the
@@ -42,7 +42,7 @@ var ValidPriorities = []string{
 // CaseSummary represents a brief overview of an F5 support case.
 //
 // Field tags follow GetCaseApiResponse in the F5 OpenAPI specification
-// (docs/openapi-outdated-5Oct2026.json). Two earlier tags matched nothing in
+// (internal_docs/oas/openapi-outdated-5Oct2026.json). Two earlier tags matched nothing in
 // the payload and so
 // always decoded as empty: `severity` (the API returns `priority`, e.g.
 // "2 - Site At Risk") and `createdDate` (the API returns `dateOpened`).

@@ -169,7 +169,7 @@ The MyF5 Downloads API generates signed CDN download URLs distributed across glo
 ## Endpoint, Path Prefix & the October 2, 2026 Cutover Notice
 
 > [!CAUTION]
-> **The "October 2 base URL cutover" notice is UNSOURCED.** No F5 bulletin supporting it has been located. The F5 articles actually published that day (archived as [K000163521](./K000163521.txt) and [K15202](./K15202.txt)) describe an IP address change for `api.f5.com` and `callhome.f5.com` and say nothing about Downloads base URLs or the `k` parameter. See [§A of the network guide](./network_and_firewall.md#a-myf5-downloads-api-base-url-cutover-october-2-2026--unsourced), which is the authoritative discussion — do not let these two copies drift apart again.
+> **The "October 2 base URL cutover" notice is UNSOURCED.** No F5 bulletin supporting it has been located. The F5 articles actually published that day ([K000163521](https://my.f5.com/manage/s/article/K000163521) and [K15202](https://my.f5.com/manage/s/article/K15202)) describe an IP address change for `api.f5.com` and `callhome.f5.com` and say nothing about Downloads base URLs or the `k` parameter. See [§A of the network guide](./network_and_firewall.md#a-myf5-downloads-api-base-url-cutover-october-2-2026--unsourced), which is the authoritative discussion — do not let these two copies drift apart again.
 >
 > What *is* confirmed by observation: `api.software.downloads.f5.com` serves the catalog, takes no `k` parameter, and K15202 lists it as a real F5 service.
 

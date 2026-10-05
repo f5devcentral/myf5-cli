@@ -20,7 +20,7 @@ const (
 	// DefaultKParam is the `k` API usage key sent to Support Case endpoints.
 	//
 	// It is not a per-user secret: this value is published in F5's OpenAPI
-	// specification (docs/openapi-outdated-5Oct2026.json) as the
+	// specification (internal_docs/oas/openapi-outdated-5Oct2026.json) as the
 	// rateLimitParam example.
 	//
 	// VERIFIED 2026-10-02: this value is accepted by GET
@@ -127,7 +127,7 @@ func (c *Client) GetMetadata(ctx context.Context) (*CaseMetadataResponse, error)
 }
 
 // Case list `type` values, per the caseTypeParam enum in the F5 OpenAPI
-// specification (docs/openapi-outdated-5Oct2026.json). `type` is REQUIRED on
+// specification (internal_docs/oas/openapi-outdated-5Oct2026.json). `type` is REQUIRED on
 // GET /case-management/v1/cases; omitting it returns
 // 400 "Missing type in the query params".
 const (
@@ -198,12 +198,10 @@ var requiredCreateFields = []string{
 // EntitlementFieldFor names the identifier a product family is verified by.
 //
 // IMPORTANT — this is a constraint of the PUBLIC API, not of a support case.
-// A HAR capture of the MyF5 web UI creating case 01292481 on 2026-10-05 shows
-// a BIG-IP Pre Sales case created with its serial/registration-key field
-// EMPTY. The UI does not call support.apis.f5.com at all: it writes to
-// Salesforce directly through an Aura endpoint
-// (CaseManagementCreateCaseCtllerWOSharing.upsertCase), and that path applies
-// different validation.
+// The MyF5 web UI can create a case with its serial/registration-key field
+// EMPTY: it does not call support.apis.f5.com at all, writing to Salesforce
+// directly through a path that applies different validation. Verified against
+// a real case opened through the UI on 2026-10-05.
 //
 // So a case without an entitlement identifier is perfectly legitimate; it is
 // the public API that refuses to create one. We cannot relax the requirement

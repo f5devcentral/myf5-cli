@@ -68,7 +68,7 @@ const (
 	// LegacyKParam is the `k` API usage key sent on the legacy fallback path.
 	//
 	// It is not a per-user secret: this value is published in F5's OpenAPI
-	// specification (docs/openapi-outdated-5Oct2026.json) as the
+	// specification (internal_docs/oas/openapi-outdated-5Oct2026.json) as the
 	// rateLimitParam example, which
 	// is also the example for the downloads metadata endpoint specifically.
 	//
@@ -147,7 +147,7 @@ func NewClientWithKey(token, baseFQDN, apiKey string) *Client {
 // The leading /v1 is the gateway's own route version and the inner /v1 is the
 // API's. Omitting the leading segment 404s every Downloads call, which is what
 // the pre-cutover code did. The shape matches the published OpenAPI document
-// (docs/openapi-outdated-5Oct2026.json).
+// (internal_docs/oas/openapi-outdated-5Oct2026.json).
 const DownloadsPrefix = "/v1/downloads-management/v1/downloads"
 
 // GetMetadata fetches the complete product hierarchy and catalog index.
