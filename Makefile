@@ -21,7 +21,7 @@ all: fmt vet test build
 ## build: Build static binary for host OS and architecture
 build:
 	@mkdir -p $(BIN_DIR)
-	@echo "==> Building $(BINARY_NAME) (v$(VERSION)) for host..."
+	@echo "==> Building $(BINARY_NAME) ($(VERSION)) for host..."
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) $(CMD_PATH)
 	@echo "==> Binary created: $(BIN_DIR)/$(BINARY_NAME)"
 
