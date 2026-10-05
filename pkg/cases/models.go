@@ -57,8 +57,16 @@ type ListCasesResponse struct {
 }
 
 // CreateCaseResponse is the response from POST /case-management/v1/cases.
+//
+// The status envelope is not decoration: this API reports failure in the body
+// as well as by status code, so a 2xx alone does not mean a case was opened.
+// Callers must check IsError before trusting Data.
 type CreateCaseResponse struct {
-	Data struct {
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	IsError bool   `json:"isError"`
+	Code    int    `json:"code,omitempty"`
+	Data    struct {
 		CaseNumber string `json:"caseNumber"`
 	} `json:"data"`
 	Links []struct {

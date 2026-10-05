@@ -141,8 +141,81 @@ func (c *Client) ListCases(ctx context.Context, showClosed bool) (*ListCasesResp
 	return &resp, nil
 }
 
+// Field requirements for CreateCase, as the LIVE API enforces them.
+//
+// These differ from the published OpenAPI document, which is wrong on two
+// counts (verified live 2026-10-05):
+//
+//   - serialNumber is documented as an optional field "applicable for only
+//     BIG-IP products". The API requires it. Omitting it returns
+//     400 "Serial Number,Product Family and Product are required to create
+//     Case." even for a Pre Sales case, and even though existing cases are
+//     readable with serialNumber: "".
+//   - The schema's required list names `version`, while every example in the
+//     same document sends `productVersion`. `version` is what the API takes.
+//
+// A serial that is present but unknown returns 403 "The value entered is
+// invalid or out of Support", which is how we know the rest of the payload
+// validates: the API only reaches the lookup once everything else passes.
+var requiredCreateFields = []string{
+	"productFamily",
+	"product",
+	"version",
+	"subject",
+	"description",
+	"priority",
+	"reasonForContact",
+	"caseOwnerEmail",
+	"preferredContactMethod",
+	"timezone",
+	"serialNumber",
+}
+
+// RequiredCreateFields returns the fields CreateCase requires, so callers can
+// validate or describe a payload without duplicating the list.
+func RequiredCreateFields() []string {
+	out := make([]string, len(requiredCreateFields))
+	copy(out, requiredCreateFields)
+	return out
+}
+
+// ErrMissingCreateFields reports a payload rejected before it was sent.
+type ErrMissingCreateFields struct {
+	Missing []string
+}
+
+func (e *ErrMissingCreateFields) Error() string {
+	return fmt.Sprintf(
+		"cannot create case: missing required field(s): %s",
+		strings.Join(e.Missing, ", "),
+	)
+}
+
 // CreateCase submits a support ticket to MyF5.
+//
+// Required fields are checked locally first. The API's own message for a
+// missing field names three fields whatever the actual omission is, so
+// catching it here gives the caller something accurate to act on and costs
+// nothing against a 10-requests-per-minute rate limit.
 func (c *Client) CreateCase(ctx context.Context, payload map[string]interface{}) (*CreateCaseResponse, error) {
+	var missing []string
+	for _, f := range requiredCreateFields {
+		v, ok := payload[f]
+		if !ok {
+			missing = append(missing, f)
+			continue
+		}
+		if s, isStr := v.(string); isStr && strings.TrimSpace(s) == "" {
+			missing = append(missing, f)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, &ErrMissingCreateFields{Missing: missing}
+	}
+	return c.createCase(ctx, payload)
+}
+
+func (c *Client) createCase(ctx context.Context, payload map[string]interface{}) (*CreateCaseResponse, error) {
 	jsonBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode case payload: %w", err)
@@ -251,6 +324,25 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 		// it obvious which of the two credentials is at fault, nor that the
 		// built-in fallback key cannot work for anyone.
 		if resp.StatusCode == http.StatusForbidden {
+			// A 403 here is NOT always the `k` key. The Case API also returns
+			// 403 for a well-formed request whose data it rejected — notably
+			// an unrecognised or out-of-support serial number on create,
+			// which answers with "The value entered is invalid or out of
+			// Support." (verified live 2026-10-05). Blaming the API key for
+			// that sends the reader after entirely the wrong credential, so
+			// only offer the key explanation when the body does not already
+			// carry a specific grievance.
+			body := string(respBytes)
+			if strings.Contains(body, "out of Support") || strings.Contains(body, "value entered is invalid") {
+				return nil, fmt.Errorf(
+					"request to %s failed with status 403: %s\n"+
+						"The API accepted the request but rejected one of its values — most often a\n"+
+						"serial number or registration key that it does not recognise, or that is not\n"+
+						"covered by an active support contract. This is a data problem, not a\n"+
+						"credentials problem: your OAuth token and `k` key both worked.",
+					redactedURL, body,
+				)
+			}
 			return nil, fmt.Errorf(
 				"request to %s failed with status 403: %s\n"+
 					"The `k` API usage key was rejected for this API. These keys are per-API-family\n"+
@@ -259,7 +351,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 					"their own) rather than anything being wrong with your account.\n"+
 					"If F5 has rotated the key, override it with F5_API_KEY or `api_key` in ~/.f5api_credentials.\n"+
 					"Note that a bad OAuth token returns 401, not 403.",
-				redactedURL, string(respBytes),
+				redactedURL, body,
 			)
 		}
 		return nil, fmt.Errorf("request to %s failed with status %d: %s", redactedURL, resp.StatusCode, string(respBytes))
