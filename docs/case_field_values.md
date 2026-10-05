@@ -130,6 +130,18 @@ remembering when reading either.
 | `Origin` | — (the UI sends `Web`; the API has no equivalent) |
 | `AccountId`, `ContactId` | — (derived from the authenticated identity) |
 
-The serial field was **empty** on case 01292481, a BIG-IP presales case. That
-is the evidence that the public API's insistence on an entitlement identifier
-is a constraint of that API rather than of support cases generally.
+The serial field was **empty** on case 01292481, a BIG-IP case. That is the
+evidence that the public API's insistence on an entitlement identifier is a
+constraint of that API rather than of support cases generally.
+
+## A caveat on HAR-derived values
+
+A HAR records what the browser **sent**, which is not always what the record
+**holds**. Case 01292481 was submitted with `Reason_for_Contact__c` set to
+`Pre Sales`; reading the same case back through the API afterwards reports
+`Account Related`. The value changed after submission — either in the form
+before final save, or during triage at F5.
+
+So treat this file as a reliable guide to which values are *accepted*, and
+`myf5 cases get <num>` as the authority on what a given case actually
+contains.
