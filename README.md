@@ -54,8 +54,6 @@ myf5-cli/
 │   ├── credentials.md          # Zero-Secret policy & credential management
 │   ├── shell_completion.md     # Shell tab autocompletion guide (zsh, bash, fish)
 │   ├── network_and_firewall.md # Egress firewall rules and DNS cutover documentation
-│   ├── logging.md              # Audit & debug logging design notes (NOT yet implemented)
-│   ├── branch_protection.md    # Intended `main` branch protection config (NOT yet enabled)
 │   ├── openapi-observed.json   # The APIs as they actually behave, from live requests
 │   ├── openapi-outdated-5Oct2026.json # F5's published spec, archived — wrong in several places
 │   └── K*.txt                  # Archived F5 reference articles, verbatim

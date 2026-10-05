@@ -198,12 +198,10 @@ var requiredCreateFields = []string{
 // EntitlementFieldFor names the identifier a product family is verified by.
 //
 // IMPORTANT — this is a constraint of the PUBLIC API, not of a support case.
-// A HAR capture of the MyF5 web UI creating case 01292481 on 2026-10-05 shows
-// a BIG-IP Pre Sales case created with its serial/registration-key field
-// EMPTY. The UI does not call support.apis.f5.com at all: it writes to
-// Salesforce directly through an Aura endpoint
-// (CaseManagementCreateCaseCtllerWOSharing.upsertCase), and that path applies
-// different validation.
+// The MyF5 web UI can create a case with its serial/registration-key field
+// EMPTY: it does not call support.apis.f5.com at all, writing to Salesforce
+// directly through a path that applies different validation. Verified against
+// a real case opened through the UI on 2026-10-05.
 //
 // So a case without an entitlement identifier is perfectly legitimate; it is
 // the public API that refuses to create one. We cannot relax the requirement
