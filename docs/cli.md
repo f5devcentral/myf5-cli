@@ -142,6 +142,10 @@ myf5 cases metadata
 > F5 and there is no client-side workaround. It is the documented source of
 > valid `productFamily`, `priority`, `timezone` and `reasonForContact` values,
 > so those values currently cannot be enumerated from the API.
+>
+> Until it recovers, see [Valid Case Field Values](./case_field_values.md),
+> recovered from the MyF5 web UI, or copy values from an existing case with
+> `myf5 cases get <num>`.
 
 #### `comment <case-number> <note>`
 Appends a status comment or investigation update to an open support case.
