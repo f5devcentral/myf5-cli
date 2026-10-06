@@ -304,8 +304,20 @@ Sys::Global Settings
 sys global-settings {
     hostname bigip-tmsh.local;
 }
+
+Sys::Provision
+sys provision ltm {
+    level nominal
+}
+sys provision mgmt {
+    level dedicated
+}
+sys provision asm {
+    level none
+}
 `
 	info := parseTmshOutput(output)
+	info.PopulateCaseAttributes()
 
 	if info.ChassisSerialNumber != "f5-tmsh-serial-888" {
 		t.Errorf("ChassisSerialNumber = %q; want f5-tmsh-serial-888", info.ChassisSerialNumber)
@@ -334,6 +346,21 @@ sys global-settings {
 	if info.Hostname != "bigip-tmsh.local" {
 		t.Errorf("Hostname = %q; want bigip-tmsh.local", info.Hostname)
 	}
+	if info.ProvisionedModules["ltm"] != "nominal" {
+		t.Errorf("ProvisionedModules[ltm] = %q; want nominal", info.ProvisionedModules["ltm"])
+	}
+	if _, ok := info.ProvisionedModules["mgmt"]; ok {
+		t.Errorf("expected mgmt to be excluded as internal module")
+	}
+	if _, ok := info.ProvisionedModules["asm"]; ok {
+		t.Errorf("expected asm to be excluded due to level none")
+	}
+	if info.CaseAttributes["product"] != "BIG-IP LTM" {
+		t.Errorf("CaseAttributes[product] = %q; want BIG-IP LTM", info.CaseAttributes["product"])
+	}
+	if info.CaseAttributes["serialNumber"] != "f5-tmsh-serial-888" {
+		t.Errorf("CaseAttributes[serialNumber] = %q; want f5-tmsh-serial-888", info.CaseAttributes["serialNumber"])
+	}
 }
 
 func TestGetSystemInfo_RestMock(t *testing.T) {
@@ -359,6 +386,14 @@ func TestGetSystemInfo_RestMock(t *testing.T) {
 		case "/mgmt/tm/sys/global-settings":
 			json.NewEncoder(w).Encode(map[string]any{
 				"hostname": "bigip-rest.corp.test",
+			})
+		case "/mgmt/tm/sys/provision":
+			json.NewEncoder(w).Encode(map[string]any{
+				"items": []map[string]string{
+					{"name": "ltm", "level": "nominal"},
+					{"name": "mgmt", "level": "nominal"},
+					{"name": "asm", "level": "none"},
+				},
 			})
 		default:
 			http.NotFound(w, r)
@@ -394,5 +429,20 @@ func TestGetSystemInfo_RestMock(t *testing.T) {
 	}
 	if info.Hostname != "bigip-rest.corp.test" {
 		t.Errorf("Hostname = %q; want bigip-rest.corp.test", info.Hostname)
+	}
+	if info.ProvisionedModules["ltm"] != "nominal" {
+		t.Errorf("ProvisionedModules[ltm] = %q; want nominal", info.ProvisionedModules["ltm"])
+	}
+	if _, ok := info.ProvisionedModules["mgmt"]; ok {
+		t.Errorf("expected mgmt to be excluded as internal module")
+	}
+	if _, ok := info.ProvisionedModules["asm"]; ok {
+		t.Errorf("expected asm to be excluded due to level none")
+	}
+	if info.CaseAttributes["product"] != "BIG-IP LTM" {
+		t.Errorf("CaseAttributes[product] = %q; want BIG-IP LTM", info.CaseAttributes["product"])
+	}
+	if info.CaseAttributes["serialNumber"] != "chs-rest-test-1" {
+		t.Errorf("CaseAttributes[serialNumber] = %q; want chs-rest-test-1", info.CaseAttributes["serialNumber"])
 	}
 }

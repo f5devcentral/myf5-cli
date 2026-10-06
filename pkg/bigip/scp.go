@@ -2,6 +2,7 @@ package bigip
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -320,7 +321,7 @@ func SCPDownload(ctx context.Context, remotePath, localDest string, opts SCPOpti
 	if remotePath == "" {
 		return "", fmt.Errorf("remote path cannot be empty")
 	}
-	if err := ValidateRemoteAppliancePath(remotePath); err != nil {
+	if err := ValidateApplianceDownloadPath(remotePath); err != nil {
 		return "", fmt.Errorf("invalid remote path: %w", err)
 	}
 	cleanRemote := path.Clean(remotePath)
@@ -534,4 +535,165 @@ func checkAck(r *bufio.Reader) error {
 		return fmt.Errorf("scp error code %d", b)
 	}
 	return fmt.Errorf("scp error code %d: %s", b, strings.TrimSpace(message))
+}
+
+// GenerateQKViewSSH triggers /usr/bin/qkview over SSH to generate a diagnostic bundle on the appliance.
+func GenerateQKViewSSH(ctx context.Context, opts SCPOptions, requestedFilename string, complete bool, statusCb func(status string)) (string, error) {
+	filename := requestedFilename
+	if filename == "" {
+		cleanHost := strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+				return r
+			}
+			return '_'
+		}, opts.Host)
+		filename = fmt.Sprintf("qkview_%s_%s.qkview", cleanHost, time.Now().UTC().Format("20060102T150405Z"))
+	}
+	if !strings.HasSuffix(filename, ".qkview") {
+		filename += ".qkview"
+	}
+	if err := ValidateQKViewFilename(filename); err != nil {
+		return "", err
+	}
+
+	clientConfig, err := BuildSSHClientConfig(opts)
+	if err != nil {
+		return "", fmt.Errorf("failed to configure SSH client: %w", err)
+	}
+
+	host, port := CleanSSHHost(opts.Host)
+	if opts.Port > 0 {
+		port = opts.Port
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = DefaultSCPTimeout
+	}
+
+	d := net.Dialer{Timeout: timeout}
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return "", fmt.Errorf("SSH connection to %s failed: %w", addr, err)
+	}
+	defer conn.Close()
+
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, clientConfig)
+	if err != nil {
+		return "", fmt.Errorf("SSH handshake failed: %w", err)
+	}
+	defer sshConn.Close()
+
+	sshClient := ssh.NewClient(sshConn, chans, reqs)
+	defer sshClient.Close()
+
+	session, err := sshClient.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("failed to create SSH session: %w", err)
+	}
+	defer session.Close()
+
+	remotePath := "/var/tmp/qkviews/" + filename
+	args := "-f " + remotePath
+	if complete {
+		args = "-s0 " + args
+	}
+	cmd := fmt.Sprintf("mkdir -p /var/tmp/qkviews && /usr/bin/qkview %s", args)
+
+	if statusCb != nil {
+		statusCb("Executing /usr/bin/qkview over SSH")
+	}
+
+	type runResult struct {
+		err error
+	}
+	done := make(chan runResult, 1)
+
+	var stderr bytes.Buffer
+	session.Stderr = &stderr
+
+	go func() {
+		err := session.Run(cmd)
+		done <- runResult{err: err}
+	}()
+
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	stages := []string{
+		"Gathering MCP system configuration",
+		"Collecting TMOS network interfaces & routing tables",
+		"Compressing diagnostic logs & audit records",
+		"Compiling system hardware metrics & health states",
+		"Packaging diagnostics into archive",
+	}
+	stageIdx := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			_ = session.Signal(ssh.SIGINT)
+			return "", ctx.Err()
+		case res := <-done:
+			if res.err != nil {
+				return "", fmt.Errorf("QKView generation failed over SSH: %w (stderr: %s)", res.err, stderr.String())
+			}
+			return filename, nil
+		case <-ticker.C:
+			if statusCb != nil {
+				statusCb(stages[stageIdx%len(stages)])
+				stageIdx++
+			}
+		}
+	}
+}
+
+// DeleteQKViewSSH removes the temporary QKView file from the appliance over SSH.
+func DeleteQKViewSSH(ctx context.Context, opts SCPOptions, filename string) error {
+	if err := ValidateQKViewFilename(filename); err != nil {
+		return err
+	}
+
+	clientConfig, err := BuildSSHClientConfig(opts)
+	if err != nil {
+		return fmt.Errorf("failed to configure SSH client: %w", err)
+	}
+
+	host, port := CleanSSHHost(opts.Host)
+	if opts.Port > 0 {
+		port = opts.Port
+	}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = DefaultSCPTimeout
+	}
+
+	d := net.Dialer{Timeout: timeout}
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return fmt.Errorf("SSH connection failed: %w", err)
+	}
+	defer conn.Close()
+
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, clientConfig)
+	if err != nil {
+		return fmt.Errorf("SSH handshake failed: %w", err)
+	}
+	defer sshConn.Close()
+
+	sshClient := ssh.NewClient(sshConn, chans, reqs)
+	defer sshClient.Close()
+
+	session, err := sshClient.NewSession()
+	if err != nil {
+		return fmt.Errorf("failed to create SSH session: %w", err)
+	}
+	defer session.Close()
+
+	remotePath := "/var/tmp/qkviews/" + filename
+	cmd := fmt.Sprintf("rm -f %s", remotePath)
+	return session.Run(cmd)
 }

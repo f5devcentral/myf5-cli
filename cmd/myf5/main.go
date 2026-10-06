@@ -1785,24 +1785,40 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			}
 		}
 		pw := os.Getenv("BIGIP_PASSWORD")
-		if pw == "" && term.IsTerminal(int(os.Stdin.Fd())) {
-			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
-			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Println()
-			if err == nil {
-				pw = strings.TrimSpace(string(bytePw))
-				// Zero raw password byte buffer immediately to scrub cleartext secret from memory
-				auth.ZeroBytes(bytePw)
+		if keyPath == "" {
+			if k := os.Getenv("BIGIP_SSH_KEY"); k != "" {
+				keyPath = k
+			} else if k := os.Getenv("SSH_KEY_PATH"); k != "" {
+				keyPath = k
 			}
 		}
-		if pw == "" {
-			fmt.Fprintf(os.Stderr, "[ERROR] BIGIP_PASSWORD environment variable must be set, or entered at prompt.\n")
-			os.Exit(1)
-		}
 
-		client := bigip.NewClient(host, port, user, pw)
-		spinner := progress.NewSpinner(fmt.Sprintf("Generating diagnostic QKView on %s", host))
-		spinner.Start()
+		if pw == "" && keyPath == "" {
+			home, _ := os.UserHomeDir()
+			hasKey := false
+			if home != "" {
+				for _, k := range []string{filepath.Join(home, ".ssh", "id_ed25519"), filepath.Join(home, ".ssh", "id_rsa")} {
+					if _, err := os.Stat(k); err == nil {
+						hasKey = true
+						break
+					}
+				}
+			}
+			if os.Getenv("SSH_AUTH_SOCK") != "" {
+				hasKey = true
+			}
+
+			if !hasKey && term.IsTerminal(int(os.Stdin.Fd())) {
+				fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
+				bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
+				fmt.Println()
+				if err == nil {
+					pw = strings.TrimSpace(string(bytePw))
+					// Zero raw password byte buffer immediately to scrub cleartext secret from memory
+					auth.ZeroBytes(bytePw)
+				}
+			}
+		}
 
 		var requestedFilename string
 		if destPath != "" && strings.HasSuffix(destPath, ".qkview") {
@@ -1812,7 +1828,34 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			}
 		}
 
-		remoteFile, err := client.GenerateQKViewWithStatus(ctx, requestedFilename, true, func(status string) {
+		var transferMethod bigip.TransferMethod
+		switch method {
+		case "icontrol":
+			transferMethod = bigip.MethodIControl
+		case "scp", "ssh":
+			transferMethod = bigip.MethodSCP
+		default:
+			transferMethod = bigip.MethodAuto
+		}
+
+		qkOpts := bigip.TransferOptions{
+			TargetType:   targetKind,
+			Method:       transferMethod,
+			Username:     user,
+			Password:     pw,
+			Port:         port,
+			IdentityFile: keyPath,
+			Timeout:      30 * time.Second,
+		}
+
+		spinner := progress.NewSpinner(fmt.Sprintf("Generating diagnostic QKView on %s", host))
+		spinner.Start()
+
+		genLogFn := func(format string, args ...any) {
+			spinner.SetMessage(fmt.Sprintf(format, args...))
+		}
+
+		remoteFile, genMethod, err := bigip.GenerateQKViewWithFailover(ctx, host, requestedFilename, true, qkOpts, genLogFn, func(status string) {
 			spinner.SetMessage(status)
 		})
 		if err != nil {
@@ -1824,7 +1867,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			spinner.Fail(fmt.Sprintf("QKView generation failed: %v", err))
 			os.Exit(1)
 		}
-		spinner.Success(fmt.Sprintf("QKView generated on appliance: /var/tmp/qkviews/%s", remoteFile))
+		spinner.Success(fmt.Sprintf("QKView generated on appliance (%s): /var/tmp/qkviews/%s", strings.ToUpper(string(genMethod)), remoteFile))
 
 		destFile := filepath.Join(getDefaultDownloadsDir(), remoteFile)
 		if destPath != "" {
@@ -1835,32 +1878,13 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			}
 		}
 
-		var transferMethod bigip.TransferMethod
-		switch method {
-		case "icontrol":
-			transferMethod = bigip.MethodIControl
-		case "scp":
-			transferMethod = bigip.MethodSCP
-		default:
-			transferMethod = bigip.MethodAuto
-		}
-
 		bar := progress.NewBar(0, "Downloading diagnostic QKView")
-		qkOpts := bigip.TransferOptions{
-			TargetType:   targetKind,
-			Method:       transferMethod,
-			Username:     user,
-			Password:     pw,
-			Port:         port,
-			IdentityFile: keyPath,
-			Timeout:      30 * time.Second,
-		}
-		logFn := func(format string, args ...any) {
+		dlLogFn := func(format string, args ...any) {
 			bar.Abort("Primary download failed")
 			fmt.Printf("\n[FAILOVER] "+format+"\n", args...)
 			bar = progress.NewBar(0, "Downloading via fallback")
 		}
-		savedFile, methodUsed, err := bigip.DownloadFileWithFailover(ctx, host, "/var/tmp/qkviews/"+remoteFile, destFile, qkOpts, logFn, func(transferred, total int64) {
+		savedFile, methodUsed, err := bigip.DownloadFileWithFailover(ctx, host, "/var/tmp/qkviews/"+remoteFile, destFile, qkOpts, dlLogFn, func(transferred, total int64) {
 			bar.Total = total
 			bar.Update(transferred)
 		})
@@ -1876,7 +1900,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		bar.Finish(fmt.Sprintf("Diagnostic QKView saved (%s) to %s", strings.ToUpper(string(methodUsed)), savedFile))
 
 		if !keepRemote {
-			if cleanupErr := client.DeleteQKView(ctx, remoteFile); cleanupErr != nil {
+			if cleanupErr := bigip.DeleteQKViewWithFailover(ctx, host, remoteFile, qkOpts); cleanupErr != nil {
 				fmt.Fprintf(os.Stderr, "[WARNING] Failed to clean up appliance temporary file /var/tmp/qkviews/%s: %v\n", remoteFile, cleanupErr)
 			} else {
 				fmt.Printf("Appliance temporary file /var/tmp/qkviews/%s cleaned up.\n", remoteFile)
@@ -2134,6 +2158,11 @@ func executeDownloadFromAppliance(
 	}
 	if method == "ssh" {
 		method = "scp"
+	}
+
+	if err := bigip.ValidateApplianceDownloadPath(remotePath); err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+		os.Exit(1)
 	}
 
 	if localDest == "" {

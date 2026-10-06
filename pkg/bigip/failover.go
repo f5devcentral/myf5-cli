@@ -133,6 +133,10 @@ func DownloadFileWithFailover(
 		method = MethodAuto
 	}
 
+	if err := ValidateApplianceDownloadPath(remotePath); err != nil {
+		return "", method, err
+	}
+
 	switch method {
 	case MethodIControl:
 		savedPath, err := downloadViaIControl(ctx, host, remotePath, localDest, opts, progressCb)
@@ -302,4 +306,143 @@ func downloadViaSCP(
 		Timeout:    opts.Timeout,
 	}
 	return SCPDownload(ctx, remotePath, localDest, scpOpts, progressCb)
+}
+
+// GenerateQKViewWithFailover generates a diagnostic QKView via iControl REST or SSH.
+// In "auto" mode, it chooses based on available credentials and auto-fails over if one fails.
+func GenerateQKViewWithFailover(
+	ctx context.Context,
+	host string,
+	requestedFilename string,
+	complete bool,
+	opts TransferOptions,
+	logFn FailoverLogger,
+	statusCb func(status string),
+) (string, TransferMethod, error) {
+	method := opts.Method
+	if method == "" {
+		method = MethodAuto
+	}
+
+	switch method {
+	case MethodIControl:
+		client := NewClient(host, opts.Port, opts.Username, opts.Password)
+		if opts.Timeout > 0 {
+			client.HTTPClient.Timeout = opts.Timeout
+		}
+		filename, err := client.GenerateQKViewWithStatus(ctx, requestedFilename, complete, statusCb)
+		if err != nil {
+			return "", MethodIControl, fmt.Errorf("iControl REST QKView generation failed: %w", err)
+		}
+		return filename, MethodIControl, nil
+
+	case MethodSCP:
+		scpOpts := SCPOptions{
+			Host:       host,
+			Port:       opts.Port,
+			Username:   opts.Username,
+			Password:   opts.Password,
+			KeyPath:    opts.IdentityFile,
+			Passphrase: opts.SSHPassphrase,
+			Timeout:    opts.Timeout,
+		}
+		filename, err := GenerateQKViewSSH(ctx, scpOpts, requestedFilename, complete, statusCb)
+		if err != nil {
+			return "", MethodSCP, fmt.Errorf("SSH QKView generation failed: %w", err)
+		}
+		return filename, MethodSCP, nil
+
+	case MethodAuto:
+		// If password is provided and no key, try iControl REST first
+		tryRestFirst := opts.Password != "" || (opts.IdentityFile == "" && os.Getenv("BIGIP_PASSWORD") != "")
+
+		if tryRestFirst {
+			client := NewClient(host, opts.Port, opts.Username, opts.Password)
+			if opts.Timeout > 0 {
+				client.HTTPClient.Timeout = opts.Timeout
+			}
+			filename, restErr := client.GenerateQKViewWithStatus(ctx, requestedFilename, complete, statusCb)
+			if restErr == nil {
+				return filename, MethodIControl, nil
+			}
+
+			if logFn != nil {
+				logFn("iControl REST QKView generation failed (%v). Automatically falling back to SSH...", restErr)
+			}
+
+			scpOpts := SCPOptions{
+				Host:       host,
+				Port:       opts.Port,
+				Username:   opts.Username,
+				Password:   opts.Password,
+				KeyPath:    opts.IdentityFile,
+				Passphrase: opts.SSHPassphrase,
+				Timeout:    opts.Timeout,
+			}
+			filename, sshErr := GenerateQKViewSSH(ctx, scpOpts, requestedFilename, complete, statusCb)
+			if sshErr == nil {
+				return filename, MethodSCP, nil
+			}
+
+			return "", MethodAuto, fmt.Errorf("both QKView generation methods failed:\n  1. iControl REST error: %v\n  2. SSH error: %v", restErr, sshErr)
+		}
+
+		// Try SSH first
+		scpOpts := SCPOptions{
+			Host:       host,
+			Port:       opts.Port,
+			Username:   opts.Username,
+			Password:   opts.Password,
+			KeyPath:    opts.IdentityFile,
+			Passphrase: opts.SSHPassphrase,
+			Timeout:    opts.Timeout,
+		}
+		filename, sshErr := GenerateQKViewSSH(ctx, scpOpts, requestedFilename, complete, statusCb)
+		if sshErr == nil {
+			return filename, MethodSCP, nil
+		}
+
+		if logFn != nil {
+			logFn("SSH QKView generation failed (%v). Automatically falling back to iControl REST...", sshErr)
+		}
+
+		client := NewClient(host, opts.Port, opts.Username, opts.Password)
+		if opts.Timeout > 0 {
+			client.HTTPClient.Timeout = opts.Timeout
+		}
+		filename, restErr := client.GenerateQKViewWithStatus(ctx, requestedFilename, complete, statusCb)
+		if restErr == nil {
+			return filename, MethodIControl, nil
+		}
+
+		return "", MethodAuto, fmt.Errorf("both QKView generation methods failed:\n  1. SSH error: %v\n  2. iControl REST error: %v", sshErr, restErr)
+
+	default:
+		return "", method, fmt.Errorf("unsupported transfer method %q", method)
+	}
+}
+
+// DeleteQKViewWithFailover deletes a generated QKView archive on the appliance via REST or SSH.
+func DeleteQKViewWithFailover(ctx context.Context, host, remoteFilename string, opts TransferOptions) error {
+	method := opts.Method
+	if method == MethodIControl || (method == MethodAuto && opts.Password != "") {
+		client := NewClient(host, opts.Port, opts.Username, opts.Password)
+		if opts.Timeout > 0 {
+			client.HTTPClient.Timeout = opts.Timeout
+		}
+		if err := client.DeleteQKView(ctx, remoteFilename); err == nil {
+			return nil
+		}
+	}
+
+	scpOpts := SCPOptions{
+		Host:       host,
+		Port:       opts.Port,
+		Username:   opts.Username,
+		Password:   opts.Password,
+		KeyPath:    opts.IdentityFile,
+		Passphrase: opts.SSHPassphrase,
+		Timeout:    opts.Timeout,
+	}
+	return DeleteQKViewSSH(ctx, scpOpts, remoteFilename)
 }

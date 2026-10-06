@@ -474,22 +474,24 @@ func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath s
 }
 
 // DownloadFile downloads a file from the BIG-IP or BIG-IQ appliance via iControl REST.
-// If remotePath is an autodeploy URI or starts with /mgmt/, it downloads directly.
+// Downloads are strictly restricted to .qkview and .iso files.
 // For files in /shared/images/, it queries /mgmt/cm/autodeploy/software-image-downloads/.
 // For files in /var/tmp/qkviews/, it queries /mgmt/cm/autodeploy/qkview-downloads/.
-// For other paths, it attempts software-image-downloads first, then qkview-downloads,
-// and can stage via TMOS bash utility.
 func (c *Client) DownloadFile(ctx context.Context, remotePath, localPath string, progressCb func(transferred, total int64)) error {
+	cleanRemote := path.Clean(remotePath)
 	if strings.HasPrefix(remotePath, "/mgmt/") {
+		ext := strings.ToLower(path.Ext(cleanRemote))
+		if ext != ".qkview" && ext != ".iso" {
+			return fmt.Errorf("prohibited download file %q: only .qkview and .iso files can be downloaded from appliances", remotePath)
+		}
 		return c.DownloadFromURI(ctx, remotePath, localPath, progressCb)
 	}
 
-	// Validate remote appliance path to reject path traversal and malicious filenames
-	if err := ValidateRemoteAppliancePath(remotePath); err != nil {
+	// Validate remote appliance path to reject path traversal and non-ISO/QKView extensions
+	if err := ValidateApplianceDownloadPath(remotePath); err != nil {
 		return err
 	}
 
-	cleanRemote := path.Clean(remotePath)
 	baseFilename := path.Base(cleanRemote)
 
 	if strings.HasPrefix(cleanRemote, "/shared/images/") || strings.HasSuffix(baseFilename, ".iso") {
@@ -509,25 +511,6 @@ func (c *Client) DownloadFile(ctx context.Context, remotePath, localPath string,
 	err = c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/qkview-downloads/%s", baseFilename), localPath, progressCb)
 	if err == nil {
 		return nil
-	}
-
-	// Staging attempt via TMOS bash utility to /shared/images
-	stagedPath, copyErr := c.CopyRemoteFile(ctx, cleanRemote, "/shared/images")
-	if copyErr == nil {
-		stagedBase := path.Base(stagedPath)
-		defer func() {
-			// clean up staged copy in /shared/images
-			payload := map[string]string{
-				"command":     "run",
-				"utilCmdArgs": fmt.Sprintf("-c 'rm -f %s'", stagedPath),
-			}
-			jb, _ := json.Marshal(payload)
-			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, fmt.Sprintf("%s/mgmt/tm/util/bash", c.BaseURL()), bytes.NewReader(jb))
-			c.setAuth(req)
-			req.Header.Set("Content-Type", "application/json")
-			_, _ = c.HTTPClient.Do(req)
-		}()
-		return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/software-image-downloads/%s", stagedBase), localPath, progressCb)
 	}
 
 	return fmt.Errorf("iControl REST download failed for %s: %w", remotePath, err)
