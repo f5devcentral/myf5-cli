@@ -91,7 +91,7 @@ jobs:
       # requirements that no reachable code imports, so a go.mod-derived SBOM
       # would claim this release ships code it does not contain.
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: stable
 
