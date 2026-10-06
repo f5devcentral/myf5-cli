@@ -127,6 +127,18 @@ func TestShouldBypassProxy(t *testing.T) {
 		{"54.243.25.230", "10.0.0.0/8,192.168.0.0/16", false},
 		{"anything.com", "*", true},
 		{"api.f5.com", "", false},
+
+		// IPv6 test cases
+		{"::1", "::1", true},
+		{"[::1]:8443", "::1", true},
+		{"[::1]:443", "0:0:0:0:0:0:0:1", true},
+		{"[2001:db8::1]:443", "2001:db8::/32", true},
+		{"[2001:db9::1]:443", "2001:db8::/32", false},
+		{"[fe80::1%eth0]:8443", "fe80::/10", true},
+		{"[fe80::1%eth0]:8443", "fe80::1", true},
+		{"2001:db8::1", "[2001:db8::1]", true},
+		{"[2001:db8::1]:8443", "[2001:db8::1]:8443", true},
+		{"[2001:db8::1]:8443", "corp.local", false},
 	}
 
 	for _, tt := range tests {
@@ -344,6 +356,103 @@ func TestSOCKS5ProxyTunnel(t *testing.T) {
 	}
 	if string(replyBuf) != testMsg {
 		t.Errorf("Expected %s, got %s", testMsg, string(replyBuf))
+	}
+}
+
+func TestSOCKS5ProxyTunnel_IPv6Target(t *testing.T) {
+	// Start mock SOCKS5 server that verifies ATYP=4 (IPv6) request serialization
+	socksListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start socks5 listener: %v", err)
+	}
+	defer socksListener.Close()
+
+	reqReceived := make(chan []byte, 1)
+
+	go func() {
+		clientConn, err := socksListener.Accept()
+		if err != nil {
+			return
+		}
+		defer clientConn.Close()
+
+		// Read greeting
+		greet := make([]byte, 3)
+		if _, err := io.ReadFull(clientConn, greet); err != nil {
+			return
+		}
+		// Reply NO AUTH
+		if _, err := clientConn.Write([]byte{0x05, 0x00}); err != nil {
+			return
+		}
+
+		// Read request header: [VER=5, CMD=1, RSV=0, ATYP=4]
+		reqHeader := make([]byte, 4)
+		if _, err := io.ReadFull(clientConn, reqHeader); err != nil {
+			return
+		}
+
+		// Read 16 bytes IPv6 + 2 bytes port
+		addrPort := make([]byte, 18)
+		if _, err := io.ReadFull(clientConn, addrPort); err != nil {
+			return
+		}
+
+		reqReceived <- append(reqHeader, addrPort...)
+
+		// Reply success: [VER=5, REP=0, RSV=0, ATYP=1, BND.ADDR=0.0.0.0, BND.PORT=0]
+		_, _ = clientConn.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+
+		// Echo loop
+		buf := make([]byte, 1024)
+		n, _ := clientConn.Read(buf)
+		_, _ = clientConn.Write(buf[:n])
+	}()
+
+	proxyURL, _ := ParseProxyURL("socks5://" + socksListener.Addr().String())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Dial an IPv6 target address with port and brackets
+	targetAddr := "[2001:db8::1]:8443"
+	conn, err := DialProxy(ctx, "tcp", targetAddr, proxyURL)
+	if err != nil {
+		t.Fatalf("SOCKS5 IPv6 DialProxy failed: %v", err)
+	}
+	defer conn.Close()
+
+	select {
+	case req := <-reqReceived:
+		if len(req) != 22 {
+			t.Fatalf("expected 22 bytes in SOCKS5 IPv6 request, got %d", len(req))
+		}
+		if req[3] != 0x04 {
+			t.Errorf("expected ATYP=0x04 (IPv6), got 0x%02x", req[3])
+		}
+		parsedIP := net.IP(req[4:20])
+		expectedIP := net.ParseIP("2001:db8::1")
+		if !parsedIP.Equal(expectedIP) {
+			t.Errorf("expected IPv6 %v, got %v", expectedIP, parsedIP)
+		}
+		port := int(req[20])<<8 | int(req[21])
+		if port != 8443 {
+			t.Errorf("expected port 8443, got %d", port)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for SOCKS5 IPv6 request")
+	}
+
+	testMsg := "IPV6_ECHO"
+	if _, err := conn.Write([]byte(testMsg)); err != nil {
+		t.Fatalf("failed to write through socks tunnel: %v", err)
+	}
+	reply := make([]byte, len(testMsg))
+	if _, err := io.ReadFull(conn, reply); err != nil {
+		t.Fatalf("failed to read reply: %v", err)
+	}
+	if string(reply) != testMsg {
+		t.Errorf("got %q, want %q", string(reply), testMsg)
 	}
 }
 
