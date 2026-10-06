@@ -201,7 +201,15 @@ func (c *Client) GetFileLinks(ctx context.Context, family, line, version, contai
 	)
 	bodyBytes, err := c.doGetWithFallback(ctx, path)
 	if err != nil {
-		return nil, err
+		// If cold 403, ESDP API gateway often requires an active product line session
+		// before issuing signed download links. Warm the session and retry once.
+		if strings.Contains(err.Error(), "403") {
+			_, _ = c.GetProductVersions(ctx, family, line)
+			bodyBytes, err = c.doGetWithFallback(ctx, path)
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var resp FileLinksResponse

@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestDownloadFileWithChecksum(t *testing.T) {
@@ -111,5 +114,71 @@ func TestFormatBytes(t *testing.T) {
 	}
 	if FormatBytes(1024*1024) != "1.00 MB" {
 		t.Errorf("FormatBytes(1MB) = %s, want 1.00 MB", FormatBytes(1024*1024))
+	}
+}
+
+func TestDownloadLink_Expiration(t *testing.T) {
+	// 1. Link with CloudFront 'Expires' parameter in past
+	pastLink := &DownloadLink{
+		Href: "https://downloads.f5.com/esd/file.iso?Expires=1600000000&Signature=abc",
+	}
+	if !pastLink.IsExpired() {
+		t.Errorf("expected past link to be expired")
+	}
+	if pastLink.FormattedExpires() != "EXPIRED" {
+		t.Errorf("expected EXPIRED, got %s", pastLink.FormattedExpires())
+	}
+
+	// 2. Link with CloudFront 'Expires' parameter in future
+	futureTime := time.Now().Add(45 * time.Minute)
+	futureLink := &DownloadLink{
+		Href: fmt.Sprintf("https://downloads.f5.com/esd/file.iso?Expires=%d&Signature=abc", futureTime.Unix()),
+	}
+	if futureLink.IsExpired() {
+		t.Errorf("expected future link not to be expired")
+	}
+	if !strings.Contains(futureLink.FormattedExpires(), "in 4") {
+		t.Errorf("expected formatted expiration to show minutes remaining, got %s", futureLink.FormattedExpires())
+	}
+
+	// 3. Link with explicit RFC3339 ExpiresAt field
+	rfcLink := &DownloadLink{
+		ExpiresAt: "2020-01-01T00:00:00Z",
+	}
+	if !rfcLink.IsExpired() {
+		t.Errorf("expected rfcLink to be expired")
+	}
+	if rfcLink.FormattedExpires() != "EXPIRED" {
+		t.Errorf("expected EXPIRED, got %s", rfcLink.FormattedExpires())
+	}
+
+	// 4. Link with no expiration
+	emptyLink := &DownloadLink{
+		Href: "https://downloads.f5.com/esd/file.iso",
+	}
+	if emptyLink.IsExpired() {
+		t.Errorf("expected emptyLink not to report expired")
+	}
+	if emptyLink.FormattedExpires() != "temporary (time unknown)" {
+		t.Errorf("expected 'temporary (time unknown)', got %s", emptyLink.FormattedExpires())
+	}
+}
+
+func TestDownloadFile_ExpiredLink(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("<Error><Code>AccessDenied</Code><Message>Request has expired</Message></Error>"))
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	outFile := filepath.Join(tempDir, "expired.iso")
+
+	err := DownloadFile(context.Background(), server.URL, outFile, "", "", nil)
+	if err == nil {
+		t.Fatalf("expected error for expired download URL, got nil")
+	}
+	if !strings.Contains(err.Error(), "expired") {
+		t.Errorf("expected error message to mention expired, got: %v", err)
 	}
 }

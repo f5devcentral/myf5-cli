@@ -791,7 +791,7 @@ func handleDownloads(ctx context.Context, args []string) {
 		}
 
 		link := links[0]
-		fmt.Printf("Mirror Region: %s\n", link.GetRegion())
+		fmt.Printf("Mirror Region: %s (link expires %s)\n", link.GetRegion(), link.FormattedExpires())
 		fmt.Printf("Target File:   %s\n", outPath)
 		if expectedHash != "" {
 			fmt.Printf("Expected SHA:  %s\n", expectedHash)
@@ -1279,7 +1279,7 @@ familyLoop:
 							}
 
 							link := links[0]
-							fmt.Printf("Mirror URL (expires %s, Region: %s):\n%s\n\n", link.ExpiresAt, link.GetRegion(), link.Href)
+							fmt.Printf("Mirror URL (expires %s, Region: %s):\n%s\n\n", link.FormattedExpires(), link.GetRegion(), link.Href)
 							targetPath := filepath.Join(getDefaultDownloadsDir(), filepath.Base(selectedTarget.file.Name))
 							fmt.Printf("Download this file directly to %s? [y/N]: ", targetPath)
 							confirmInput, err := reader.ReadString('\n')
