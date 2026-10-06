@@ -20,7 +20,6 @@ import (
 	"myf5-cli/pkg/auth"
 	"myf5-cli/pkg/bigip"
 	"myf5-cli/pkg/cases"
-	"myf5-cli/pkg/completion"
 	"myf5-cli/pkg/downloads"
 	"myf5-cli/pkg/ihealth"
 	"myf5-cli/pkg/logger"
@@ -58,23 +57,33 @@ func main() {
 	// Enforce Zero-Secret CLI Policy
 	if err := auth.CheckNoCLISecrets(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "\n[SECURITY ERROR] %s\n\n", err.Error())
-		os.Exit(2)
+		exitFunc(2)
 	}
 
 	if len(os.Args) < 2 {
+		if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+			startInteractive(ctx)
+			return
+		}
 		printUsage()
-		os.Exit(1)
+		exitFunc(1)
+		return
 	}
 
 	subcommand := os.Args[1]
 	args := os.Args[2:]
 
 	logger.Get().Info("Invoking command %s", subcommand)
+	executeSubcommand(ctx, subcommand, args)
+}
 
+// executeSubcommand dispatches a subcommand and its arguments.
+func executeSubcommand(ctx context.Context, subcommand string, args []string) {
 	// If help is requested for a subcommand (e.g. `myf5 downloads --help`), print usage and exit 0
 	if isSubcommandHelp(args) {
 		printCommandHelp(subcommand)
-		os.Exit(0)
+		exitFunc(0)
+		return
 	}
 
 	switch subcommand {
@@ -94,15 +103,15 @@ func main() {
 		handlePull(ctx, args)
 	case "doctor":
 		handleDoctor(ctx, args)
-	case "completion":
-		handleCompletion(args)
+	case "interactive", "shell", "repl", "i":
+		startInteractive(ctx)
 	case "version", "--version", "-v":
 		fmt.Printf("myf5-cli version %s (Go 1.27.1 / darwin-arm64)\n", Version)
 	case "help", "--help", "-h":
 		printUsage()
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command '%s'. Run 'myf5 help' for usage.\n", subcommand)
-		os.Exit(1)
+		exitFunc(1)
 	}
 }
 
@@ -123,7 +132,7 @@ func normalizeHelpArgs(subcommand string, args []string) []string {
 		return args
 	}
 	switch subcommand {
-	case "completion", "doctor":
+	case "doctor", "interactive", "shell", "repl", "i":
 		return args
 	default:
 		return nil
@@ -149,11 +158,26 @@ func printCommandHelp(subcommand string) {
 		printPullUsage()
 	case "doctor":
 		printDoctorUsage()
-	case "completion":
-		printCompletionUsage()
+	case "interactive", "shell", "repl", "i":
+		printInteractiveUsage()
 	default:
 		printUsage()
 	}
+}
+
+func printInteractiveUsage() {
+	fmt.Println(`myf5 interactive - Launch Interactive REPL Shell
+
+USAGE:
+    myf5 interactive
+    myf5 shell
+    myf5 repl
+    myf5 i
+
+FEATURES:
+    - Tab autocompletion for commands, subcommands, and flags
+    - Command history and line navigation
+    - Safe execution without exiting your shell on errors`)
 }
 
 func printCasesUsage() {
@@ -186,7 +210,6 @@ USAGE:
     myf5 %s ready <host>
     myf5 %s info <host | file.qkview> [--json]
     myf5 %s serial <host | file.qkview> [--json]
-    myf5 %s example <host> <endpoint>
     myf5 %s push <host> <file> [--dest <path>] [--method auto|icontrol|scp]
     myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp]
 
@@ -198,7 +221,7 @@ OPTIONS:
     --cert-key <key-path>   TLS client private key
     --method <method>       Transfer method: auto, icontrol, or scp
     --json                  Output machine-readable JSON
-`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName)
+`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName)
 	} else {
 		fmt.Printf(`myf5 %s - Manage BIG-IP TMOS Appliance
 
@@ -206,7 +229,6 @@ USAGE:
     myf5 %s ready <host>
     myf5 %s info <host | file.qkview> [--json]
     myf5 %s serial <host | file.qkview> [--json]
-    myf5 %s example <host> <endpoint>
     myf5 %s qkview <host> [--dest <path>] [--keep-remote] [--method auto|icontrol|scp]
     myf5 %s push <host> <file> [--dest <path>] [--method auto|icontrol|scp]
     myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp]
@@ -220,7 +242,7 @@ OPTIONS:
     --method <method>       Transfer method: auto, icontrol, or scp
     --keep-remote           Keep generated QKView file on appliance after download
     --json                  Output machine-readable JSON
-`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName)
+`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName)
 	}
 }
 
@@ -270,27 +292,6 @@ HTTPS reachability. Takes no arguments and changes nothing.
 `)
 }
 
-func printCompletionUsage() {
-	fmt.Fprintf(os.Stdout, `myf5 completion - Generate Shell Tab Completion Script
-
-USAGE:
-    myf5 completion [bash | zsh | fish | powershell]
-
-EXAMPLES:
-  # Bash (current session)
-  source <(myf5 completion bash)
-
-  # Zsh (current session)
-  source <(myf5 completion zsh)
-
-  # Fish (persistent)
-  myf5 completion fish > ~/.config/fish/completions/myf5.fish
-
-  # PowerShell (current session)
-  myf5 completion powershell | Out-String | Invoke-Expression
-`)
-}
-
 func printUsage() {
 	fmt.Printf(`myf5-cli - High-Performance F5 Cloud & Appliance Automation CLI (v%s)
 
@@ -306,12 +307,12 @@ COMMANDS:
     downloads    Browse MyF5 catalog and stream multi-GB software images
     cases        View and manage MyF5 support cases
     ihealth      Upload and inspect QKView diagnostic bundles on iHealth
-    bigip        Manage BIG-IP TMOS appliances (ready check, info, serial, example schema, QKView generation, push, download)
-    bigiq        Manage BIG-IQ appliances (ready check, info, serial, example schema, push, download)
+    bigip        Manage BIG-IP TMOS appliances (ready check, info, serial, QKView generation, push, download)
+    bigiq        Manage BIG-IQ appliances (ready check, info, serial, push, download)
     push         Push software downloads or files to BIG-IP / BIG-IQ (auto failover)
     pull         Download files from BIG-IP / BIG-IQ (auto failover)
     doctor       Verify API credentials, DNS, and network firewall egress
-    completion   Generate shell tab completion script (bash, zsh, fish, powershell)
+    interactive  Interactive REPL shell with tab completion (alias: shell, repl)
     version      Print application version
 
 ZERO-SECRET SECURITY POLICY:
@@ -330,10 +331,10 @@ func checkErr(ctx context.Context, err error, prefix string) {
 	}
 	if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 		fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-		os.Exit(130)
+		exitFunc(130)
 	}
 	printDetailedError(prefix, err)
-	os.Exit(1)
+	exitFunc(1)
 }
 
 func printDetailedError(prefix string, err error) {
@@ -383,7 +384,7 @@ func suggestRemediation(err error) string {
 func handleDownloads(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		printDownloadsUsage()
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	action := args[0]
@@ -499,7 +500,7 @@ func handleDownloads(ctx context.Context, args []string) {
 		creds, err := auth.ResolveCredentials(profileVal)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
 		checkErr(ctx, err, "Authentication failed")
@@ -523,7 +524,7 @@ func handleDownloads(ctx context.Context, args []string) {
 	case "lines", "list-lines":
 		if len(remaining) < 1 {
 			fmt.Fprintln(os.Stderr, "Usage: myf5 downloads lines <product-family>")
-			os.Exit(1)
+			exitFunc(1)
 		}
 		targetFamily := remaining[0]
 		client := getDownloadsClient()
@@ -543,12 +544,12 @@ func handleDownloads(ctx context.Context, args []string) {
 			}
 		}
 		fmt.Fprintf(os.Stderr, "Product family '%s' not found.\n", targetFamily)
-		os.Exit(1)
+		exitFunc(1)
 
 	case "versions", "list-versions":
 		if len(remaining) < 2 {
 			fmt.Fprintln(os.Stderr, "Usage: myf5 downloads versions <product-family> <product-line>")
-			os.Exit(1)
+			exitFunc(1)
 		}
 		client := getDownloadsClient()
 		resp, err := client.GetProductVersions(ctx, remaining[0], remaining[1])
@@ -565,7 +566,7 @@ func handleDownloads(ctx context.Context, args []string) {
 	case "containers", "list-containers":
 		if len(remaining) < 2 {
 			fmt.Fprintln(os.Stderr, "Usage: myf5 downloads containers <product-family> <product-line> [version]")
-			os.Exit(1)
+			exitFunc(1)
 		}
 		client := getDownloadsClient()
 		resp, err := client.GetProductVersions(ctx, remaining[0], remaining[1])
@@ -596,7 +597,7 @@ func handleDownloads(ctx context.Context, args []string) {
 	case "files", "list-files":
 		if len(remaining) < 2 {
 			fmt.Fprintln(os.Stderr, "Usage: myf5 downloads files <product-family> <product-line> [version] [container]")
-			os.Exit(1)
+			exitFunc(1)
 		}
 		client := getDownloadsClient()
 		resp, err := client.GetProductVersions(ctx, remaining[0], remaining[1])
@@ -637,7 +638,7 @@ func handleDownloads(ctx context.Context, args []string) {
 	case "get", "download":
 		if len(remaining) < 5 {
 			fmt.Fprintln(os.Stderr, "Usage: myf5 downloads get <family> <line> <version> <container> <file> [-o output.iso]")
-			os.Exit(1)
+			exitFunc(1)
 		}
 		family, line, ver, cont, fileName := remaining[0], remaining[1], remaining[2], remaining[3], remaining[4]
 		outPath := outputVal
@@ -658,7 +659,7 @@ func handleDownloads(ctx context.Context, args []string) {
 		links := linksResp.GetLinks()
 		if len(links) == 0 {
 			fmt.Fprintf(os.Stderr, "No download links available for %s\n", fileName)
-			os.Exit(1)
+			exitFunc(1)
 		}
 
 		var expectedHash, hashAlgo string
@@ -688,10 +689,10 @@ func handleDownloads(ctx context.Context, args []string) {
 			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 				bar.Abort("Download cancelled by user.")
 				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
+				exitFunc(130)
 			}
 			fmt.Fprintf(os.Stderr, "\n[DOWNLOAD FAILED] %v\n", err)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		bar.Finish(fmt.Sprintf("Download verified and complete: %s", outPath))
 		if pushHost != "" {
@@ -704,7 +705,7 @@ func handleDownloads(ctx context.Context, args []string) {
 
 	default:
 		printDownloadsUsage()
-		os.Exit(1)
+		exitFunc(1)
 	}
 }
 
@@ -737,10 +738,10 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 	if err != nil {
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 			fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-			os.Exit(130)
+			exitFunc(130)
 		}
 		fmt.Fprintf(os.Stderr, "Failed to load catalog: %v\n", err)
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 familyLoop:
@@ -754,7 +755,7 @@ familyLoop:
 		if err != nil {
 			if ctx.Err() != nil {
 				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
+				exitFunc(130)
 			}
 			return
 		}
@@ -781,7 +782,7 @@ familyLoop:
 			if err != nil {
 				if ctx.Err() != nil {
 					fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-					os.Exit(130)
+					exitFunc(130)
 				}
 				return
 			}
@@ -805,7 +806,7 @@ familyLoop:
 			if err != nil {
 				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 					fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-					os.Exit(130)
+					exitFunc(130)
 				}
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				continue
@@ -828,7 +829,7 @@ familyLoop:
 				if err != nil {
 					if ctx.Err() != nil {
 						fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-						os.Exit(130)
+						exitFunc(130)
 					}
 					return
 				}
@@ -935,7 +936,7 @@ familyLoop:
 					if err != nil {
 						if ctx.Err() != nil {
 							fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-							os.Exit(130)
+							exitFunc(130)
 						}
 						return
 					}
@@ -1024,7 +1025,7 @@ familyLoop:
 							if err != nil {
 								if ctx.Err() != nil {
 									fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-									os.Exit(130)
+									exitFunc(130)
 								}
 								return
 							}
@@ -1102,7 +1103,7 @@ familyLoop:
 							if err != nil {
 								if ctx.Err() != nil {
 									fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-									os.Exit(130)
+									exitFunc(130)
 								}
 								return
 							}
@@ -1147,7 +1148,7 @@ familyLoop:
 							if err != nil {
 								if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 									fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-									os.Exit(130)
+									exitFunc(130)
 								}
 								fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 								continue
@@ -1166,7 +1167,7 @@ familyLoop:
 							if err != nil {
 								if ctx.Err() != nil {
 									fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-									os.Exit(130)
+									exitFunc(130)
 								}
 								return
 							}
@@ -1188,7 +1189,7 @@ familyLoop:
 									if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 										bar.Abort("Download cancelled by user.")
 										fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-										os.Exit(130)
+										exitFunc(130)
 									}
 									fmt.Fprintf(os.Stderr, "\n[ERROR] Download failed: %v\n", err)
 								} else {
@@ -1215,7 +1216,7 @@ func getDefaultDownloadsDir() string {
 func handleCases(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		printCasesUsage()
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	action := args[0]
@@ -1223,7 +1224,7 @@ func handleCases(ctx context.Context, args []string) {
 	creds, err := auth.ResolveCredentials("default")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-		os.Exit(1)
+		exitFunc(1)
 	}
 	token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
 	checkErr(ctx, err, "Authentication failed")
@@ -1241,7 +1242,7 @@ func handleCases(ctx context.Context, args []string) {
 				showClosed = true
 			default:
 				fmt.Fprintf(os.Stderr, "Unknown flag %q\n\nUsage: myf5 cases list [--all]\n", a)
-				os.Exit(1)
+				exitFunc(1)
 			}
 		}
 		resp, err := client.ListCases(ctx, showClosed)
@@ -1270,7 +1271,7 @@ func handleCases(ctx context.Context, args []string) {
 	case "comment":
 		if len(args) < 3 {
 			fmt.Fprintln(os.Stderr, "Usage: myf5 cases comment <case-number> <note>")
-			os.Exit(1)
+			exitFunc(1)
 		}
 		resp, err := client.AddComment(ctx, args[1], args[2])
 		checkErr(ctx, err, "Failed to add comment")
@@ -1283,7 +1284,7 @@ func handleCases(ctx context.Context, args []string) {
 				msg = "the API reported an error without a message"
 			}
 			fmt.Fprintf(os.Stderr, "[ERROR] Failed to add comment: %s\n", msg)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		if resp.Data.CaseNumber != "" {
 			fmt.Printf("Comment added to case %s (updated %s).\n", resp.Data.CaseNumber, resp.Data.UpdatedDate)
@@ -1293,7 +1294,7 @@ func handleCases(ctx context.Context, args []string) {
 	case "get", "show", "detail":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "Usage: myf5 cases get <case-number>")
-			os.Exit(1)
+			exitFunc(1)
 		}
 		detail, err := client.GetCase(ctx, args[1])
 		checkErr(ctx, err, "Failed to retrieve case")
@@ -1302,7 +1303,7 @@ func handleCases(ctx context.Context, args []string) {
 		handleCaseCreate(ctx, client, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown cases action '%s'\n", action)
-		os.Exit(1)
+		exitFunc(1)
 	}
 }
 
@@ -1392,7 +1393,7 @@ Copy them from an existing case ('myf5 cases get <num>') until it returns.`
 func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) {
 	if len(args) == 0 {
 		fmt.Println(caseCreateUsage)
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	payload := map[string]interface{}{}
@@ -1428,11 +1429,11 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 		field, known := flagToField[a]
 		if !known {
 			fmt.Fprintf(os.Stderr, "Unknown flag %q\n\n%s\n", a, caseCreateUsage)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		if i+1 >= len(args) {
 			fmt.Fprintf(os.Stderr, "Flag %s requires a value\n", a)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		payload[field] = args[i+1]
 		i++
@@ -1447,7 +1448,7 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 		out, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ERROR] failed to render payload: %v\n", err)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		fmt.Println("Dry run — the following payload would be POSTed:")
 		fmt.Println(string(out))
@@ -1469,7 +1470,7 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 			// list here sent people to look for a serial number without saying
 			// that the web UI opens such cases without one.
 			fmt.Printf("\nIncomplete: %v\n", &cases.ErrMissingCreateFields{Missing: missing})
-			os.Exit(1)
+			exitFunc(1)
 		}
 		fmt.Println("\nAll required fields present.")
 		return
@@ -1480,7 +1481,7 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 		var missingErr *cases.ErrMissingCreateFields
 		if errors.As(err, &missingErr) {
 			fmt.Fprintf(os.Stderr, "[ERROR] %v\n\n%s\n", err, caseCreateUsage)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		checkErr(ctx, err, "Failed to create case")
 	}
@@ -1490,7 +1491,7 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 			msg = "the API reported an error without a message"
 		}
 		fmt.Fprintf(os.Stderr, "[ERROR] Failed to create case: %s\n", msg)
-		os.Exit(1)
+		exitFunc(1)
 	}
 	if resp.Data.CaseNumber != "" {
 		fmt.Printf("Case %s created.\n", resp.Data.CaseNumber)
@@ -1506,7 +1507,7 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 func handleIHealth(ctx context.Context, args []string) {
 	if len(args) == 0 {
 		printIHealthUsage()
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	action := args[0]
@@ -1516,7 +1517,7 @@ func handleIHealth(ctx context.Context, args []string) {
 	creds, err := auth.ResolveCredentialsForService("default", "ihealth")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-		os.Exit(1)
+		exitFunc(1)
 	}
 	token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "ihealth")
 	checkErr(ctx, err, "Authentication failed")
@@ -1553,7 +1554,7 @@ func handleIHealth(ctx context.Context, args []string) {
 	case "upload":
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "Usage: myf5 ihealth upload <file.qkview> [case-number] [description]")
-			os.Exit(1)
+			exitFunc(1)
 		}
 		filePath := args[1]
 		caseNum := ""
@@ -1567,7 +1568,7 @@ func handleIHealth(ctx context.Context, args []string) {
 		fileStat, err := os.Stat(filePath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Cannot access file %s: %v\n", filePath, err)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		var totalSize int64
 		if fileStat != nil {
@@ -1581,10 +1582,10 @@ func handleIHealth(ctx context.Context, args []string) {
 			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 				bar.Abort("Upload cancelled by user.")
 				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
+				exitFunc(130)
 			}
 			fmt.Fprintf(os.Stderr, "\nUpload failed: %v\n", err)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		bar.Finish(fmt.Sprintf("QKView uploaded. iHealth ID: %s (Status: %s)", resp.ID, resp.Status))
 		if resp.ID != "" {
@@ -1592,7 +1593,7 @@ func handleIHealth(ctx context.Context, args []string) {
 		}
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown ihealth action '%s'\n", action)
-		os.Exit(1)
+		exitFunc(1)
 	}
 }
 
@@ -1611,7 +1612,7 @@ func handleBIGIQ(ctx context.Context, args []string) {
 func handlePush(ctx context.Context, args []string) {
 	if len(args) < 2 {
 		printPushUsage()
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	var positional []string
@@ -1718,7 +1719,7 @@ func handlePush(ctx context.Context, args []string) {
 
 	if len(positional) < 2 {
 		printPushUsage()
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	host := positional[0]
@@ -1729,7 +1730,7 @@ func handlePush(ctx context.Context, args []string) {
 func handlePull(ctx context.Context, args []string) {
 	if len(args) < 2 {
 		printPullUsage()
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	var positional []string
@@ -1838,7 +1839,7 @@ func handlePull(ctx context.Context, args []string) {
 
 	if len(positional) < 2 {
 		printPullUsage()
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	host := positional[0]
@@ -1854,7 +1855,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	if len(args) == 0 {
 		printApplianceUsage(targetKind)
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	action := strings.ToLower(args[0])
@@ -1959,7 +1960,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	method = strings.ToLower(strings.TrimSpace(method))
 	if method != "auto" && method != "icontrol" && method != "scp" && method != "ssh" {
 		fmt.Fprintf(os.Stderr, "[ERROR] Invalid method %q. Valid methods: 'auto', 'icontrol', 'scp'\n", method)
-		os.Exit(1)
+		exitFunc(1)
 	}
 	if method == "ssh" {
 		method = "scp"
@@ -1969,7 +1970,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	case "ready":
 		if len(positional) < 1 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s ready <host> [--user <user>] [--port <port>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		host := positional[0]
 		if user == "" {
@@ -2003,7 +2004,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		}
 		if pw == "" && certPath == "" {
 			fmt.Fprintf(os.Stderr, "[ERROR] Password or client certificate required. Set BIGIP_PASSWORD / BIGIQ_PASSWORD / BIGIP_CERT or enter at prompt.\n")
-			os.Exit(1)
+			exitFunc(1)
 		}
 
 		client, err := bigip.NewClientWithOptions(bigip.ClientOptions{
@@ -2026,7 +2027,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	case "info", "system-info", "sysinfo":
 		if len(positional) < 1 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s info <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		target := positional[0]
 		info := getSystemInfoTarget(ctx, target, targetKind, user, port, keyPath, method, certPath, certKeyPath)
@@ -2043,7 +2044,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	case "serial", "sn", "serialnumber":
 		if len(positional) < 1 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s serial <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		target := positional[0]
 		info := getSystemInfoTarget(ctx, target, targetKind, user, port, keyPath, method, certPath, certKeyPath)
@@ -2065,68 +2066,13 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 				fmt.Println(sn)
 			} else {
 				fmt.Fprintln(os.Stderr, "[WARNING] No serial number or registration key found.")
-				os.Exit(1)
+				exitFunc(1)
 			}
 		}
-
-	case "example", "schema":
-		if len(positional) < 2 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s example <host> <endpoint> [--user <user>] [--port <port>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
-			os.Exit(1)
-		}
-		host := positional[0]
-		endpoint := positional[1]
-		if user == "" {
-			if strings.EqualFold(targetKind, "BIG-IQ") {
-				user = os.Getenv("BIGIQ_USER")
-			}
-			if user == "" {
-				user = os.Getenv("BIGIP_USER")
-			}
-			if user == "" {
-				user = "admin"
-			}
-		}
-
-		pw := ""
-		if strings.EqualFold(targetKind, "BIG-IQ") {
-			pw = os.Getenv("BIGIQ_PASSWORD")
-		}
-		if pw == "" {
-			pw = os.Getenv("BIGIP_PASSWORD")
-		}
-		if pw == "" && certPath == "" && term.IsTerminal(int(os.Stdin.Fd())) {
-			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
-			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Println()
-			if err == nil {
-				pw = strings.TrimSpace(string(bytePw))
-				// Zero raw password byte buffer immediately to scrub cleartext secret from memory
-				auth.ZeroBytes(bytePw)
-			}
-		}
-		if pw == "" && certPath == "" {
-			fmt.Fprintf(os.Stderr, "[ERROR] Password or client certificate required. Set BIGIP_PASSWORD / BIGIQ_PASSWORD / BIGIP_CERT or enter at prompt.\n")
-			os.Exit(1)
-		}
-
-		client, err := bigip.NewClientWithOptions(bigip.ClientOptions{
-			Host:           host,
-			Port:           port,
-			Username:       user,
-			Password:       pw,
-			ClientCertPath: certPath,
-			ClientKeyPath:  certKeyPath,
-		})
-		checkErr(ctx, err, "Failed to initialize appliance client")
-		ex, err := client.GetEndpointExample(ctx, endpoint)
-		checkErr(ctx, err, fmt.Sprintf("Failed to get example for endpoint %s", endpoint))
-		fmt.Println(string(ex))
-
 	case "push", "upload":
 		if len(positional) < 2 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		host := positional[0]
 		localFile := positional[1]
@@ -2135,7 +2081,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	case "download", "pull", "fetch":
 		if len(positional) < 2 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		host := positional[0]
 		remoteFile := positional[1]
@@ -2144,7 +2090,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	case "qkview":
 		if len(positional) < 1 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s qkview <host> [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--keep-remote]\n", cmdName)
-			os.Exit(1)
+			exitFunc(1)
 		}
 		host := positional[0]
 		if user == "" {
@@ -2219,10 +2165,10 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 				spinner.Abort("QKView generation cancelled by user.")
 				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
+				exitFunc(130)
 			}
 			spinner.Fail(fmt.Sprintf("QKView generation failed: %v", err))
-			os.Exit(1)
+			exitFunc(1)
 		}
 		spinner.Success(fmt.Sprintf("QKView generated on appliance (%s): /var/tmp/qkviews/%s", strings.ToUpper(string(genMethod)), remoteFile))
 
@@ -2249,10 +2195,10 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 				bar.Abort("QKView download cancelled by user.")
 				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-				os.Exit(130)
+				exitFunc(130)
 			}
 			bar.Abort(fmt.Sprintf("Download failed: %v", err))
-			os.Exit(1)
+			exitFunc(1)
 		}
 		bar.Finish(fmt.Sprintf("Diagnostic QKView saved (%s) to %s", strings.ToUpper(string(methodUsed)), savedFile))
 
@@ -2268,7 +2214,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown %s action '%s'\n", cmdName, action)
-		os.Exit(1)
+		exitFunc(1)
 	}
 }
 
@@ -2300,7 +2246,7 @@ func getSystemInfoTarget(ctx context.Context, target, targetKind, user string, p
 	}
 	if strings.HasSuffix(strings.ToLower(target), ".qkview") {
 		fmt.Fprintf(os.Stderr, "[ERROR] QKView file not found: %s\n", target)
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	host := target
@@ -2421,7 +2367,7 @@ func executePushToAppliance(ctx context.Context, host, localPath, method, destPa
 	method = strings.ToLower(strings.TrimSpace(method))
 	if method != "auto" && method != "icontrol" && method != "scp" && method != "ssh" {
 		fmt.Fprintf(os.Stderr, "[ERROR] Invalid push method %q. Valid methods: 'auto', 'icontrol', 'scp'\n", method)
-		os.Exit(1)
+		exitFunc(1)
 	}
 	if method == "ssh" {
 		method = "scp"
@@ -2430,7 +2376,7 @@ func executePushToAppliance(ctx context.Context, host, localPath, method, destPa
 	stat, err := os.Stat(localPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] Local file %q does not exist or cannot be read: %v\n", localPath, err)
-		os.Exit(1)
+		exitFunc(1)
 	}
 	fileSize := stat.Size()
 	baseName := filepath.Base(localPath)
@@ -2536,14 +2482,14 @@ func executePushToAppliance(ctx context.Context, host, localPath, method, destPa
 				bar.Abort("Upload cancelled by user.")
 			}
 			fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-			os.Exit(130)
+			exitFunc(130)
 		}
 		if bar != nil {
 			bar.Abort(fmt.Sprintf("Upload failed: %v", err))
 		} else {
 			fmt.Fprintf(os.Stderr, "[ERROR] Upload failed: %v\n", err)
 		}
-		os.Exit(1)
+		exitFunc(1)
 	}
 	if bar != nil {
 		bar.Finish(fmt.Sprintf("File successfully pushed to %s (%s) at %s", targetKind, strings.ToUpper(string(methodUsed)), finalPath))
@@ -2569,7 +2515,7 @@ func executeDownloadFromAppliance(
 	method = strings.ToLower(strings.TrimSpace(method))
 	if method != "auto" && method != "icontrol" && method != "scp" && method != "ssh" {
 		fmt.Fprintf(os.Stderr, "[ERROR] Invalid download method %q. Valid methods: 'auto', 'icontrol', 'scp'\n", method)
-		os.Exit(1)
+		exitFunc(1)
 	}
 	if method == "ssh" {
 		method = "scp"
@@ -2577,7 +2523,7 @@ func executeDownloadFromAppliance(
 
 	if err := bigip.ValidateApplianceDownloadPath(remotePath); err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	if localDest == "" {
@@ -2688,14 +2634,14 @@ func executeDownloadFromAppliance(
 				bar.Abort("Download cancelled by user.")
 			}
 			fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
-			os.Exit(130)
+			exitFunc(130)
 		}
 		if bar != nil {
 			bar.Abort(fmt.Sprintf("Download failed: %v", err))
 		} else {
 			fmt.Fprintf(os.Stderr, "[ERROR] Download failed: %v\n", err)
 		}
-		os.Exit(1)
+		exitFunc(1)
 	}
 	if bar != nil {
 		bar.Finish(fmt.Sprintf("File successfully downloaded from %s (%s) to %s", targetKind, strings.ToUpper(string(methodUsed)), savedPath))
@@ -2769,27 +2715,6 @@ func handleDoctor(ctx context.Context, args []string) {
 
 	fmt.Println("\nDoctor audit complete.")
 	if hasError {
-		os.Exit(1)
-	}
-}
-
-// ----------------------------------------------------------------------------
-// Shell Tab Completion Command
-// ----------------------------------------------------------------------------
-
-func handleCompletion(args []string) {
-	if len(args) == 0 {
-		printCompletionUsage()
-		os.Exit(1)
-	}
-	if isHelpFlag(args[0]) {
-		printCompletionUsage()
-		return
-	}
-
-	shell := strings.ToLower(args[0])
-	if err := completion.Generate(shell, os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-		os.Exit(1)
+		exitFunc(1)
 	}
 }
