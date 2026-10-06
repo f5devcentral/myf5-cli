@@ -36,10 +36,16 @@ type SCPOptions struct {
 // DefaultSCPTimeout is the default connection timeout for SSH dial operations.
 const DefaultSCPTimeout = 30 * time.Second
 
-// CleanSSHHost strips URI schemes, ports, and trailing slashes from a host string.
+// CleanSSHHost strips URI schemes, ports, brackets, and trailing slashes from a host string.
+// It returns a normalized hostname or IP (without IPv6 brackets) suitable for net.JoinHostPort.
 func CleanSSHHost(rawHost string) (string, int) {
-	host := strings.TrimSpace(rawHost)
-	port := 22
+	_, host, port, _, err := ParseAndValidateApplianceHost(rawHost, 22)
+	if err == nil {
+		return host, port
+	}
+
+	host = strings.TrimSpace(rawHost)
+	port = 22
 	if strings.HasPrefix(host, "http://") {
 		host = strings.TrimPrefix(host, "http://")
 	} else if strings.HasPrefix(host, "https://") {
@@ -49,12 +55,13 @@ func CleanSSHHost(rawHost string) (string, int) {
 	}
 	host = strings.TrimRight(host, "/")
 
-	if h, pStr, err := net.SplitHostPort(host); err == nil {
+	if h, pStr, splitErr := net.SplitHostPort(host); splitErr == nil {
 		host = h
-		if p, err := strconv.Atoi(pStr); err == nil && p > 0 {
+		if p, atoiErr := strconv.Atoi(pStr); atoiErr == nil && p > 0 {
 			port = p
 		}
 	}
+	host = strings.Trim(host, "[]")
 	return host, port
 }
 

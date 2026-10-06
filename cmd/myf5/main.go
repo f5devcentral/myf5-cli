@@ -156,7 +156,7 @@ COMMANDS:
     push         Push software downloads or files to BIG-IP / BIG-IQ (auto failover)
     pull         Download files from BIG-IP / BIG-IQ (auto failover)
     doctor       Verify API credentials, DNS, and network firewall egress
-    completion   Generate shell tab completion script (bash, zsh, fish)
+    completion   Generate shell tab completion script (bash, zsh, fish, powershell)
     version      Print application version
 
 ZERO-SECRET SECURITY POLICY:
@@ -207,6 +207,8 @@ func handleDownloads(ctx context.Context, args []string) {
 	pushPort := 0
 	pushKey := ""
 	pushTarget := "BIG-IP"
+	pushCert := ""
+	pushCertKey := ""
 	var remaining []string
 
 	for i := 0; i < len(actionArgs); i++ {
@@ -280,6 +282,22 @@ func handleDownloads(ctx context.Context, args []string) {
 			}
 		} else if strings.HasPrefix(arg, "--push-target=") {
 			pushTarget = strings.TrimPrefix(arg, "--push-target=")
+		} else if arg == "--push-cert" {
+			if i+1 < len(actionArgs) {
+				pushCert = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--push-cert=") {
+			pushCert = strings.TrimPrefix(arg, "--push-cert=")
+		} else if arg == "--push-cert-key" || arg == "--push-key-file" {
+			if i+1 < len(actionArgs) {
+				pushCertKey = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--push-cert-key=") {
+			pushCertKey = strings.TrimPrefix(arg, "--push-cert-key=")
+		} else if strings.HasPrefix(arg, "--push-key-file=") {
+			pushCertKey = strings.TrimPrefix(arg, "--push-key-file=")
 		} else {
 			remaining = append(remaining, arg)
 		}
@@ -434,6 +452,12 @@ func handleDownloads(ctx context.Context, args []string) {
 		outPath := outputVal
 		if outPath == "" {
 			outPath = filepath.Join(getDefaultDownloadsDir(), filepath.Base(fileName))
+		} else {
+			if strings.HasSuffix(outPath, "/") || strings.HasSuffix(outPath, "\\") {
+				outPath = filepath.Join(outPath, filepath.Base(fileName))
+			} else if fi, err := os.Stat(outPath); err == nil && fi.IsDir() {
+				outPath = filepath.Join(outPath, filepath.Base(fileName))
+			}
 		}
 
 		client := getDownloadsClient()
@@ -481,7 +505,7 @@ func handleDownloads(ctx context.Context, args []string) {
 		bar.Finish(fmt.Sprintf("Download verified and complete: %s", outPath))
 		if pushHost != "" {
 			fmt.Printf("\n--- Automatic Appliance Push Requested ---\n")
-			executePushToAppliance(ctx, pushHost, outPath, pushMethod, pushDest, pushUser, pushPort, pushKey, pushTarget)
+			executePushToAppliance(ctx, pushHost, outPath, pushMethod, pushDest, pushUser, pushPort, pushKey, pushTarget, pushCert, pushCertKey)
 		}
 
 	case "browse":
@@ -1404,7 +1428,7 @@ func handleBIGIQ(ctx context.Context, args []string) {
 
 func handlePush(ctx context.Context, args []string) {
 	if len(args) < 2 {
-		fmt.Println("Usage: myf5 push <host> <file> [--method auto|icontrol|scp] [--dest <path>] [--target bigip|bigiq] [--user <user>] [--port <port>] [-i <key>]")
+		fmt.Println("Usage: myf5 push <host> <file> [--method auto|icontrol|scp] [--dest <path>] [--target bigip|bigiq] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]")
 		os.Exit(1)
 	}
 
@@ -1415,6 +1439,8 @@ func handlePush(ctx context.Context, args []string) {
 	destPath := ""
 	keyPath := ""
 	targetKind := "BIG-IP"
+	certPath := ""
+	certKeyPath := ""
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -1470,24 +1496,57 @@ func handlePush(ctx context.Context, args []string) {
 			if strings.EqualFold(targ, "bigiq") || strings.EqualFold(targ, "big-iq") {
 				targetKind = "BIG-IQ"
 			}
+		} else if arg == "--cert" {
+			if i+1 < len(args) {
+				certPath = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--cert=") {
+			certPath = strings.TrimPrefix(arg, "--cert=")
+		} else if arg == "--cert-key" || arg == "--key-file" {
+			if i+1 < len(args) {
+				certKeyPath = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--cert-key=") {
+			certKeyPath = strings.TrimPrefix(arg, "--cert-key=")
+		} else if strings.HasPrefix(arg, "--key-file=") {
+			certKeyPath = strings.TrimPrefix(arg, "--key-file=")
 		} else if !strings.HasPrefix(arg, "-") {
 			positional = append(positional, arg)
 		}
 	}
 
+	if certPath == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			certPath = os.Getenv("BIGIQ_CERT")
+		}
+		if certPath == "" {
+			certPath = os.Getenv("BIGIP_CERT")
+		}
+	}
+	if certKeyPath == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			certKeyPath = os.Getenv("BIGIQ_KEY")
+		}
+		if certKeyPath == "" {
+			certKeyPath = os.Getenv("BIGIP_KEY")
+		}
+	}
+
 	if len(positional) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: myf5 push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--target bigip|bigiq] ...\n")
+		fmt.Fprintf(os.Stderr, "Usage: myf5 push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--target bigip|bigiq] [--cert <cert>] [--cert-key <key>] ...\n")
 		os.Exit(1)
 	}
 
 	host := positional[0]
 	localFile := positional[1]
-	executePushToAppliance(ctx, host, localFile, method, destPath, user, port, keyPath, targetKind)
+	executePushToAppliance(ctx, host, localFile, method, destPath, user, port, keyPath, targetKind, certPath, certKeyPath)
 }
 
 func handlePull(ctx context.Context, args []string) {
 	if len(args) < 2 {
-		fmt.Println("Usage: myf5 pull <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--target bigip|bigiq] [--user <user>] [--port <port>] [-i <key>]")
+		fmt.Println("Usage: myf5 pull <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--target bigip|bigiq] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]")
 		os.Exit(1)
 	}
 
@@ -1498,6 +1557,8 @@ func handlePull(ctx context.Context, args []string) {
 	localDest := ""
 	keyPath := ""
 	targetKind := "BIG-IP"
+	certPath := ""
+	certKeyPath := ""
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -1555,19 +1616,52 @@ func handlePull(ctx context.Context, args []string) {
 			if strings.EqualFold(targ, "bigiq") || strings.EqualFold(targ, "big-iq") {
 				targetKind = "BIG-IQ"
 			}
+		} else if arg == "--cert" {
+			if i+1 < len(args) {
+				certPath = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--cert=") {
+			certPath = strings.TrimPrefix(arg, "--cert=")
+		} else if arg == "--cert-key" || arg == "--key-file" {
+			if i+1 < len(args) {
+				certKeyPath = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--cert-key=") {
+			certKeyPath = strings.TrimPrefix(arg, "--cert-key=")
+		} else if strings.HasPrefix(arg, "--key-file=") {
+			certKeyPath = strings.TrimPrefix(arg, "--key-file=")
 		} else if !strings.HasPrefix(arg, "-") {
 			positional = append(positional, arg)
 		}
 	}
 
+	if certPath == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			certPath = os.Getenv("BIGIQ_CERT")
+		}
+		if certPath == "" {
+			certPath = os.Getenv("BIGIP_CERT")
+		}
+	}
+	if certKeyPath == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			certKeyPath = os.Getenv("BIGIQ_KEY")
+		}
+		if certKeyPath == "" {
+			certKeyPath = os.Getenv("BIGIP_KEY")
+		}
+	}
+
 	if len(positional) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: myf5 pull <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--target bigip|bigiq] ...\n")
+		fmt.Fprintf(os.Stderr, "Usage: myf5 pull <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--target bigip|bigiq] [--cert <cert>] [--cert-key <key>] ...\n")
 		os.Exit(1)
 	}
 
 	host := positional[0]
 	remoteFile := positional[1]
-	executeDownloadFromAppliance(ctx, host, remoteFile, localDest, method, user, port, keyPath, targetKind)
+	executeDownloadFromAppliance(ctx, host, remoteFile, localDest, method, user, port, keyPath, targetKind, certPath, certKeyPath)
 }
 
 func handleAppliance(ctx context.Context, targetKind string, args []string) {
@@ -1578,9 +1672,9 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	if len(args) == 0 {
 		if strings.EqualFold(targetKind, "BIG-IQ") {
-			fmt.Printf("Usage: myf5 %s [ready <host> | info <target> | serial <target> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--json]\n", cmdName)
+			fmt.Printf("Usage: myf5 %s [ready <host> | info <target> | serial <target> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--json]\n", cmdName)
 		} else {
-			fmt.Printf("Usage: myf5 %s [ready <host> | info <target> | serial <target> | qkview <host> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--json] [--keep-remote]\n", cmdName)
+			fmt.Printf("Usage: myf5 %s [ready <host> | info <target> | serial <target> | qkview <host> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--json] [--keep-remote]\n", cmdName)
 		}
 		os.Exit(1)
 	}
@@ -1594,6 +1688,8 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	method := "auto"
 	destPath := ""
 	keyPath := ""
+	certPath := ""
+	certKeyPath := ""
 	keepRemote := false
 	jsonOutput := false
 
@@ -1640,12 +1736,45 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			}
 		} else if strings.HasPrefix(arg, "--identity=") {
 			keyPath = strings.TrimPrefix(arg, "--identity=")
+		} else if arg == "--cert" {
+			if i+1 < len(actionArgs) {
+				certPath = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--cert=") {
+			certPath = strings.TrimPrefix(arg, "--cert=")
+		} else if arg == "--cert-key" || arg == "--key-file" {
+			if i+1 < len(actionArgs) {
+				certKeyPath = actionArgs[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--cert-key=") {
+			certKeyPath = strings.TrimPrefix(arg, "--cert-key=")
+		} else if strings.HasPrefix(arg, "--key-file=") {
+			certKeyPath = strings.TrimPrefix(arg, "--key-file=")
 		} else if arg == "--keep-remote" || arg == "--no-delete" || arg == "--no-cleanup" {
 			keepRemote = true
 		} else if arg == "--json" {
 			jsonOutput = true
 		} else if !strings.HasPrefix(arg, "-") {
 			positional = append(positional, arg)
+		}
+	}
+
+	if certPath == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			certPath = os.Getenv("BIGIQ_CERT")
+		}
+		if certPath == "" {
+			certPath = os.Getenv("BIGIP_CERT")
+		}
+	}
+	if certKeyPath == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			certKeyPath = os.Getenv("BIGIQ_KEY")
+		}
+		if certKeyPath == "" {
+			certKeyPath = os.Getenv("BIGIP_KEY")
 		}
 	}
 
@@ -1661,7 +1790,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	switch action {
 	case "ready":
 		if len(positional) < 1 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s ready <host> [--user <user>] [--port <port>]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s ready <host> [--user <user>] [--port <port>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
 			os.Exit(1)
 		}
 		host := positional[0]
@@ -1684,7 +1813,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		if pw == "" {
 			pw = os.Getenv("BIGIP_PASSWORD")
 		}
-		if pw == "" && term.IsTerminal(int(os.Stdin.Fd())) {
+		if pw == "" && certPath == "" && term.IsTerminal(int(os.Stdin.Fd())) {
 			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
 			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
@@ -1694,12 +1823,20 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 				auth.ZeroBytes(bytePw)
 			}
 		}
-		if pw == "" {
-			fmt.Fprintf(os.Stderr, "[ERROR] Password required. Set BIGIP_PASSWORD / BIGIQ_PASSWORD or enter at prompt.\n")
+		if pw == "" && certPath == "" {
+			fmt.Fprintf(os.Stderr, "[ERROR] Password or client certificate required. Set BIGIP_PASSWORD / BIGIQ_PASSWORD / BIGIP_CERT or enter at prompt.\n")
 			os.Exit(1)
 		}
 
-		client := bigip.NewClient(host, port, user, pw)
+		client, err := bigip.NewClientWithOptions(bigip.ClientOptions{
+			Host:           host,
+			Port:           port,
+			Username:       user,
+			Password:       pw,
+			ClientCertPath: certPath,
+			ClientKeyPath:  certKeyPath,
+		})
+		checkErr(ctx, err, "Failed to initialize appliance client")
 		ready, err := client.CheckReady(ctx)
 		checkErr(ctx, err, "Ready check failed")
 		if ready {
@@ -1710,11 +1847,11 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	case "info", "system-info", "sysinfo":
 		if len(positional) < 1 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s info <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s info <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
 			os.Exit(1)
 		}
 		target := positional[0]
-		info := getSystemInfoTarget(ctx, target, targetKind, user, port, keyPath, method)
+		info := getSystemInfoTarget(ctx, target, targetKind, user, port, keyPath, method, certPath, certKeyPath)
 		if jsonOutput {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
@@ -1727,11 +1864,11 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	case "serial", "sn", "serialnumber":
 		if len(positional) < 1 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s serial <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s serial <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
 			os.Exit(1)
 		}
 		target := positional[0]
-		info := getSystemInfoTarget(ctx, target, targetKind, user, port, keyPath, method)
+		info := getSystemInfoTarget(ctx, target, targetKind, user, port, keyPath, method, certPath, certKeyPath)
 		sn := info.PreferredSerialNumber()
 		if jsonOutput {
 			res := map[string]string{
@@ -1756,25 +1893,25 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	case "push", "upload":
 		if len(positional) < 2 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
 			os.Exit(1)
 		}
 		host := positional[0]
 		localFile := positional[1]
-		executePushToAppliance(ctx, host, localFile, method, destPath, user, port, keyPath, targetKind)
+		executePushToAppliance(ctx, host, localFile, method, destPath, user, port, keyPath, targetKind, certPath, certKeyPath)
 
 	case "download", "pull", "fetch":
 		if len(positional) < 2 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
 			os.Exit(1)
 		}
 		host := positional[0]
 		remoteFile := positional[1]
-		executeDownloadFromAppliance(ctx, host, remoteFile, destPath, method, user, port, keyPath, targetKind)
+		executeDownloadFromAppliance(ctx, host, remoteFile, destPath, method, user, port, keyPath, targetKind, certPath, certKeyPath)
 
 	case "qkview":
 		if len(positional) < 1 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s qkview <host> [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--keep-remote]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s qkview <host> [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--keep-remote]\n", cmdName)
 			os.Exit(1)
 		}
 		host := positional[0]
@@ -1793,22 +1930,8 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			}
 		}
 
-		if pw == "" && keyPath == "" {
-			home, _ := os.UserHomeDir()
-			hasKey := false
-			if home != "" {
-				for _, k := range []string{filepath.Join(home, ".ssh", "id_ed25519"), filepath.Join(home, ".ssh", "id_rsa")} {
-					if _, err := os.Stat(k); err == nil {
-						hasKey = true
-						break
-					}
-				}
-			}
-			if os.Getenv("SSH_AUTH_SOCK") != "" {
-				hasKey = true
-			}
-
-			if !hasKey && term.IsTerminal(int(os.Stdin.Fd())) {
+		if pw == "" && keyPath == "" && certPath == "" {
+			if !hasDefaultSSHAuth() && term.IsTerminal(int(os.Stdin.Fd())) {
 				fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
 				bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
 				fmt.Println()
@@ -1839,13 +1962,15 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		}
 
 		qkOpts := bigip.TransferOptions{
-			TargetType:   targetKind,
-			Method:       transferMethod,
-			Username:     user,
-			Password:     pw,
-			Port:         port,
-			IdentityFile: keyPath,
-			Timeout:      30 * time.Second,
+			TargetType:     targetKind,
+			Method:         transferMethod,
+			Username:       user,
+			Password:       pw,
+			Port:           port,
+			IdentityFile:   keyPath,
+			ClientCertPath: certPath,
+			ClientKeyPath:  certKeyPath,
+			Timeout:        30 * time.Second,
 		}
 
 		spinner := progress.NewSpinner(fmt.Sprintf("Generating diagnostic QKView on %s", host))
@@ -1915,7 +2040,27 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	}
 }
 
-func getSystemInfoTarget(ctx context.Context, target, targetKind, user string, port int, keyPath, method string) *bigip.SystemInfo {
+func hasDefaultSSHAuth() bool {
+	if os.Getenv("SSH_AUTH_SOCK") != "" {
+		return true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	for _, k := range []string{
+		filepath.Join(home, ".ssh", "id_ed25519"),
+		filepath.Join(home, ".ssh", "id_rsa"),
+		filepath.Join(home, ".ssh", "id_ecdsa"),
+	} {
+		if _, err := os.Stat(k); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func getSystemInfoTarget(ctx context.Context, target, targetKind, user string, port int, keyPath, method, certPath, certKeyPath string) *bigip.SystemInfo {
 	if fi, err := os.Stat(target); err == nil && !fi.IsDir() {
 		info, err := bigip.InspectQKView(target)
 		checkErr(ctx, err, fmt.Sprintf("Failed to inspect QKView %s", target))
@@ -1939,6 +2084,23 @@ func getSystemInfoTarget(ctx context.Context, target, targetKind, user string, p
 		}
 	}
 
+	if certPath == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			certPath = os.Getenv("BIGIQ_CERT")
+		}
+		if certPath == "" {
+			certPath = os.Getenv("BIGIP_CERT")
+		}
+	}
+	if certKeyPath == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			certKeyPath = os.Getenv("BIGIQ_KEY")
+		}
+		if certKeyPath == "" {
+			certKeyPath = os.Getenv("BIGIP_KEY")
+		}
+	}
+
 	pw := ""
 	if strings.EqualFold(targetKind, "BIG-IQ") {
 		pw = os.Getenv("BIGIQ_PASSWORD")
@@ -1946,22 +2108,24 @@ func getSystemInfoTarget(ctx context.Context, target, targetKind, user string, p
 	if pw == "" {
 		pw = os.Getenv("BIGIP_PASSWORD")
 	}
-	if pw == "" && keyPath == "" && term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
-		bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Println()
-		if err == nil {
-			pw = strings.TrimSpace(string(bytePw))
-			auth.ZeroBytes(bytePw)
+	if pw == "" && keyPath == "" && certPath == "" {
+		if !hasDefaultSSHAuth() && term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
+			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err == nil {
+				pw = strings.TrimSpace(string(bytePw))
+				auth.ZeroBytes(bytePw)
+			}
 		}
 	}
 
-	info, err := resolveApplianceSystemInfo(ctx, host, port, user, pw, keyPath, method, targetKind)
+	info, err := resolveApplianceSystemInfo(ctx, host, port, user, pw, keyPath, method, targetKind, certPath, certKeyPath)
 	checkErr(ctx, err, fmt.Sprintf("Failed to retrieve system info from %s", host))
 	return info
 }
 
-func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user, pw, keyPath, method, targetKind string) (*bigip.SystemInfo, error) {
+func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user, pw, keyPath, method, targetKind, certPath, certKeyPath string) (*bigip.SystemInfo, error) {
 	if method == "scp" || method == "ssh" {
 		opts := bigip.SCPOptions{
 			Host:     host,
@@ -1974,10 +2138,24 @@ func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user
 		return bigip.GetSystemInfoSSH(ctx, opts)
 	}
 
-	client := bigip.NewClient(host, port, user, pw)
-	info, err := client.GetSystemInfo(ctx)
+	client, err := bigip.NewClientWithOptions(bigip.ClientOptions{
+		Host:           host,
+		Port:           port,
+		Username:       user,
+		Password:       pw,
+		ClientCertPath: certPath,
+		ClientKeyPath:  certKeyPath,
+	})
 	if err == nil {
-		return info, nil
+		info, err := client.GetSystemInfo(ctx)
+		if err == nil {
+			return info, nil
+		}
+		if method != "auto" {
+			return nil, err
+		}
+	} else if method != "auto" {
+		return nil, err
 	}
 
 	if method == "auto" {
@@ -2001,7 +2179,7 @@ func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user
 
 // executePushToAppliance handles streaming upload of a local file to a BIG-IP or BIG-IQ appliance
 // via either iControl REST chunked transfer or SCP over SSH, with automatic seamless failover.
-func executePushToAppliance(ctx context.Context, host, localPath, method, destPath, user string, port int, keyPath, targetKind string) {
+func executePushToAppliance(ctx context.Context, host, localPath, method, destPath, user string, port int, keyPath, targetKind, certPath, certKeyPath string) {
 	if targetKind == "" {
 		targetKind = "BIG-IP"
 	}
@@ -2041,6 +2219,23 @@ func executePushToAppliance(ctx context.Context, host, localPath, method, destPa
 		}
 	}
 
+	if certPath == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			certPath = os.Getenv("BIGIQ_CERT")
+		}
+		if certPath == "" {
+			certPath = os.Getenv("BIGIP_CERT")
+		}
+	}
+	if certKeyPath == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			certKeyPath = os.Getenv("BIGIQ_KEY")
+		}
+		if certKeyPath == "" {
+			certKeyPath = os.Getenv("BIGIP_KEY")
+		}
+	}
+
 	pw := ""
 	if strings.EqualFold(targetKind, "BIG-IQ") {
 		pw = os.Getenv("BIGIQ_PASSWORD")
@@ -2057,22 +2252,8 @@ func executePushToAppliance(ctx context.Context, host, localPath, method, destPa
 		}
 	}
 
-	if pw == "" && keyPath == "" {
-		home, _ := os.UserHomeDir()
-		hasKey := false
-		if home != "" {
-			for _, k := range []string{filepath.Join(home, ".ssh", "id_ed25519"), filepath.Join(home, ".ssh", "id_rsa")} {
-				if _, err := os.Stat(k); err == nil {
-					hasKey = true
-					break
-				}
-			}
-		}
-		if os.Getenv("SSH_AUTH_SOCK") != "" {
-			hasKey = true
-		}
-
-		if !hasKey && term.IsTerminal(int(os.Stdin.Fd())) {
+	if pw == "" && keyPath == "" && certPath == "" {
+		if !hasDefaultSSHAuth() && term.IsTerminal(int(os.Stdin.Fd())) {
 			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
 			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
@@ -2085,14 +2266,16 @@ func executePushToAppliance(ctx context.Context, host, localPath, method, destPa
 	}
 
 	opts := bigip.TransferOptions{
-		TargetType:   targetKind,
-		Method:       bigip.TransferMethod(method),
-		Username:     user,
-		Password:     pw,
-		Port:         port,
-		IdentityFile: keyPath,
-		DestDir:      destPath,
-		Timeout:      30 * time.Second,
+		TargetType:     targetKind,
+		Method:         bigip.TransferMethod(method),
+		Username:       user,
+		Password:       pw,
+		Port:           port,
+		IdentityFile:   keyPath,
+		ClientCertPath: certPath,
+		ClientKeyPath:  certKeyPath,
+		DestDir:        destPath,
+		Timeout:        30 * time.Second,
 	}
 
 	fmt.Printf("Pushing %s (%s) to %s (%s) via %s...\n", baseName, downloads.FormatBytes(fileSize), targetKind, host, strings.ToUpper(method))
@@ -2143,7 +2326,7 @@ func executeDownloadFromAppliance(
 	ctx context.Context,
 	host, remotePath, localDest, method, user string,
 	port int,
-	keyPath, targetKind string,
+	keyPath, targetKind, certPath, certKeyPath string,
 ) {
 	if targetKind == "" {
 		targetKind = "BIG-IP"
@@ -2189,6 +2372,23 @@ func executeDownloadFromAppliance(
 		}
 	}
 
+	if certPath == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			certPath = os.Getenv("BIGIQ_CERT")
+		}
+		if certPath == "" {
+			certPath = os.Getenv("BIGIP_CERT")
+		}
+	}
+	if certKeyPath == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			certKeyPath = os.Getenv("BIGIQ_KEY")
+		}
+		if certKeyPath == "" {
+			certKeyPath = os.Getenv("BIGIP_KEY")
+		}
+	}
+
 	pw := ""
 	if strings.EqualFold(targetKind, "BIG-IQ") {
 		pw = os.Getenv("BIGIQ_PASSWORD")
@@ -2205,22 +2405,8 @@ func executeDownloadFromAppliance(
 		}
 	}
 
-	if pw == "" && keyPath == "" {
-		home, _ := os.UserHomeDir()
-		hasKey := false
-		if home != "" {
-			for _, k := range []string{filepath.Join(home, ".ssh", "id_ed25519"), filepath.Join(home, ".ssh", "id_rsa")} {
-				if _, err := os.Stat(k); err == nil {
-					hasKey = true
-					break
-				}
-			}
-		}
-		if os.Getenv("SSH_AUTH_SOCK") != "" {
-			hasKey = true
-		}
-
-		if !hasKey && term.IsTerminal(int(os.Stdin.Fd())) {
+	if pw == "" && keyPath == "" && certPath == "" {
+		if !hasDefaultSSHAuth() && term.IsTerminal(int(os.Stdin.Fd())) {
 			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
 			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
@@ -2233,13 +2419,15 @@ func executeDownloadFromAppliance(
 	}
 
 	opts := bigip.TransferOptions{
-		TargetType:   targetKind,
-		Method:       bigip.TransferMethod(method),
-		Username:     user,
-		Password:     pw,
-		Port:         port,
-		IdentityFile: keyPath,
-		Timeout:      30 * time.Second,
+		TargetType:     targetKind,
+		Method:         bigip.TransferMethod(method),
+		Username:       user,
+		Password:       pw,
+		Port:           port,
+		IdentityFile:   keyPath,
+		ClientCertPath: certPath,
+		ClientKeyPath:  certKeyPath,
+		Timeout:        30 * time.Second,
 	}
 
 	fmt.Printf("Downloading %s from %s (%s) via %s...\n", remotePath, targetKind, host, strings.ToUpper(method))
@@ -2364,7 +2552,7 @@ HTTPS reachability. Takes no arguments and changes nothing.
 
 func handleCompletion(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, `Usage: myf5 completion [bash | zsh | fish]
+		fmt.Fprintf(os.Stderr, `Usage: myf5 completion [bash | zsh | fish | powershell]
 
 Generate shell completion scripts to enable tab autocompletion.
 
@@ -2383,6 +2571,12 @@ EXAMPLES:
 
   # Fish (persistent installation)
   myf5 completion fish > ~/.config/fish/completions/myf5.fish
+
+  # PowerShell (current session)
+  myf5 completion powershell | Out-String | Invoke-Expression
+
+  # PowerShell (profile)
+  myf5 completion powershell >> $PROFILE
 `)
 		os.Exit(1)
 	}

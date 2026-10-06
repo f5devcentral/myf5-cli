@@ -141,7 +141,7 @@ func TestGetSystemInfoTarget_QKViewFile(t *testing.T) {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
-	info := getSystemInfoTarget(context.Background(), tmpFile, "BIG-IP", "", 0, "", "auto")
+	info := getSystemInfoTarget(context.Background(), tmpFile, "BIG-IP", "", 0, "", "auto", "", "")
 	if info == nil {
 		t.Fatal("getSystemInfoTarget returned nil")
 	}

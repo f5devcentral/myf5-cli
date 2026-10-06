@@ -65,6 +65,46 @@ func TestDownloadFileWithChecksum(t *testing.T) {
 	}
 }
 
+func TestDownloadFile_DirectoryTarget(t *testing.T) {
+	testData := []byte("directory-target-data")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(testData)))
+		w.Write(testData)
+	}))
+	defer server.Close()
+
+	tempDir := t.TempDir()
+	// Download into directory with trailing slash
+	err := DownloadFile(context.Background(), server.URL+"/sample.iso", tempDir+"/", "", "", nil)
+	if err != nil {
+		t.Fatalf("DownloadFile into dir trailing slash failed: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(tempDir, "sample.iso"))
+	if err != nil {
+		t.Fatalf("failed to read downloaded file in dir: %v", err)
+	}
+	if string(content) != string(testData) {
+		t.Errorf("content mismatch, got %s, want %s", string(content), string(testData))
+	}
+
+	// Download into existing directory without trailing slash
+	subDir := filepath.Join(tempDir, "subdir")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("failed to create subdir: %v", err)
+	}
+	err = DownloadFile(context.Background(), server.URL+"/another.iso", subDir, "", "", nil)
+	if err != nil {
+		t.Fatalf("DownloadFile into existing subdir failed: %v", err)
+	}
+	content2, err := os.ReadFile(filepath.Join(subDir, "another.iso"))
+	if err != nil {
+		t.Fatalf("failed to read downloaded file in subdir: %v", err)
+	}
+	if string(content2) != string(testData) {
+		t.Errorf("content mismatch in subdir")
+	}
+}
+
 func TestFormatBytes(t *testing.T) {
 	if FormatBytes(500) != "500 B" {
 		t.Errorf("FormatBytes(500) = %s, want 500 B", FormatBytes(500))
