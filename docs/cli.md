@@ -228,6 +228,23 @@ against the rate limit.
 > cannot open a presales case; use `"General Problem"` or another reason from
 > case metadata.
 
+#### `wizard` (or top-level `myf5 wizard`)
+Launches the interactive, step-by-step Support Case Creation Wizard with appliance auto-detection and dry-run safety gates.
+```bash
+myf5 cases wizard
+# or simply:
+myf5 wizard
+# or via flag:
+myf5 cases create --wizard
+```
+
+The wizard guides you through:
+1. **Appliance & Diagnostic Auto-Detection**: Optionally connects to a live BIG-IP appliance or inspects a local `.qkview` diagnostic tarball to automatically extract product family, product name, TMOS version, serial number / registration key, and hostname.
+2. **Product & Entitlement Selection**: Prompts for required fields with sane defaults, enforcing serial numbers for hardware appliances or subscriptions for NGINX / Aspen Mesh.
+3. **Priority & Problem Description**: Guided selection of case priority (`1 - Site Down` to `4 - General Assistance`) and reason for contact.
+4. **Contact & Environment**: Automatically detects local system timezone in F5 format `(GMT -04:00) EDT`.
+5. **Review & Dry-Run Safety Gate**: Displays a formatted review box and prompts with `[d] Dry Run`, `[s] Submit`, or `[c] Cancel` (default). In dry-run mode, validates all required fields without submitting any data to F5 Support.
+
 ---
 
 ## 3. `myf5 ihealth`

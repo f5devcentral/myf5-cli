@@ -194,6 +194,13 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
   --priority "4 - General Assistance" --reason "General Problem" \
   --email you@example.com \
   --timezone "(GMT -5:00) US/Eastern - Eastern Standard Time"
+
+# Alternatively, launch the interactive step-by-step case creation wizard.
+# Supports auto-detecting serials/versions from live BIG-IPs or .qkview files,
+# auto-detects your system timezone, and includes a dry-run review safety gate:
+./bin/myf5 cases wizard
+# Or top-level shortcut:
+./bin/myf5 wizard
 ```
 
 ### 4. F5 iHealth

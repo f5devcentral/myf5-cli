@@ -91,6 +91,8 @@ func executeSubcommand(ctx context.Context, subcommand string, args []string) {
 		handleDownloads(ctx, args)
 	case "cases", "case":
 		handleCases(ctx, args)
+	case "wizard":
+		handleCases(ctx, append([]string{"wizard"}, args...))
 	case "ihealth":
 		handleIHealth(ctx, args)
 	case "bigip":
@@ -132,7 +134,7 @@ func normalizeHelpArgs(subcommand string, args []string) []string {
 		return args
 	}
 	switch subcommand {
-	case "doctor", "interactive", "shell", "repl", "i":
+	case "doctor", "interactive", "shell", "repl", "i", "wizard":
 		return args
 	default:
 		return nil
@@ -144,7 +146,7 @@ func printCommandHelp(subcommand string) {
 	switch subcommand {
 	case "downloads", "download":
 		printDownloadsUsage()
-	case "cases", "case":
+	case "cases", "case", "wizard":
 		printCasesUsage()
 	case "ihealth":
 		printIHealthUsage()
@@ -188,6 +190,7 @@ USAGE:
     myf5 cases get <case-number> [--json]
     myf5 cases comment <case-number> <note>
     myf5 cases create [flags]
+    myf5 cases wizard                       (guided interactive case creator)
     myf5 cases metadata
 
 Run 'myf5 cases create --help' for details on creating support cases.`)
@@ -305,7 +308,8 @@ USAGE:
 
 COMMANDS:
     downloads    Browse MyF5 catalog and stream multi-GB software images
-    cases        View and manage MyF5 support cases
+    cases        View and manage MyF5 support cases (wizard available)
+    wizard       Launch interactive guided support case creation wizard
     ihealth      Upload and inspect QKView diagnostic bundles on iHealth
     bigip        Manage BIG-IP TMOS appliances (ready check, info, serial, QKView generation, push, download)
     bigiq        Manage BIG-IQ appliances (ready check, info, serial, push, download)
@@ -1221,16 +1225,32 @@ func handleCases(ctx context.Context, args []string) {
 
 	action := args[0]
 
-	creds, err := auth.ResolveCredentials("default")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-		exitFunc(1)
+	var client *cases.Client
+	if action == "wizard" || action == "new" {
+		creds, err := auth.ResolveCredentials("default")
+		if err == nil {
+			token, aErr := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
+			if aErr == nil {
+				client = cases.NewClientWithKey(token, "", creds.APIKey)
+			}
+		}
+	} else {
+		creds, err := auth.ResolveCredentials("default")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			exitFunc(1)
+		}
+		token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
+		checkErr(ctx, err, "Authentication failed")
+		client = cases.NewClientWithKey(token, "", creds.APIKey)
 	}
-	token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
-	checkErr(ctx, err, "Authentication failed")
-	client := cases.NewClientWithKey(token, "", creds.APIKey)
 
 	switch action {
+	case "wizard", "new":
+		if err := RunCaseWizard(ctx, os.Stdin, os.Stdout, client); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			exitFunc(1)
+		}
 	case "list":
 		// Closed cases are hidden by default because the open ones are what a
 		// person normally wants. Without --all there was no way to see a closed
@@ -1357,7 +1377,10 @@ func printCaseDetail(d *cases.CaseDetail) {
 
 const caseCreateUsage = `Usage: myf5 cases create [flags]
 
-Opens a MyF5 support case. All flags below are required by the API.
+Opens a MyF5 support case. To launch the guided step-by-step wizard instead,
+run 'myf5 cases wizard' or 'myf5 cases create --wizard'.
+
+All flags below are required by the API when not using the wizard:
 
   --family <s>        Product family, e.g. "BIG-IP"
   --product <s>       Product within the family, e.g. "BIG-IP LTM"
@@ -1381,6 +1404,7 @@ Opens a MyF5 support case. All flags below are required by the API.
   --timezone <s>      e.g. "(GMT -5:00) US/Eastern - Eastern Standard Time"
 
 Optional:
+  --wizard                  Launch the interactive step-by-step wizard
   --hostname <s>            Affected hostname
   --customer-ticket <s>     Your own ticket reference
   --dry-run                 Print the payload and exit without creating
@@ -1392,6 +1416,15 @@ Copy them from an existing case ('myf5 cases get <num>') until it returns.`
 
 func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) {
 	if len(args) == 0 {
+		if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+			fmt.Println("No flags provided. Launching interactive Support Case Wizard...")
+			fmt.Println()
+			if err := RunCaseWizard(ctx, os.Stdin, os.Stdout, client); err != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+				exitFunc(1)
+			}
+			return
+		}
 		fmt.Println(caseCreateUsage)
 		exitFunc(1)
 	}
@@ -1418,6 +1451,13 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 
 	for i := 0; i < len(args); i++ {
 		a := args[i]
+		if a == "--wizard" || a == "-w" {
+			if err := RunCaseWizard(ctx, os.Stdin, os.Stdout, client); err != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+				exitFunc(1)
+			}
+			return
+		}
 		if a == "--dry-run" {
 			dryRun = true
 			continue
