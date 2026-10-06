@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -133,11 +134,20 @@ func validateHostname(h string) error {
 
 // ParseAndValidateApplianceHost extracts scheme, normalized host, and port, validating the host.
 func ParseAndValidateApplianceHost(rawHost string, defaultPort int) (scheme, cleanHost string, port int, isIPv6 bool, err error) {
-	s := strings.TrimSpace(rawHost)
 	scheme = "https"
+	s := strings.TrimSpace(rawHost)
 	if strings.HasPrefix(s, "http://") {
+		trimmed := strings.TrimPrefix(s, "http://")
+		hostPart := trimmed
+		if h, _, splitErr := net.SplitHostPort(trimmed); splitErr == nil {
+			hostPart = h
+		}
+		hostPart = strings.Trim(hostPart, "[]")
+		if hostPart != "127.0.0.1" && hostPart != "::1" && hostPart != "localhost" {
+			return "", "", 0, false, fmt.Errorf("unencrypted HTTP is forbidden: appliance communication requires HTTPS (use https://%s or omit the scheme)", trimmed)
+		}
 		scheme = "http"
-		s = strings.TrimPrefix(s, "http://")
+		s = trimmed
 	} else if strings.HasPrefix(s, "https://") {
 		scheme = "https"
 		s = strings.TrimPrefix(s, "https://")
@@ -755,6 +765,61 @@ func (c *Client) DeleteQKView(ctx context.Context, remoteFilename string) error 
 	}
 
 	return nil
+}
+
+// GetEndpointExample queries the BIG-IP iControl REST `/example` endpoint for a given URI.
+// On BIG-IP, appending `/example` to any REST worker endpoint returns the JSON template / schema
+// describing the expected request body, parameters, and response attributes.
+func (c *Client) GetEndpointExample(ctx context.Context, endpoint string) ([]byte, error) {
+	p := strings.TrimSpace(endpoint)
+	if p == "" {
+		return nil, errors.New("endpoint path cannot be empty")
+	}
+
+	// Clean leading and trailing slashes for consistent parsing
+	p = strings.TrimPrefix(p, "/")
+	p = strings.TrimSuffix(p, "/")
+
+	// If it doesn't start with mgmt/, prepend mgmt/
+	if !strings.HasPrefix(p, "mgmt/") {
+		p = "mgmt/" + p
+	}
+
+	// If it doesn't already end with /example, append /example
+	if !strings.HasSuffix(p, "/example") {
+		p = p + "/example"
+	}
+
+	fullURL := fmt.Sprintf("%s/%s", c.BaseURL(), p)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request for example endpoint: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	c.setAuth(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch example for %s: %w", p, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response from %s: %w", p, err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("example request to %s returned HTTP %d: %s", p, resp.StatusCode, string(body))
+	}
+
+	// Indent JSON if valid
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, body, "", "  "); err == nil {
+		return pretty.Bytes(), nil
+	}
+
+	return body, nil
 }
 
 func (c *Client) setAuth(req *http.Request) {

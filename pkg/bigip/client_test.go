@@ -49,7 +49,7 @@ func TestBaseURLAndURLNormalization(t *testing.T) {
 		{"10.1.1.4", 443, "https://10.1.1.4"},
 		{"https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com/", 443, "https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com"},
 		{"aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com", 443, "https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com"},
-		{"http://10.1.1.4", 80, "http://10.1.1.4"},
+		{"http://127.0.0.1:8080", 8080, "http://127.0.0.1:8080"},
 		{"10.1.1.4:8443", 0, "https://10.1.1.4:8443"},
 		{"https://bigip.lab.local:8443/", 0, "https://bigip.lab.local:8443"},
 	}
@@ -262,8 +262,9 @@ func TestParseAndValidateApplianceHost(t *testing.T) {
 		wantErr     bool
 	}{
 		{"Plain IPv4", "10.1.1.4", 443, "https", "10.1.1.4", 443, false, false},
-		{"HTTPS URL with port", "https://10.1.1.4:8443/", 443, "https", "10.1.1.4", 8443, false, false},
-		{"HTTP URL default port", "http://appliance.lab.local", 0, "http", "appliance.lab.local", 80, false, false},
+		{"HTTP non-loopback forbidden", "http://appliance.lab.local", 0, "", "", 0, false, true},
+		{"HTTP loopback IPv4 allowed for mock tests", "http://127.0.0.1:8080", 0, "http", "127.0.0.1", 8080, false, false},
+		{"HTTP loopback localhost allowed for mock tests", "http://localhost:8080", 0, "http", "localhost", 8080, false, false},
 		{"SSH URL custom port", "ssh://[2001:db8::1]:2222/", 22, "ssh", "2001:db8::1", 2222, true, false},
 		{"IPv6 bracketed with port", "[::1]:9443", 443, "https", "::1", 9443, true, false},
 		{"IPv6 unbracketed without port", "2001:db8::1", 443, "https", "2001:db8::1", 443, true, false},
@@ -363,5 +364,67 @@ func TestCreateQKViewTaskWithOptions(t *testing.T) {
 	}
 	if !strings.Contains(receivedBody, `"-s0"`) {
 		t.Errorf("expected request body to contain -s0 option, got %s", receivedBody)
+	}
+}
+
+func TestGetEndpointExample(t *testing.T) {
+	mockJSON := `{"name":"pool_1","members":[{"name":"node1:80"}]}`
+	var requestedPath string
+	var authHeader string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		authHeader = r.Header.Get("Authorization")
+		if r.URL.Path == "/mgmt/tm/ltm/pool/example" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(mockJSON))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	// 1. Test normalization with "tm/ltm/pool"
+	out, err := c.GetEndpointExample(context.Background(), "tm/ltm/pool")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if requestedPath != "/mgmt/tm/ltm/pool/example" {
+		t.Errorf("requestedPath = %q, want /mgmt/tm/ltm/pool/example", requestedPath)
+	}
+	if !strings.HasPrefix(authHeader, "Basic ") {
+		t.Errorf("missing or invalid auth header: %q", authHeader)
+	}
+	if !strings.Contains(string(out), "  \"name\": \"pool_1\"") {
+		t.Errorf("expected pretty-printed JSON, got:\n%s", string(out))
+	}
+
+	// 2. Test already with /mgmt/ and /example
+	_, err = c.GetEndpointExample(context.Background(), "/mgmt/tm/ltm/pool/example/")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if requestedPath != "/mgmt/tm/ltm/pool/example" {
+		t.Errorf("requestedPath = %q, want /mgmt/tm/ltm/pool/example", requestedPath)
+	}
+
+	// 3. Test 404
+	_, err = c.GetEndpointExample(context.Background(), "tm/nonexistent")
+	if err == nil {
+		t.Errorf("expected 404 error, got nil")
+	}
+
+	// 4. Test empty endpoint
+	_, err = c.GetEndpointExample(context.Background(), "   ")
+	if err == nil {
+		t.Errorf("expected error on empty endpoint, got nil")
 	}
 }
