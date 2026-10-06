@@ -1416,15 +1416,6 @@ Copy them from an existing case ('myf5 cases get <num>') until it returns.`
 
 func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) {
 	if len(args) == 0 {
-		if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
-			fmt.Println("No flags provided. Launching interactive Support Case Wizard...")
-			fmt.Println()
-			if err := RunCaseWizard(ctx, os.Stdin, os.Stdout, client); err != nil {
-				fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-				exitFunc(1)
-			}
-			return
-		}
 		fmt.Println(caseCreateUsage)
 		exitFunc(1)
 	}
@@ -2052,6 +2043,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			Port:           port,
 			Username:       user,
 			Password:       pw,
+			SkipTLSVerify:  true,
 			ClientCertPath: certPath,
 			ClientKeyPath:  certKeyPath,
 		})
@@ -2361,6 +2353,7 @@ func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user
 		Port:           port,
 		Username:       user,
 		Password:       pw,
+		SkipTLSVerify:  true,
 		ClientCertPath: certPath,
 		ClientKeyPath:  certKeyPath,
 	})

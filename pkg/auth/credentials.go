@@ -155,22 +155,35 @@ func ResolveCredentialsForService(profile, service string) (*Credentials, error)
 	}
 
 	// 2. Check credentials files
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		paths := []string{
+	var paths []string
+	if customPath := os.Getenv("F5_CREDENTIALS_FILE"); customPath != "" {
+		paths = append(paths, customPath)
+	}
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		paths = append(paths,
 			filepath.Join(homeDir, ".f5api_credentials"),
+			filepath.Join(homeDir, ".f5_credentials"),
 			filepath.Join(homeDir, ".ihealth_credentials"),
+		)
+	}
+	if runtime.GOOS == "windows" {
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			paths = append(paths,
+				filepath.Join(appData, "f5", "credentials"),
+				filepath.Join(appData, ".f5api_credentials"),
+				filepath.Join(appData, ".f5_credentials"),
+			)
 		}
+	}
 
-		for _, path := range paths {
-			if creds, err := readCredentialsFile(path, profile, service); err == nil && creds != nil {
-				// Environment wins over the file, matching the precedence used
-				// for the OAuth pair above.
-				if apiKey != "" {
-					creds.APIKey = apiKey
-				}
-				return creds, nil
+	for _, path := range paths {
+		if creds, err := readCredentialsFile(path, profile, service); err == nil && creds != nil {
+			// Environment wins over the file, matching the precedence used
+			// for the OAuth pair above.
+			if apiKey != "" {
+				creds.APIKey = apiKey
 			}
+			return creds, nil
 		}
 	}
 

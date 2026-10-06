@@ -149,3 +149,83 @@ func TestRunCaseWizard_NGINXSubscriptionFlow(t *testing.T) {
 		t.Errorf("expected payload validation confirmation")
 	}
 }
+
+func TestRunCaseWizard_ReviewEditFieldFlow(t *testing.T) {
+	inputLines := []string{
+		"3",                                    // Step 1: skip auto-detect
+		"",                                     // Step 2: Product family (default)
+		"",                                     // Product (default)
+		"",                                     // Version (default)
+		"test-serial-12345",                    // Serial number
+		"4",                                    // Step 3: Priority 4
+		"1",                                    // Reason 1
+		"Initial typo subject",                 // Subject (accidental typo)
+		"Detailed logs and core dump captured", // Description
+		"user@example.com",                     // Step 4: Email
+		"",                                     // Contact Method (default)
+		"",                                     // Timezone (default)
+		"bigip-edge.corp.net",                  // Hostname
+		"INC-9999",                             // Ticket Ref
+		"p",                                    // Step 5: Preview description
+		"",                                     // Enter to return from preview
+		"7",                                    // Step 5: Direct edit field 7 (Subject)
+		"Corrected BGP flapping subject",       // New Subject value
+		"d",                                    // Step 5: Dry Run
+		"n",                                    // Submit now? No
+	}
+
+	input := strings.Join(inputLines, "\n") + "\n"
+	in := strings.NewReader(input)
+	var out bytes.Buffer
+
+	err := RunCaseWizard(context.Background(), in, &out, nil)
+	if err != nil {
+		t.Fatalf("wizard returned unexpected error: %v", err)
+	}
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "Corrected BGP flapping subject") {
+		t.Errorf("expected updated subject in output, got:\n%s", outStr)
+	}
+	if strings.Contains(outStr, "\"subject\": \"Initial typo subject\"") {
+		t.Errorf("found old typo subject in dry run payload, should have been replaced")
+	}
+}
+
+func TestRunCaseWizard_MultilineDescriptionFlow(t *testing.T) {
+	inputLines := []string{
+		"3",                                 // Step 1: skip auto-detect
+		"",                                  // Step 2: Product family (default)
+		"",                                  // Product (default)
+		"",                                  // Version (default)
+		"test-serial-12345",                 // Serial number
+		"4",                                 // Step 3: Priority 4
+		"1",                                 // Reason 1
+		"HA Failover issue",                 // Subject
+		":m",                                // Description: enter multiline mode
+		"Line 1: High CPU observed on TMM0", // Multiline line 1
+		"Line 2: Cluster state degraded to Standby", // Multiline line 2
+		".",                // Multiline terminator
+		"user@example.com", // Step 4: Email
+		"",                 // Contact Method (default)
+		"",                 // Timezone (default)
+		"",                 // Hostname
+		"",                 // Ticket Ref
+		"d",                // Step 5: Dry Run
+		"n",                // Submit now? No
+	}
+
+	input := strings.Join(inputLines, "\n") + "\n"
+	in := strings.NewReader(input)
+	var out bytes.Buffer
+
+	err := RunCaseWizard(context.Background(), in, &out, nil)
+	if err != nil {
+		t.Fatalf("wizard returned unexpected error: %v", err)
+	}
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "Line 1: High CPU observed on TMM0") || !strings.Contains(outStr, "Line 2: Cluster state degraded to Standby") {
+		t.Errorf("expected multiline description in payload, got:\n%s", outStr)
+	}
+}
