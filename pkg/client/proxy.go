@@ -179,7 +179,13 @@ func ShouldBypassProxy(targetHost, noProxy string) bool {
 		host = targetHost
 	}
 	host = strings.Trim(host, "[]")
-	targetIP := net.ParseIP(host)
+
+	// Strip zone ID before parsing IP (e.g. fe80::1%eth0)
+	cleanTargetHost := host
+	if idx := strings.IndexByte(cleanTargetHost, '%'); idx >= 0 {
+		cleanTargetHost = cleanTargetHost[:idx]
+	}
+	targetIP := net.ParseIP(cleanTargetHost)
 
 	for _, token := range strings.Split(noProxy, ",") {
 		token = strings.TrimSpace(token)
@@ -190,7 +196,7 @@ func ShouldBypassProxy(targetHost, noProxy string) bool {
 			return true
 		}
 
-		// CIDR check (e.g. 192.168.0.0/16, 10.0.0.0/8)
+		// CIDR check (e.g. 192.168.0.0/16, 10.0.0.0/8, 2001:db8::/32, fe80::/10)
 		if _, ipNet, err := net.ParseCIDR(token); err == nil && targetIP != nil {
 			if ipNet.Contains(targetIP) {
 				return true
@@ -205,14 +211,29 @@ func ShouldBypassProxy(targetHost, noProxy string) bool {
 		}
 		tokenHost = strings.Trim(tokenHost, "[]")
 
-		// Exact match
-		if strings.EqualFold(host, tokenHost) {
+		// Strip zone ID before token IP comparison
+		cleanTokenHost := tokenHost
+		if idx := strings.IndexByte(cleanTokenHost, '%'); idx >= 0 {
+			cleanTokenHost = cleanTokenHost[:idx]
+		}
+
+		// Exact match (raw host or zone-stripped host)
+		if strings.EqualFold(host, tokenHost) || strings.EqualFold(cleanTargetHost, cleanTokenHost) {
 			return true
+		}
+
+		// IP equality check (handles different representations like ::1 vs 0:0:0:0:0:0:0:1)
+		if targetIP != nil {
+			if tokenIP := net.ParseIP(cleanTokenHost); tokenIP != nil {
+				if targetIP.Equal(tokenIP) {
+					return true
+				}
+			}
 		}
 
 		// Domain suffix match (e.g. .corp.local or corp.local)
 		tokenDomain := strings.TrimPrefix(tokenHost, ".")
-		if strings.HasSuffix(strings.ToLower(host), "."+strings.ToLower(tokenDomain)) {
+		if !strings.Contains(host, ":") && strings.HasSuffix(strings.ToLower(host), "."+strings.ToLower(tokenDomain)) {
 			return true
 		}
 	}
@@ -412,13 +433,19 @@ func dialSOCKS5(ctx context.Context, proxyURL *url.URL, targetAddr string) (net.
 	}
 
 	req := []byte{0x05, 0x01, 0x00} // VER=5, CMD=1 (CONNECT), RSV=0
-	ip := net.ParseIP(host)
-	if ip4 := ip.To4(); ip4 != nil {
-		req = append(req, 0x01) // ATYP=1 (IPv4)
-		req = append(req, ip4...)
-	} else if ip6 := ip.To16(); ip6 != nil {
-		req = append(req, 0x04) // ATYP=4 (IPv6)
-		req = append(req, ip6...)
+	cleanHost := strings.Trim(host, "[]")
+	if idx := strings.IndexByte(cleanHost, '%'); idx >= 0 {
+		cleanHost = cleanHost[:idx]
+	}
+	ip := net.ParseIP(cleanHost)
+	if ip != nil {
+		if ip4 := ip.To4(); ip4 != nil {
+			req = append(req, 0x01) // ATYP=1 (IPv4)
+			req = append(req, ip4...)
+		} else if ip6 := ip.To16(); ip6 != nil {
+			req = append(req, 0x04) // ATYP=4 (IPv6)
+			req = append(req, ip6...)
+		}
 	} else {
 		req = append(req, 0x03, byte(len(host))) // ATYP=3 (Domain name)
 		req = append(req, []byte(host)...)
