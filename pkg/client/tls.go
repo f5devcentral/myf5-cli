@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
@@ -37,9 +38,15 @@ func SecureTLSConfig(insecureSkipVerify bool) *tls.Config {
 	}
 }
 
-// NewProductionTransport returns a hardened http.Transport with explicit phase timeouts.
+// NewProductionTransport returns a hardened http.Transport with explicit phase timeouts and proxy support.
 func NewProductionTransport(tlsConfig *tls.Config) *http.Transport {
+	return NewProductionTransportWithProxy(tlsConfig, nil)
+}
+
+// NewProductionTransportWithProxy returns a hardened http.Transport with explicit proxy configuration.
+func NewProductionTransportWithProxy(tlsConfig *tls.Config, explicitProxy *url.URL) *http.Transport {
 	return &http.Transport{
+		Proxy: ProxyFunc(explicitProxy),
 		// Restrict TCP connect and DNS dial phases to prevent slowloris hanging
 		DialContext: (&net.Dialer{
 			Timeout:   15 * time.Second,

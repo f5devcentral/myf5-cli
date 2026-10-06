@@ -20,6 +20,7 @@ import (
 	"myf5-cli/pkg/auth"
 	"myf5-cli/pkg/bigip"
 	"myf5-cli/pkg/cases"
+	"myf5-cli/pkg/client"
 	"myf5-cli/pkg/downloads"
 	"myf5-cli/pkg/ihealth"
 	"myf5-cli/pkg/logger"
@@ -60,7 +61,16 @@ func main() {
 		exitFunc(2)
 	}
 
-	if len(os.Args) < 2 {
+	// Extract global --proxy flag if present
+	cleanArgs, proxyFlag := extractProxyFlag(os.Args[1:])
+	if proxyFlag != "" {
+		if err := client.SetGlobalProxy(proxyFlag); err != nil {
+			fmt.Fprintf(os.Stderr, "\n[ERROR] Invalid proxy URL: %v\n\n", err)
+			exitFunc(1)
+		}
+	}
+
+	if len(cleanArgs) < 1 {
 		if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
 			startInteractive(ctx)
 			return
@@ -70,11 +80,32 @@ func main() {
 		return
 	}
 
-	subcommand := os.Args[1]
-	args := os.Args[2:]
+	subcommand := cleanArgs[0]
+	args := cleanArgs[1:]
 
 	logger.Get().Info("Invoking command %s", subcommand)
 	executeSubcommand(ctx, subcommand, args)
+}
+
+// extractProxyFlag extracts --proxy <url> or --proxy=<url> from an argument slice,
+// returning the cleaned arguments and the extracted proxy URL (if any).
+func extractProxyFlag(args []string) ([]string, string) {
+	var proxyURL string
+	var filtered []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--proxy" {
+			if i+1 < len(args) {
+				proxyURL = args[i+1]
+				i++
+			}
+		} else if strings.HasPrefix(arg, "--proxy=") {
+			proxyURL = strings.TrimPrefix(arg, "--proxy=")
+		} else {
+			filtered = append(filtered, arg)
+		}
+	}
+	return filtered, proxyURL
 }
 
 // executeSubcommand dispatches a subcommand and its arguments.
@@ -105,6 +136,8 @@ func executeSubcommand(ctx context.Context, subcommand string, args []string) {
 		handlePush(ctx, args)
 	case "pull", "fetch":
 		handlePull(ctx, args)
+	case "proxy":
+		handleProxyCommand(args)
 	case "doctor":
 		handleDoctor(ctx, args)
 	case "interactive", "shell", "repl", "i":
@@ -136,7 +169,7 @@ func normalizeHelpArgs(subcommand string, args []string) []string {
 		return args
 	}
 	switch subcommand {
-	case "doctor", "interactive", "shell", "repl", "i", "wizard":
+	case "doctor", "interactive", "shell", "repl", "i", "wizard", "proxy":
 		return args
 	default:
 		return nil
@@ -160,6 +193,8 @@ func printCommandHelp(subcommand string) {
 		printPushUsage()
 	case "pull", "fetch":
 		printPullUsage()
+	case "proxy":
+		printProxyUsage()
 	case "doctor":
 		printDoctorUsage()
 	case "interactive", "shell", "repl", "i":
@@ -291,15 +326,74 @@ OPTIONS:
     --cert-key <key-path>   TLS client private key`)
 }
 
-func printDoctorUsage() {
-	fmt.Print(`myf5 doctor - Verify credentials, DNS, and firewall egress
+func printProxyUsage() {
+	fmt.Println(`myf5 proxy - Manage HTTP/HTTPS/SOCKS5 Egress Proxy
 
 USAGE:
-    myf5 doctor
+    myf5 proxy show            Display active egress proxy
+    myf5 proxy set <url>       Set global proxy (http://, https://, socks5://)
+    myf5 proxy clear           Clear active global proxy
+    myf5 --proxy <url> <cmd>   Use proxy for a single command invocation
+
+SUPPORTED SCHEMES:
+    http://user:pass@host:port     HTTP CONNECT proxy
+    https://user:pass@host:port    HTTPS CONNECT proxy
+    socks5://user:pass@host:port   SOCKS5 proxy (RFC 1928 / RFC 1929)
+    socks5h://...                  SOCKS5 proxy with remote DNS resolution
+
+ENVIRONMENT VARIABLES:
+    MYF5_PROXY, F5_PROXY, HTTPS_PROXY, HTTP_PROXY, ALL_PROXY, NO_PROXY`)
+}
+
+func handleProxyCommand(args []string) {
+	if len(args) == 0 || args[0] == "show" || args[0] == "status" {
+		p := client.GetGlobalProxy()
+		if p == nil {
+			p = client.ResolveEnvProxy()
+		}
+		if p == nil {
+			fmt.Println("No proxy configured. Outbound connections connect directly.")
+		} else {
+			fmt.Printf("Active proxy: %s\n", client.RedactProxyURL(p.String()))
+		}
+		return
+	}
+	if isHelpFlag(args[0]) {
+		printProxyUsage()
+		return
+	}
+	if args[0] == "clear" || args[0] == "unset" || args[0] == "off" {
+		client.ClearGlobalProxy()
+		fmt.Println("Global proxy cleared. Outbound connections will connect directly (unless environment proxy is active).")
+		return
+	}
+	if args[0] == "set" && len(args) > 1 {
+		if err := client.SetGlobalProxy(args[1]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error setting proxy: %v\n", err)
+			exitFunc(1)
+			return
+		}
+		fmt.Printf("Global proxy set to %s\n", client.RedactProxyURL(args[1]))
+		return
+	}
+	if err := client.SetGlobalProxy(args[0]); err != nil {
+		fmt.Fprintf(os.Stderr, "Error setting proxy: %v\n", err)
+		exitFunc(1)
+		return
+	}
+	fmt.Printf("Global proxy set to %s\n", client.RedactProxyURL(args[0]))
+}
+
+func printDoctorUsage() {
+	fmt.Print(`myf5 doctor - Verify credentials, proxy egress, DNS, and firewall egress
+
+USAGE:
+    myf5 doctor [--proxy <url>]
 
 Runs a read-only diagnostic: audits ~/.f5api_credentials permissions and
-environment variables, resolves the MyF5 API hostnames, and checks outbound
-HTTPS reachability. Takes no arguments and changes nothing.
+environment variables, audits configured proxy egress, resolves the MyF5
+API hostnames, and checks outbound HTTPS reachability (directly or via proxy).
+Takes no arguments and changes nothing.
 `)
 }
 
@@ -312,7 +406,7 @@ IMPORTANT NOTICE:
     or file an issue at https://github.com/SalesAmerSP/myf5-cli/issues.
 
 USAGE:
-    myf5 <command> [subcommand] [arguments...]
+    myf5 [options] <command> [subcommand] [arguments...]
 
 COMMANDS:
     downloads    Browse MyF5 catalog and stream multi-GB software images
@@ -324,9 +418,15 @@ COMMANDS:
     push         Push software downloads or files to BIG-IP / BIG-IQ (auto failover)
     pull         Download files from BIG-IP / BIG-IQ (auto failover)
     geoip        Apply GeoIP database package to BIG-IP appliance (alias: bigip geoip)
+    proxy        View or configure HTTP/HTTPS/SOCKS5 egress proxy
     doctor       Verify API credentials, DNS, and network firewall egress
     interactive  Interactive REPL shell with tab completion (alias: shell, repl)
     version      Print application version
+
+GLOBAL OPTIONS:
+    --proxy <url>        Route outbound traffic via HTTP, HTTPS, or SOCKS5 proxy
+                         (e.g., http://proxy:8080, socks5://127.0.0.1:1080)
+    --profile <name>     Credentials profile (default: "default")
 
 ZERO-SECRET SECURITY POLICY:
     CLI arguments for secrets (--password, --client-secret) are strictly rejected.
@@ -2954,7 +3054,26 @@ func handleDoctor(ctx context.Context, args []string) {
 		fmt.Println("   [PASS] Found Client Secret: [REDACTED] (Zero CLI Exposure)")
 	}
 
-	// 2. DNS & Egress Reachability
+	// 2. Outbound Proxy Configuration
+	fmt.Println("\n2. Outbound Proxy Configuration:")
+	activeProxy := client.GetGlobalProxy()
+	if activeProxy == nil {
+		activeProxy = client.ResolveEnvProxy()
+	}
+	if activeProxy != nil {
+		fmt.Printf("   [INFO] Active Egress Proxy:  %s\n", client.RedactProxyURL(activeProxy.String()))
+		noProxy := os.Getenv("NO_PROXY")
+		if noProxy == "" {
+			noProxy = os.Getenv("no_proxy")
+		}
+		if noProxy != "" {
+			fmt.Printf("   [INFO] Active NO_PROXY:      %s\n", noProxy)
+		}
+	} else {
+		fmt.Println("   [INFO] Active Egress Proxy:  Direct (none configured)")
+	}
+
+	// 3. DNS & Egress Reachability
 	// We audit connectivity to all production cloud services across authentication,
 	// software downloads, case management, diagnostic analysis, and telemetry.
 	endpoints := []struct {
@@ -2972,16 +3091,24 @@ func handleDoctor(ctx context.Context, args []string) {
 		{"F5 Cloud Gateway", "api.f5.com", 443},
 	}
 
-	fmt.Println("\n2. Network Egress & DNS Connectivity Audit (TCP 443):")
+	fmt.Println("\n3. Network Egress & DNS Connectivity Audit (TCP 443):")
 	for _, ep := range endpoints {
 		target := net.JoinHostPort(ep.fqdn, strconv.Itoa(ep.port))
-		conn, err := net.DialTimeout("tcp", target, 3*time.Second)
+		dialCtx, dialCancel := context.WithTimeout(ctx, 4*time.Second)
+		conn, err := client.DialProxy(dialCtx, "tcp", target, nil)
+		dialCancel()
+
+		viaMsg := ""
+		if activeProxy != nil && !client.ShouldBypassProxy(target, os.Getenv("NO_PROXY")) && !client.ShouldBypassProxy(target, os.Getenv("no_proxy")) {
+			viaMsg = " (via proxy)"
+		}
+
 		if err != nil {
-			fmt.Printf("   [FAIL] %-25s (%s): %v\n", ep.name, ep.fqdn, err)
+			fmt.Printf("   [FAIL] %-25s (%s%s): %v\n", ep.name, ep.fqdn, viaMsg, err)
 			hasError = true
 		} else {
 			conn.Close()
-			fmt.Printf("   [PASS] %-25s (%s): Reachable\n", ep.name, ep.fqdn)
+			fmt.Printf("   [PASS] %-25s (%s%s): Reachable\n", ep.name, ep.fqdn, viaMsg)
 		}
 	}
 

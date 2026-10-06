@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"myf5-cli/pkg/client"
 )
 
 // ZeroBytes securely overwrites a byte slice with zeros to clear secrets from RAM.
@@ -81,6 +83,10 @@ type Credentials struct {
 	// It is issued per entitlement from the MyF5 API Catalog, so it cannot be
 	// a single shared constant. Empty means "fall back to the package default".
 	APIKey string
+
+	// Proxy specifies an HTTP, HTTPS, or SOCKS5 proxy URL for outbound egress.
+	// Loaded from environment (MYF5_PROXY, F5_PROXY, HTTPS_PROXY, etc.) or credentials file.
+	Proxy string
 }
 
 // String implements fmt.Stringer to ensure secrets are never leaked into logs or stdout.
@@ -91,10 +97,14 @@ func (c Credentials) String() string {
 	if c.APIKey != "" {
 		apiKey = "[REDACTED]"
 	}
-	if c.ClientSecret != "" {
-		return fmt.Sprintf("Credentials{ClientID: %q, ClientSecret: [REDACTED], APIKey: %s}", c.ClientID, apiKey)
+	proxyStr := ""
+	if c.Proxy != "" {
+		proxyStr = fmt.Sprintf(", Proxy: %q", client.RedactProxyURL(c.Proxy))
 	}
-	return fmt.Sprintf("Credentials{ClientID: %q, APIKey: %s}", c.ClientID, apiKey)
+	if c.ClientSecret != "" {
+		return fmt.Sprintf("Credentials{ClientID: %q, ClientSecret: [REDACTED], APIKey: %s%s}", c.ClientID, apiKey, proxyStr)
+	}
+	return fmt.Sprintf("Credentials{ClientID: %q, APIKey: %s%s}", c.ClientID, apiKey, proxyStr)
 }
 
 // GoString implements fmt.GoStringer.
@@ -146,12 +156,23 @@ func ResolveCredentialsForService(profile, service string) (*Credentials, error)
 	// credentials file below, with the environment taking precedence.
 	apiKey := os.Getenv("F5_API_KEY")
 
+	// Check environment for proxy configuration (MYF5_PROXY, F5_PROXY, ALL_PROXY, HTTPS_PROXY, HTTP_PROXY)
+	var envProxy string
+	if p := client.ResolveEnvProxy(); p != nil {
+		envProxy = p.String()
+	}
+
 	if clientID != "" && clientSecret != "" {
-		return &Credentials{
+		creds := &Credentials{
 			ClientID:     clientID,
 			ClientSecret: clientSecret,
 			APIKey:       apiKey,
-		}, nil
+			Proxy:        envProxy,
+		}
+		if envProxy != "" && client.GetGlobalProxy() == nil {
+			_ = client.SetGlobalProxy(envProxy)
+		}
+		return creds, nil
 	}
 
 	// 2. Check credentials files
@@ -182,6 +203,12 @@ func ResolveCredentialsForService(profile, service string) (*Credentials, error)
 			// for the OAuth pair above.
 			if apiKey != "" {
 				creds.APIKey = apiKey
+			}
+			if envProxy != "" {
+				creds.Proxy = envProxy
+			}
+			if creds.Proxy != "" && client.GetGlobalProxy() == nil {
+				_ = client.SetGlobalProxy(creds.Proxy)
 			}
 			return creds, nil
 		}
@@ -297,7 +324,11 @@ func readCredentialsFile(filePath, profile, servicePrefix string) (*Credentials,
 			if ak == "" {
 				ak = lookupKey(kvStore, "api_key", "apikey", "k")
 			}
-			return &Credentials{ClientID: cid, ClientSecret: csec, APIKey: ak}, nil
+			prx := lookupKey(section, "proxy", "f5_proxy", "https_proxy", "http_proxy")
+			if prx == "" {
+				prx = lookupKey(kvStore, "proxy", "f5_proxy", "https_proxy", "http_proxy")
+			}
+			return &Credentials{ClientID: cid, ClientSecret: csec, APIKey: ak, Proxy: prx}, nil
 		}
 	}
 
@@ -306,7 +337,8 @@ func readCredentialsFile(filePath, profile, servicePrefix string) (*Credentials,
 	csec := lookupKey(kvStore, append(csecNames, "f5_client_secret")...)
 	if cid != "" && csec != "" {
 		ak := lookupKey(kvStore, "api_key", "apikey", "k", "f5_api_key")
-		return &Credentials{ClientID: cid, ClientSecret: csec, APIKey: ak}, nil
+		prx := lookupKey(kvStore, "proxy", "f5_proxy", "https_proxy", "http_proxy")
+		return &Credentials{ClientID: cid, ClientSecret: csec, APIKey: ak, Proxy: prx}, nil
 	}
 
 	return nil, fmt.Errorf("no credentials found in %s for profile %s", filePath, profile)

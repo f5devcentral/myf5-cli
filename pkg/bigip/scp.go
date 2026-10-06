@@ -20,6 +20,7 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 
 	"myf5-cli/pkg/auth"
+	"myf5-cli/pkg/client"
 )
 
 // SCPOptions specifies the SSH connection and authentication configuration for SCP file transfers.
@@ -209,8 +210,7 @@ func SCPUpload(ctx context.Context, localPath string, destDir string, opts SCPOp
 		return "", err
 	}
 
-	// Dial with context cancellation support
-	var d net.Dialer
+	// Dial with context cancellation and proxy support
 	dialTimeout := opts.Timeout
 	if dialTimeout <= 0 {
 		dialTimeout = DefaultSCPTimeout
@@ -219,7 +219,7 @@ func SCPUpload(ctx context.Context, localPath string, destDir string, opts SCPOp
 	defer dialCancel()
 
 	addr := net.JoinHostPort(opts.Host, strconv.Itoa(opts.Port))
-	netConn, err := d.DialContext(dialCtx, "tcp", addr)
+	netConn, err := client.DialProxy(dialCtx, "tcp", addr, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed connecting to SSH on %s: %w", addr, err)
 	}
@@ -364,7 +364,6 @@ func SCPDownload(ctx context.Context, remotePath, localDest string, opts SCPOpti
 
 	addr := net.JoinHostPort(opts.Host, strconv.Itoa(opts.Port))
 
-	var d net.Dialer
 	dialTimeout := opts.Timeout
 	if dialTimeout <= 0 {
 		dialTimeout = DefaultSCPTimeout
@@ -372,7 +371,7 @@ func SCPDownload(ctx context.Context, remotePath, localDest string, opts SCPOpti
 	dialCtx, dialCancel := context.WithTimeout(ctx, dialTimeout)
 	defer dialCancel()
 
-	conn, err := d.DialContext(dialCtx, "tcp", addr)
+	conn, err := client.DialProxy(dialCtx, "tcp", addr, nil)
 	if err != nil {
 		return "", fmt.Errorf("SSH connection to %s failed: %w", addr, err)
 	}
@@ -579,8 +578,10 @@ func GenerateQKViewSSH(ctx context.Context, opts SCPOptions, requestedFilename s
 		timeout = DefaultSCPTimeout
 	}
 
-	d := net.Dialer{Timeout: timeout}
-	conn, err := d.DialContext(ctx, "tcp", addr)
+	dialCtx, dialCancel := context.WithTimeout(ctx, timeout)
+	defer dialCancel()
+
+	conn, err := client.DialProxy(dialCtx, "tcp", addr, nil)
 	if err != nil {
 		return "", fmt.Errorf("SSH connection to %s failed: %w", addr, err)
 	}
@@ -678,8 +679,10 @@ func DeleteQKViewSSH(ctx context.Context, opts SCPOptions, filename string) erro
 		timeout = DefaultSCPTimeout
 	}
 
-	d := net.Dialer{Timeout: timeout}
-	conn, err := d.DialContext(ctx, "tcp", addr)
+	dialCtx, dialCancel := context.WithTimeout(ctx, timeout)
+	defer dialCancel()
+
+	conn, err := client.DialProxy(dialCtx, "tcp", addr, nil)
 	if err != nil {
 		return fmt.Errorf("SSH connection failed: %w", err)
 	}

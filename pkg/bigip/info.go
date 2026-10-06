@@ -18,6 +18,8 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/ssh"
+
+	"myf5-cli/pkg/client"
 )
 
 // SystemInfo encapsulates appliance identification, hardware metadata, and licensing.
@@ -502,8 +504,10 @@ func GetSystemInfoSSH(ctx context.Context, opts SCPOptions) (*SystemInfo, error)
 		timeout = DefaultSCPTimeout
 	}
 
-	d := net.Dialer{Timeout: timeout}
-	conn, err := d.DialContext(ctx, "tcp", addr)
+	dialCtx, dialCancel := context.WithTimeout(ctx, timeout)
+	defer dialCancel()
+
+	conn, err := client.DialProxy(dialCtx, "tcp", addr, nil)
 	if err != nil {
 		return nil, fmt.Errorf("SSH connection to %s failed: %w", addr, err)
 	}
