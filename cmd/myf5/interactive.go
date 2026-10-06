@@ -195,6 +195,7 @@ func completeLine(line string, pos int) (string, int, bool) {
 			"bigiq",
 			"push",
 			"pull",
+			"geoip",
 			"doctor",
 			"interactive",
 			"version",
@@ -223,8 +224,9 @@ func completeLine(line string, pos int) (string, int, bool) {
 			candidates = []string{"list", "upload", "--json"}
 		case "bigip":
 			candidates = []string{
-				"ready", "info", "serial", "qkview", "push", "download",
+				"ready", "info", "serial", "qkview", "push", "download", "geoip",
 				"--method", "--user", "--port", "--dest", "-i", "--cert", "--cert-key",
+				"--apply-geoip", "--keep-extracted",
 				"--json", "--keep-remote",
 			}
 		case "bigiq":
@@ -236,12 +238,17 @@ func completeLine(line string, pos int) (string, int, bool) {
 		case "push":
 			candidates = []string{
 				"--method", "--dest", "--target", "--user", "--port", "-i",
-				"--cert", "--cert-key",
+				"--cert", "--cert-key", "--apply-geoip", "--keep-extracted", "--json",
 			}
 		case "pull", "fetch":
 			candidates = []string{
 				"-o", "--method", "--target", "--user", "--port", "-i",
 				"--cert", "--cert-key",
+			}
+		case "geoip":
+			candidates = []string{
+				"--method", "--dest", "--user", "--port", "-i",
+				"--cert", "--cert-key", "--keep-extracted", "--json",
 			}
 		case "wizard", "doctor", "interactive", "version", "help", "clear", "exit", "quit":
 			candidates = []string{"--help"}

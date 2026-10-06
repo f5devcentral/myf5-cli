@@ -23,7 +23,7 @@ func TestVersion(t *testing.T) {
 // prints usage, or is on the short list that inspects the flag itself.
 func TestNormalizeHelpArgs(t *testing.T) {
 	// Commands whose handlers print usage when called with no arguments.
-	blanked := []string{"downloads", "cases", "ihealth", "bigip", "bigiq", "push", "pull"}
+	blanked := []string{"downloads", "cases", "ihealth", "bigip", "bigiq", "push", "pull", "geoip"}
 	for _, cmd := range blanked {
 		for _, flag := range []string{"--help", "-h", "help"} {
 			if got := normalizeHelpArgs(cmd, []string{flag}); got != nil {
@@ -152,5 +152,41 @@ func TestGetSystemInfoTarget_QKViewFile(t *testing.T) {
 	}
 	if info.PreferredSerialNumber() != "test-serial-999" {
 		t.Errorf("PreferredSerialNumber = %q; want test-serial-999", info.PreferredSerialNumber())
+	}
+}
+
+func runWithExitCapture(fn func()) (exitCode int, exited bool) {
+	prevExit := exitFunc
+	defer func() {
+		exitFunc = prevExit
+		if r := recover(); r != nil {
+			if ep, ok := r.(exitPanic); ok {
+				exitCode = ep.code
+				exited = true
+			} else {
+				panic(r)
+			}
+		}
+	}()
+	exitFunc = func(code int) {
+		panic(exitPanic{code: code})
+	}
+	fn()
+	return 0, false
+}
+
+func TestExecuteSubcommand_GeoIPUsage(t *testing.T) {
+	code, exited := runWithExitCapture(func() {
+		executeSubcommand(context.Background(), "geoip", []string{})
+	})
+	if !exited || code != 1 {
+		t.Errorf("expected exit code 1 for empty geoip args, got code=%d exited=%v", code, exited)
+	}
+
+	code, exited = runWithExitCapture(func() {
+		executeSubcommand(context.Background(), "bigiq", []string{"geoip", "192.0.2.1", "file.zip"})
+	})
+	if !exited || code != 1 {
+		t.Errorf("expected exit code 1 for bigiq geoip rejection, got code=%d exited=%v", code, exited)
 	}
 }

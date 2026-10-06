@@ -99,6 +99,8 @@ func executeSubcommand(ctx context.Context, subcommand string, args []string) {
 		handleBIGIP(ctx, args)
 	case "bigiq":
 		handleBIGIQ(ctx, args)
+	case "geoip":
+		handleBIGIP(ctx, append([]string{"geoip"}, args...))
 	case "push":
 		handlePush(ctx, args)
 	case "pull", "fetch":
@@ -150,7 +152,7 @@ func printCommandHelp(subcommand string) {
 		printCasesUsage()
 	case "ihealth":
 		printIHealthUsage()
-	case "bigip":
+	case "bigip", "geoip":
 		printApplianceUsage("BIG-IP")
 	case "bigiq":
 		printApplianceUsage("BIG-IQ")
@@ -205,8 +207,9 @@ USAGE:
 }
 
 func printApplianceUsage(targetKind string) {
-	cmdName := strings.ToLower(targetKind)
+	cmdName := "bigip"
 	if strings.EqualFold(targetKind, "BIG-IQ") {
+		cmdName = "bigiq"
 		fmt.Printf(`myf5 %s - Manage BIG-IQ Appliance
 
 USAGE:
@@ -233,8 +236,9 @@ USAGE:
     myf5 %s info <host | file.qkview> [--json]
     myf5 %s serial <host | file.qkview> [--json]
     myf5 %s qkview <host> [--dest <path>] [--keep-remote] [--method auto|icontrol|scp]
-    myf5 %s push <host> <file> [--dest <path>] [--method auto|icontrol|scp]
+    myf5 %s push <host> <file> [--dest <path>] [--apply-geoip] [--method auto|icontrol|scp]
     myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp]
+    myf5 %s geoip <host> <zip-path> [--keep-extracted] [--method auto|icontrol|scp] [--json]
 
 OPTIONS:
     --user <username>       Appliance username (default: admin)
@@ -243,9 +247,11 @@ OPTIONS:
     --cert <cert-path>      TLS client certificate for mTLS
     --cert-key <key-path>   TLS client private key
     --method <method>       Transfer method: auto, icontrol, or scp
+    --apply-geoip           Post-upload: automatically extract and apply GeoIP RPMs to TMM
+    --keep-extracted        Retain extracted GeoIP files on appliance (default: cleaned up)
     --keep-remote           Keep generated QKView file on appliance after download
     --json                  Output machine-readable JSON
-`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName)
+`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName)
 	}
 }
 
@@ -258,6 +264,8 @@ USAGE:
 OPTIONS:
     --target <type>         Target appliance type: bigip or bigiq (default: bigip)
     --dest <path>           Remote destination directory (default: /shared/images)
+    --apply-geoip           Post-upload: automatically extract and apply GeoIP RPMs to TMM (BIG-IP only)
+    --keep-extracted        Retain extracted GeoIP files on appliance (default: cleaned up)
     --method <method>       auto, icontrol, or scp (default: auto)
     --user <username>       Appliance user (default: admin)
     --port <port>           Port override
@@ -315,6 +323,7 @@ COMMANDS:
     bigiq        Manage BIG-IQ appliances (ready check, info, serial, push, download)
     push         Push software downloads or files to BIG-IP / BIG-IQ (auto failover)
     pull         Download files from BIG-IP / BIG-IQ (auto failover)
+    geoip        Apply GeoIP database package to BIG-IP appliance (alias: bigip geoip)
     doctor       Verify API credentials, DNS, and network firewall egress
     interactive  Interactive REPL shell with tab completion (alias: shell, repl)
     version      Print application version
@@ -405,6 +414,8 @@ func handleDownloads(ctx context.Context, args []string) {
 	pushTarget := "BIG-IP"
 	pushCert := ""
 	pushCertKey := ""
+	pushApplyGeoIP := false
+	pushKeepExtracted := false
 	var remaining []string
 
 	for i := 0; i < len(actionArgs); i++ {
@@ -494,6 +505,10 @@ func handleDownloads(ctx context.Context, args []string) {
 			pushCertKey = strings.TrimPrefix(arg, "--push-cert-key=")
 		} else if strings.HasPrefix(arg, "--push-key-file=") {
 			pushCertKey = strings.TrimPrefix(arg, "--push-key-file=")
+		} else if arg == "--apply-geoip" || arg == "--push-apply-geoip" {
+			pushApplyGeoIP = true
+		} else if arg == "--keep-extracted" || arg == "--push-keep-extracted" {
+			pushKeepExtracted = true
 		} else {
 			remaining = append(remaining, arg)
 		}
@@ -701,7 +716,7 @@ func handleDownloads(ctx context.Context, args []string) {
 		bar.Finish(fmt.Sprintf("Download verified and complete: %s", outPath))
 		if pushHost != "" {
 			fmt.Printf("\n--- Automatic Appliance Push Requested ---\n")
-			executePushToAppliance(ctx, pushHost, outPath, pushMethod, pushDest, pushUser, pushPort, pushKey, pushTarget, pushCert, pushCertKey)
+			executePushToAppliance(ctx, pushHost, outPath, pushMethod, pushDest, pushUser, pushPort, pushKey, pushTarget, pushCert, pushCertKey, pushApplyGeoIP, pushKeepExtracted, false)
 		}
 
 	case "browse":
@@ -1655,6 +1670,9 @@ func handlePush(ctx context.Context, args []string) {
 	targetKind := "BIG-IP"
 	certPath := ""
 	certKeyPath := ""
+	applyGeoIP := false
+	keepExtracted := false
+	jsonOutput := false
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -1726,6 +1744,12 @@ func handlePush(ctx context.Context, args []string) {
 			certKeyPath = strings.TrimPrefix(arg, "--cert-key=")
 		} else if strings.HasPrefix(arg, "--key-file=") {
 			certKeyPath = strings.TrimPrefix(arg, "--key-file=")
+		} else if arg == "--apply-geoip" || arg == "--geoip" {
+			applyGeoIP = true
+		} else if arg == "--keep-extracted" || arg == "--no-cleanup" {
+			keepExtracted = true
+		} else if arg == "--json" {
+			jsonOutput = true
 		} else if !strings.HasPrefix(arg, "-") {
 			positional = append(positional, arg)
 		}
@@ -1755,7 +1779,7 @@ func handlePush(ctx context.Context, args []string) {
 
 	host := positional[0]
 	localFile := positional[1]
-	executePushToAppliance(ctx, host, localFile, method, destPath, user, port, keyPath, targetKind, certPath, certKeyPath)
+	executePushToAppliance(ctx, host, localFile, method, destPath, user, port, keyPath, targetKind, certPath, certKeyPath, applyGeoIP, keepExtracted, jsonOutput)
 }
 
 func handlePull(ctx context.Context, args []string) {
@@ -1901,6 +1925,8 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	certPath := ""
 	certKeyPath := ""
 	keepRemote := false
+	applyGeoIP := false
+	keepExtracted := false
 	jsonOutput := false
 
 	for i := 0; i < len(actionArgs); i++ {
@@ -1964,6 +1990,10 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			certKeyPath = strings.TrimPrefix(arg, "--key-file=")
 		} else if arg == "--keep-remote" || arg == "--no-delete" || arg == "--no-cleanup" {
 			keepRemote = true
+		} else if arg == "--apply-geoip" || arg == "--geoip" {
+			applyGeoIP = true
+		} else if arg == "--keep-extracted" {
+			keepExtracted = true
 		} else if arg == "--json" {
 			jsonOutput = true
 		} else if !strings.HasPrefix(arg, "-") {
@@ -2103,12 +2133,116 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		}
 	case "push", "upload":
 		if len(positional) < 2 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--apply-geoip] [--keep-extracted] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--json]\n", cmdName)
 			exitFunc(1)
 		}
 		host := positional[0]
 		localFile := positional[1]
-		executePushToAppliance(ctx, host, localFile, method, destPath, user, port, keyPath, targetKind, certPath, certKeyPath)
+		executePushToAppliance(ctx, host, localFile, method, destPath, user, port, keyPath, targetKind, certPath, certKeyPath, applyGeoIP, keepExtracted, jsonOutput)
+
+	case "geoip":
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			fmt.Fprintf(os.Stderr, "[ERROR] GeoIP database updates are only supported on BIG-IP appliances.\n")
+			exitFunc(1)
+		}
+		if len(positional) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s geoip <host> <zip-path> [--method auto|icontrol|scp] [--dest <path>] [--keep-extracted] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--json]\n", cmdName)
+			exitFunc(1)
+		}
+		host := positional[0]
+		zipTarget := positional[1]
+
+		if fi, err := os.Stat(zipTarget); err == nil && !fi.IsDir() {
+			// Local file: push it to appliance and apply
+			executePushToAppliance(ctx, host, zipTarget, method, destPath, user, port, keyPath, targetKind, certPath, certKeyPath, true, keepExtracted, jsonOutput)
+		} else {
+			// Remote file on appliance: apply directly
+			if err := bigip.ValidateRemoteAppliancePath(zipTarget); err != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] Invalid remote zip path: %v\n", err)
+				exitFunc(1)
+			}
+
+			if user == "" {
+				user = os.Getenv("BIGIP_USER")
+				if user == "" {
+					user = "admin"
+				}
+			}
+			pw := os.Getenv("BIGIP_PASSWORD")
+			if keyPath == "" {
+				if k := os.Getenv("BIGIP_SSH_KEY"); k != "" {
+					keyPath = k
+				} else if k := os.Getenv("SSH_KEY_PATH"); k != "" {
+					keyPath = k
+				}
+			}
+
+			if pw == "" && keyPath == "" && certPath == "" {
+				if !hasDefaultSSHAuth() && term.IsTerminal(int(os.Stdin.Fd())) {
+					fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
+					bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
+					fmt.Println()
+					if err == nil {
+						pw = strings.TrimSpace(string(bytePw))
+						auth.ZeroBytes(bytePw)
+					}
+				}
+			}
+
+			var spinner *progress.Spinner
+			if !jsonOutput {
+				spinner = progress.NewSpinner("Applying GeoIP updates on BIG-IP (extracting RPMs, updating data, loading tmsh)")
+				spinner.Start()
+			}
+
+			geoOpts := bigip.GeoIPOptions{
+				Port:           port,
+				Username:       user,
+				Password:       pw,
+				IdentityFile:   keyPath,
+				ClientCertPath: certPath,
+				ClientKeyPath:  certKeyPath,
+				Method:         bigip.TransferMethod(method),
+				KeepExtracted:  keepExtracted,
+			}
+
+			statusCb := func(status string) {
+				if spinner != nil {
+					spinner.SetMessage(status)
+				}
+			}
+
+			res, err := bigip.ApplyGeoIP(ctx, host, zipTarget, geoOpts, statusCb)
+			if err != nil {
+				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+					if spinner != nil {
+						spinner.Abort("GeoIP application cancelled by user.")
+					}
+					fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+					exitFunc(130)
+				}
+				if spinner != nil {
+					spinner.Fail(fmt.Sprintf("GeoIP application failed: %v", err))
+				} else {
+					fmt.Fprintf(os.Stderr, "[ERROR] GeoIP application failed: %v\n", err)
+				}
+				exitFunc(1)
+			}
+
+			if spinner != nil {
+				spinner.Success(fmt.Sprintf("GeoIP database applied successfully via %s (time: %s)", strings.ToUpper(string(res.MethodUsed)), res.Duration.Round(100*time.Millisecond)))
+			}
+
+			if jsonOutput {
+				enc := json.NewEncoder(os.Stdout)
+				enc.SetIndent("", "  ")
+				if err := enc.Encode(res); err != nil {
+					checkErr(ctx, err, "Failed to encode JSON")
+				}
+			} else {
+				fmt.Print(res.Summary())
+			}
+		}
 
 	case "download", "pull", "fetch":
 		if len(positional) < 2 {
@@ -2390,7 +2524,15 @@ func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user
 
 // executePushToAppliance handles streaming upload of a local file to a BIG-IP or BIG-IQ appliance
 // via either iControl REST chunked transfer or SCP over SSH, with automatic seamless failover.
-func executePushToAppliance(ctx context.Context, host, localPath, method, destPath, user string, port int, keyPath, targetKind, certPath, certKeyPath string) {
+func executePushToAppliance(
+	ctx context.Context,
+	host, localPath, method, destPath, user string,
+	port int,
+	keyPath, targetKind, certPath, certKeyPath string,
+	applyGeoIP bool,
+	keepExtracted bool,
+	jsonOutput bool,
+) {
 	if targetKind == "" {
 		targetKind = "BIG-IP"
 	}
@@ -2404,6 +2546,16 @@ func executePushToAppliance(ctx context.Context, host, localPath, method, destPa
 	}
 	if method == "ssh" {
 		method = "scp"
+	}
+
+	if applyGeoIP {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			fmt.Fprintf(os.Stderr, "[ERROR] GeoIP database updates are only supported on BIG-IP appliances.\n")
+			exitFunc(1)
+		}
+		if destPath == "" {
+			destPath = "/var/tmp"
+		}
 	}
 
 	stat, err := os.Stat(localPath)
@@ -2489,23 +2641,32 @@ func executePushToAppliance(ctx context.Context, host, localPath, method, destPa
 		Timeout:        30 * time.Second,
 	}
 
-	fmt.Printf("Pushing %s (%s) to %s (%s) via %s...\n", baseName, downloads.FormatBytes(fileSize), targetKind, host, strings.ToUpper(method))
-
 	var bar *progress.Bar
-	renderProgress := func(transferred, total int64) {
-		if bar == nil {
-			bar = progress.NewBar(0, fmt.Sprintf("Uploading to %s", targetKind))
-		}
-		bar.Total = total
-		bar.Update(transferred)
-	}
+	var renderProgress func(transferred, total int64)
+	var logFn bigip.FailoverLogger
 
-	logFn := func(format string, args ...any) {
-		if bar != nil {
-			bar.Abort("Primary upload method failed")
-			bar = nil
+	if !jsonOutput {
+		fmt.Printf("Pushing %s (%s) to %s (%s) via %s...\n", baseName, downloads.FormatBytes(fileSize), targetKind, host, strings.ToUpper(method))
+
+		renderProgress = func(transferred, total int64) {
+			if bar == nil {
+				bar = progress.NewBar(0, fmt.Sprintf("Uploading to %s", targetKind))
+			}
+			bar.Total = total
+			bar.Update(transferred)
 		}
-		fmt.Printf("\n[FAILOVER] "+format+"\n", args...)
+
+		logFn = func(format string, args ...any) {
+			if bar != nil {
+				bar.Abort("Primary upload method failed")
+				bar = nil
+			}
+			fmt.Printf("\n[FAILOVER] "+format+"\n", args...)
+		}
+	} else {
+		logFn = func(format string, args ...any) {
+			logger.Get().Info("[FAILOVER] "+format, args...)
+		}
 	}
 
 	finalPath, methodUsed, err := bigip.PushFileWithFailover(ctx, host, localPath, opts, logFn, renderProgress)
@@ -2524,10 +2685,88 @@ func executePushToAppliance(ctx context.Context, host, localPath, method, destPa
 		}
 		exitFunc(1)
 	}
+
+	if !applyGeoIP {
+		if bar != nil {
+			bar.Finish(fmt.Sprintf("File successfully pushed to %s (%s) at %s", targetKind, strings.ToUpper(string(methodUsed)), finalPath))
+		} else if !jsonOutput {
+			fmt.Printf("File successfully pushed to %s (%s) at %s\n", targetKind, strings.ToUpper(string(methodUsed)), finalPath)
+		} else {
+			res := map[string]any{
+				"host":       host,
+				"localPath":  localPath,
+				"remotePath": finalPath,
+				"method":     string(methodUsed),
+				"size":       fileSize,
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(res); err != nil {
+				checkErr(ctx, err, "Failed to encode JSON")
+			}
+		}
+		return
+	}
+
 	if bar != nil {
 		bar.Finish(fmt.Sprintf("File successfully pushed to %s (%s) at %s", targetKind, strings.ToUpper(string(methodUsed)), finalPath))
-	} else {
+	} else if !jsonOutput {
 		fmt.Printf("File successfully pushed to %s (%s) at %s\n", targetKind, strings.ToUpper(string(methodUsed)), finalPath)
+	}
+
+	var spinner *progress.Spinner
+	if !jsonOutput {
+		fmt.Println()
+		spinner = progress.NewSpinner("Applying GeoIP updates on BIG-IP (extracting RPMs, updating data, loading tmsh)")
+		spinner.Start()
+	}
+
+	geoOpts := bigip.GeoIPOptions{
+		Port:           port,
+		Username:       user,
+		Password:       pw,
+		IdentityFile:   keyPath,
+		ClientCertPath: certPath,
+		ClientKeyPath:  certKeyPath,
+		Method:         bigip.TransferMethod(method),
+		KeepExtracted:  keepExtracted,
+	}
+
+	statusCb := func(status string) {
+		if spinner != nil {
+			spinner.SetMessage(status)
+		}
+	}
+
+	res, err := bigip.ApplyGeoIP(ctx, host, finalPath, geoOpts, statusCb)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			if spinner != nil {
+				spinner.Abort("GeoIP application cancelled by user.")
+			}
+			fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+			exitFunc(130)
+		}
+		if spinner != nil {
+			spinner.Fail(fmt.Sprintf("GeoIP application failed: %v", err))
+		} else {
+			fmt.Fprintf(os.Stderr, "[ERROR] GeoIP application failed: %v\n", err)
+		}
+		exitFunc(1)
+	}
+
+	if spinner != nil {
+		spinner.Success(fmt.Sprintf("GeoIP database applied successfully via %s (time: %s)", strings.ToUpper(string(res.MethodUsed)), res.Duration.Round(100*time.Millisecond)))
+	}
+
+	if jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(res); err != nil {
+			checkErr(ctx, err, "Failed to encode JSON")
+		}
+	} else {
+		fmt.Print(res.Summary())
 	}
 }
 
