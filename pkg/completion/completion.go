@@ -38,8 +38,8 @@ _myf5_completions() {
     local downloads_actions="browse families lines versions containers files get"
     local cases_actions="list metadata get comment create"
     local ihealth_actions="list upload"
-    local bigip_actions="ready qkview push download"
-    local bigiq_actions="ready push download"
+    local bigip_actions="ready info serial qkview push download"
+    local bigiq_actions="ready info serial push download"
     local completion_shells="bash zsh fish"
     local product_families="BIG-IP NGINX BIG-IQ"
 
@@ -247,6 +247,8 @@ _myf5() {
                     local -a bigip_actions
                     bigip_actions=(
                         'ready:Check TMOS management plane readiness'
+                        'info:Extract hardware and system metadata from host or QKView'
+                        'serial:Extract preferred serial number from host or QKView'
                         'qkview:Generate and download a diagnostic QKView bundle'
                         'push:Upload software image or file (auto failover)'
                         'download:Download file from appliance (auto failover)'
@@ -258,6 +260,7 @@ _myf5() {
                         '(-d --dest)'{-d,--dest}'[Remote destination path]:dest:' \
                         '(-o --output)'{-o,--output}'[Local destination file path]:file:_files' \
                         '(-i --identity)'{-i,--identity}'[SSH private key path]:file:_files' \
+                        '--json[Output in JSON format]' \
                         '1: :->b_action' \
                         '2:host:_hosts'
 
@@ -271,6 +274,8 @@ _myf5() {
                     local -a bigiq_actions
                     bigiq_actions=(
                         'ready:Check BIG-IQ management plane readiness'
+                        'info:Extract hardware and system metadata from host or QKView'
+                        'serial:Extract preferred serial number from host or QKView'
                         'push:Upload software image or file (auto failover)'
                         'download:Download file from appliance (auto failover)'
                     )
@@ -281,6 +286,7 @@ _myf5() {
                         '(-d --dest)'{-d,--dest}'[Remote destination path]:dest:' \
                         '(-o --output)'{-o,--output}'[Local destination file path]:file:_files' \
                         '(-i --identity)'{-i,--identity}'[SSH private key path]:file:_files' \
+                        '--json[Output in JSON format]' \
                         '1: :->biq_action' \
                         '2:host:_hosts'
 
@@ -385,23 +391,29 @@ complete -c myf5 -n "__fish_seen_subcommand_from ihealth; and not __fish_seen_su
 complete -c myf5 -n "__fish_seen_subcommand_from ihealth; and __fish_seen_subcommand_from upload" -F
 
 # BIG-IP subcommands
-complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready qkview push download" -a ready -d "Check TMOS readiness"
-complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready qkview push download" -a qkview -d "Generate diagnostic QKView"
-complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready qkview push download" -a push -d "Push file via iControl or SCP (auto failover)"
-complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready qkview push download" -a download -d "Download file via iControl or SCP (auto failover)"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready info serial qkview push download" -a ready -d "Check TMOS readiness"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready info serial qkview push download" -a info -d "Inspect system info from host or QKView"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready info serial qkview push download" -a serial -d "Extract serial number from host or QKView"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready info serial qkview push download" -a qkview -d "Generate diagnostic QKView"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready info serial qkview push download" -a push -d "Push file via iControl or SCP (auto failover)"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip; and not __fish_seen_subcommand_from ready info serial qkview push download" -a download -d "Download file via iControl or SCP (auto failover)"
 complete -c myf5 -n "__fish_seen_subcommand_from bigip" -s u -l user -d "BIG-IP admin username"
 complete -c myf5 -n "__fish_seen_subcommand_from bigip" -s p -l port -d "Management HTTPS/SSH port"
 complete -c myf5 -n "__fish_seen_subcommand_from bigip" -s o -l output -F -d "Local destination file path"
 complete -c myf5 -n "__fish_seen_subcommand_from bigip" -s i -l identity -F -d "SSH private key path"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip" -l json -d "Output in JSON format"
 
 # BIG-IQ subcommands
-complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready push download" -a ready -d "Check BIG-IQ readiness"
-complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready push download" -a push -d "Push file via iControl or SCP (auto failover)"
-complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready push download" -a download -d "Download file via iControl or SCP (auto failover)"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready info serial push download" -a ready -d "Check BIG-IQ readiness"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready info serial push download" -a info -d "Inspect system info from host or QKView"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready info serial push download" -a serial -d "Extract serial number from host or QKView"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready info serial push download" -a push -d "Push file via iControl or SCP (auto failover)"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq; and not __fish_seen_subcommand_from ready info serial push download" -a download -d "Download file via iControl or SCP (auto failover)"
 complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -s u -l user -d "BIG-IQ admin username"
 complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -s p -l port -d "Management HTTPS/SSH port"
 complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -s o -l output -F -d "Local destination file path"
 complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -s i -l identity -F -d "SSH private key path"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -l json -d "Output in JSON format"
 
 # Push command
 complete -c myf5 -n "__fish_seen_subcommand_from push" -s m -l method -d "Transfer method (auto, icontrol, scp)"

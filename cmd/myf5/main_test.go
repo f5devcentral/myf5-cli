@@ -1,6 +1,12 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"myf5-cli/pkg/cases"
@@ -98,5 +104,54 @@ func TestEntitlementFieldPerFamily(t *testing.T) {
 		if got := cases.EntitlementFieldFor(family); got != want {
 			t.Errorf("EntitlementFieldFor(%q) = %q, want %q", family, got, want)
 		}
+	}
+}
+
+func TestGetSystemInfoTarget_QKViewFile(t *testing.T) {
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gw)
+
+	files := map[string]string{
+		"VERSION":              "Product: BIG-IP\nVersion: 17.5.1\nBuild: 0.0.1\nEdition: Final\n",
+		"config/bigip.license": "Registration Key : TEST-REG-KEY-12345\nSerial Number : test-serial-999\n",
+	}
+	for name, content := range files {
+		hdr := &tar.Header{
+			Name: name,
+			Mode: 0600,
+			Size: int64(len(content)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("WriteHeader failed: %v", err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("Close tar failed: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("Close gzip failed: %v", err)
+	}
+
+	tmpFile := filepath.Join(t.TempDir(), "test.qkview")
+	if err := os.WriteFile(tmpFile, buf.Bytes(), 0600); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	info := getSystemInfoTarget(context.Background(), tmpFile, "BIG-IP", "", 0, "", "auto")
+	if info == nil {
+		t.Fatal("getSystemInfoTarget returned nil")
+	}
+	if info.Product != "BIG-IP" {
+		t.Errorf("Product = %q; want BIG-IP", info.Product)
+	}
+	if info.Version != "17.5.1" {
+		t.Errorf("Version = %q; want 17.5.1", info.Version)
+	}
+	if info.PreferredSerialNumber() != "test-serial-999" {
+		t.Errorf("PreferredSerialNumber = %q; want test-serial-999", info.PreferredSerialNumber())
 	}
 }
