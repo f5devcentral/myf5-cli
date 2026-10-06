@@ -149,6 +149,39 @@ func TestResolveAPIKey(t *testing.T) {
 			t.Errorf("String() leaked the API key: %s", s)
 		}
 	})
+
+	t.Run("proxy password never appears in String output", func(t *testing.T) {
+		c := Credentials{
+			ClientID:     "id",
+			ClientSecret: "sec",
+			Proxy:        "http://proxyuser:supersecretpass@proxy.corp.net:8080",
+		}
+		s := c.String()
+		if strings.Contains(s, "supersecretpass") {
+			t.Errorf("String() leaked the proxy password: %s", s)
+		}
+		if !strings.Contains(s, "[REDACTED]") {
+			t.Errorf("String() should contain [REDACTED] for proxy password: %s", s)
+		}
+	})
+}
+
+func TestResolveProxyCredentials(t *testing.T) {
+	t.Run("reads proxy from credentials file", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "ini_creds")
+		content := []byte("[default]\nclient_id = d-id\nclient_secret = d-sec\nproxy = socks5://proxy.internal:1080\n")
+		if err := os.WriteFile(f, content, 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		creds, err := readCredentialsFile(f, "default", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if creds.Proxy != "socks5://proxy.internal:1080" {
+			t.Errorf("Proxy = %q, want socks5://proxy.internal:1080", creds.Proxy)
+		}
+	})
 }
 
 // iHealth's OAuth client is granted the "ihealth" scope, which the general

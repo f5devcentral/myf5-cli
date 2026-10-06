@@ -8,6 +8,8 @@ import (
 	"strings"
 	"unicode"
 
+	"myf5-cli/pkg/client"
+
 	"golang.org/x/term"
 )
 
@@ -103,7 +105,7 @@ func startInteractive(ctx context.Context) {
 }
 
 // runSafely executes a command line, recovering from exitPanic.
-func runSafely(ctx context.Context, args []string) {
+func runSafely(ctx context.Context, rawArgs []string) {
 	defer func() {
 		if r := recover(); r != nil {
 			if _, ok := r.(exitPanic); ok {
@@ -114,6 +116,17 @@ func runSafely(ctx context.Context, args []string) {
 			panic(r)
 		}
 	}()
+
+	args, proxyFlag := extractProxyFlag(rawArgs)
+	if proxyFlag != "" {
+		if err := client.SetGlobalProxy(proxyFlag); err != nil {
+			fmt.Fprintf(os.Stderr, "Error setting proxy: %v\n", err)
+			return
+		}
+	}
+	if len(args) == 0 {
+		return
+	}
 
 	executeSubcommand(ctx, args[0], args[1:])
 }
@@ -196,6 +209,7 @@ func completeLine(line string, pos int) (string, int, bool) {
 			"push",
 			"pull",
 			"geoip",
+			"proxy",
 			"doctor",
 			"interactive",
 			"version",
@@ -210,47 +224,51 @@ func completeLine(line string, pos int) (string, int, bool) {
 		case "downloads", "download":
 			candidates = []string{
 				"get", "list", "lines", "versions", "containers", "files", "metadata",
-				"--output", "--profile", "--push-to", "--push-method", "--push-dest",
+				"--proxy", "--output", "--profile", "--push-to", "--push-method", "--push-dest",
 				"--push-user", "--push-port", "--push-key", "--push-cert", "--push-cert-key",
 			}
 		case "cases", "case":
 			candidates = []string{
 				"list", "get", "comment", "create", "wizard", "metadata",
-				"--json", "--all", "--family", "--product", "--version", "--serial",
+				"--proxy", "--json", "--all", "--family", "--product", "--version", "--serial",
 				"--subscription", "--subject", "--description", "--priority", "--reason", "--email",
 				"--contact-method", "--timezone", "--hostname", "--customer-ticket", "--dry-run", "--wizard",
 			}
 		case "ihealth":
-			candidates = []string{"list", "upload", "--json"}
+			candidates = []string{"list", "upload", "--proxy", "--json"}
 		case "bigip":
 			candidates = []string{
 				"ready", "info", "serial", "qkview", "push", "download", "geoip",
-				"--method", "--user", "--port", "--dest", "-i", "--cert", "--cert-key",
+				"--proxy", "--method", "--user", "--port", "--dest", "-i", "--cert", "--cert-key",
 				"--apply-geoip", "--keep-extracted",
 				"--json", "--keep-remote",
 			}
 		case "bigiq":
 			candidates = []string{
 				"ready", "info", "serial", "push", "download",
-				"--method", "--user", "--port", "--dest", "-i", "--cert", "--cert-key",
+				"--proxy", "--method", "--user", "--port", "--dest", "-i", "--cert", "--cert-key",
 				"--json",
 			}
 		case "push":
 			candidates = []string{
-				"--method", "--dest", "--target", "--user", "--port", "-i",
+				"--proxy", "--method", "--dest", "--target", "--user", "--port", "-i",
 				"--cert", "--cert-key", "--apply-geoip", "--keep-extracted", "--json",
 			}
 		case "pull", "fetch":
 			candidates = []string{
-				"-o", "--method", "--target", "--user", "--port", "-i",
+				"--proxy", "-o", "--method", "--target", "--user", "--port", "-i",
 				"--cert", "--cert-key",
 			}
 		case "geoip":
 			candidates = []string{
-				"--method", "--dest", "--user", "--port", "-i",
+				"--proxy", "--method", "--dest", "--user", "--port", "-i",
 				"--cert", "--cert-key", "--keep-extracted", "--json",
 			}
-		case "wizard", "doctor", "interactive", "version", "help", "clear", "exit", "quit":
+		case "proxy":
+			candidates = []string{"show", "set", "clear", "--help"}
+		case "doctor":
+			candidates = []string{"--proxy", "--help"}
+		case "wizard", "interactive", "version", "help", "clear", "exit", "quit":
 			candidates = []string{"--help"}
 		}
 	}

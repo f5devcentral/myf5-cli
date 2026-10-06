@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"myf5-cli/pkg/client"
 )
 
 // GeoIPOptions configures connection, execution, and cleanup parameters for appliance GeoIP updates.
@@ -332,8 +334,14 @@ func applyGeoIPSSH(ctx context.Context, host, scriptB64 string, opts GeoIPOption
 	}
 	addr := net.JoinHostPort(h, strconv.Itoa(port))
 
-	d := net.Dialer{Timeout: opts.Timeout}
-	netConn, err := d.DialContext(ctx, "tcp", addr)
+	dialTimeout := opts.Timeout
+	if dialTimeout <= 0 {
+		dialTimeout = DefaultSCPTimeout
+	}
+	dialCtx, dialCancel := context.WithTimeout(ctx, dialTimeout)
+	defer dialCancel()
+
+	netConn, err := client.DialProxy(dialCtx, "tcp", addr, nil)
 	if err != nil {
 		return "", fmt.Errorf("SSH connection to %s failed: %w", addr, err)
 	}

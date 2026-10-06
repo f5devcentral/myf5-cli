@@ -82,6 +82,18 @@ func TestCompleteLine(t *testing.T) {
 		t.Errorf("expected completeLine('cases wiz') -> ('cases wizard ', 13, true), got (%q, %d, %v)", line, pos, ok)
 	}
 
+	// Top-level proxy command match
+	line, pos, ok = completeLine("prox", 4)
+	if !ok || line != "proxy " || pos != 6 {
+		t.Errorf("expected completeLine('prox') -> ('proxy ', 6, true), got (%q, %d, %v)", line, pos, ok)
+	}
+
+	// Proxy subcommand match
+	line, pos, ok = completeLine("proxy sh", 8)
+	if !ok || line != "proxy show " || pos != 11 {
+		t.Errorf("expected completeLine('proxy sh') -> ('proxy show ', 11, true), got (%q, %d, %v)", line, pos, ok)
+	}
+
 	// Longest common prefix match
 	line, pos, ok = completeLine("bigi", 4)
 	if !ok || line != "bigi" || pos != 4 {
