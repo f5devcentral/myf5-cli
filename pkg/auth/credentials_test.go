@@ -258,3 +258,23 @@ func TestZeroBytes(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveCredentialsCustomFile(t *testing.T) {
+	tempDir := t.TempDir()
+	customPath := filepath.Join(tempDir, "custom_creds.txt")
+	content := []byte("client_id=custom-id\nclient_secret=custom-sec\n")
+	if err := os.WriteFile(customPath, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	os.Setenv("F5_CREDENTIALS_FILE", customPath)
+	defer os.Unsetenv("F5_CREDENTIALS_FILE")
+
+	creds, err := ResolveCredentials("default")
+	if err != nil {
+		t.Fatalf("unexpected error resolving custom file: %v", err)
+	}
+	if creds.ClientID != "custom-id" || creds.ClientSecret != "custom-sec" {
+		t.Errorf("got %v, want custom-id/custom-sec", creds)
+	}
+}
