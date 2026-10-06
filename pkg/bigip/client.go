@@ -277,7 +277,7 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 			}
 			return '_'
 		}, c.Host)
-		filename = fmt.Sprintf("qkview_%s_%d.qkview", cleanHost, time.Now().Unix())
+		filename = fmt.Sprintf("qkview_%s_%s.qkview", cleanHost, time.Now().UTC().Format("20060102T150405Z"))
 	}
 	if !strings.HasSuffix(filename, ".qkview") {
 		filename += ".qkview"

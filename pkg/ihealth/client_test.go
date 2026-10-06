@@ -2,7 +2,6 @@ package ihealth
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"log"
 	"net/http"
@@ -102,12 +101,35 @@ func TestUploadQKView(t *testing.T) {
 			t.Errorf("unexpected auth header")
 		}
 
-		resp := UploadQKViewResponse{
-			ID:     "12345",
-			Status: "queued",
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			t.Errorf("failed to parse multipart form: %v", err)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if got := r.FormValue("visible_in_gui"); got != "True" {
+			t.Errorf("visible_in_gui = %q, want True (K000130498)", got)
+		}
+		if got := r.FormValue("f5_support_case"); got != "01287164" {
+			t.Errorf("f5_support_case = %q, want 01287164", got)
+		}
+		if got := r.FormValue("case_number"); got != "01287164" {
+			t.Errorf("case_number = %q, want 01287164", got)
+		}
+		if got := r.FormValue("description"); got != "Test upload" {
+			t.Errorf("description = %q, want 'Test upload'", got)
+		}
+		file, header, err := r.FormFile("qkview")
+		if err != nil {
+			t.Errorf("missing qkview form file: %v", err)
+		} else {
+			file.Close()
+			if header.Filename != "test.qkview" {
+				t.Errorf("filename = %q, want test.qkview", header.Filename)
+			}
+		}
+
+		// The live API returns an XML-derived JSON wrapper with integer id.
+		w.Header().Set("Content-Type", "application/vnd.f5.ihealth.api+json")
+		w.Header().Set("Location", "https://ihealth-api.f5.com/qkview-analyzer/api/qkviews/26991271")
+		_, _ = w.Write([]byte(`{"qkview_upload":{"result":"OK","id":26991271,"location":"https://ihealth-api.f5.com/qkview-analyzer/api/qkviews/26991271"}}`))
 	}))
 	defer server.Close()
 
@@ -124,7 +146,7 @@ func TestUploadQKView(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.ID != "12345" || resp.Status != "queued" {
+	if resp.ID != "26991271" || resp.Status != "OK" {
 		t.Errorf("unexpected upload response: %+v", resp)
 	}
 }
@@ -174,4 +196,111 @@ func TestUploadQKViewReleasesWriterOnRequestFailure(t *testing.T) {
 		}
 	}
 	t.Errorf("goroutine leaked after a failed upload: %d before, %d after", before, after)
+}
+
+func TestParseUploadResponse(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		location   string
+		wantID     string
+		wantStatus string
+	}{
+		{
+			name:       "live XML-mapped JSON wrapper with integer id",
+			body:       `{"qkview_upload":{"result":"OK","id":26991271,"location":"https://ihealth-api.f5.com/qkview-analyzer/api/qkviews/26991271"}}`,
+			wantID:     "26991271",
+			wantStatus: "OK",
+		},
+		{
+			name:       "XML-mapped JSON wrapper with string id",
+			body:       `{"qkview_upload":{"result":"OK","id":"26991271","location":"https://ihealth-api.f5.com/qkview-analyzer/api/qkviews/26991271"}}`,
+			wantID:     "26991271",
+			wantStatus: "OK",
+		},
+		{
+			name:       "flat JSON response with string id and status",
+			body:       `{"id":"12345","status":"queued"}`,
+			wantID:     "12345",
+			wantStatus: "queued",
+		},
+		{
+			name:       "flat JSON response with numeric id and result",
+			body:       `{"id":98765,"result":"OK"}`,
+			wantID:     "98765",
+			wantStatus: "OK",
+		},
+		{
+			name:       "Location header fallback when body is empty",
+			body:       "",
+			location:   "https://ihealth-api.f5.com/qkview-analyzer/api/qkviews/34567",
+			wantID:     "34567",
+			wantStatus: "OK",
+		},
+		{
+			name:       "XML body fallback",
+			body:       `<?xml version="1.0"?><qkview_upload><result>OK</result><id>54321</id></qkview_upload>`,
+			wantID:     "54321",
+			wantStatus: "OK",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := parseUploadResponse([]byte(tc.body), tc.location)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if resp.ID != tc.wantID {
+				t.Errorf("ID = %q, want %q", resp.ID, tc.wantID)
+			}
+			if resp.Status != tc.wantStatus {
+				t.Errorf("Status = %q, want %q", resp.Status, tc.wantStatus)
+			}
+		})
+	}
+}
+
+func TestGetQKViewHTTP202Accepted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != QKViewsPath+"/26991271" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		// HTTP 202 Accepted returned while processing is RUNNING (observed live 2026-10-05)
+		w.Header().Set("Content-Type", "application/vnd.f5.ihealth.api+json")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{
+			"file_name": "test.qkview",
+			"hostname": "test-box.local",
+			"gui_uri": null,
+			"f5_support_case": "01287164",
+			"processing_status": "RUNNING",
+			"file_size": 43027134,
+			"upload": {"date": 1791245779000, "performed_by": {"name": "Test User", "email": "test@example.com"}}
+		}`))
+	}))
+	defer server.Close()
+
+	c := NewClient("test-tok", server.URL)
+	c.HTTPClient = server.Client()
+
+	summary, err := c.GetQKView(context.Background(), "26991271")
+	if err != nil {
+		t.Fatalf("GetQKView failed on HTTP 202: %v", err)
+	}
+
+	if summary.Status != "RUNNING" {
+		t.Errorf("Status = %q, want RUNNING", summary.Status)
+	}
+	if summary.FileName != "test.qkview" {
+		t.Errorf("FileName = %q, want test.qkview", summary.FileName)
+	}
+	if summary.CaseNumber != "01287164" {
+		t.Errorf("CaseNumber = %q, want 01287164", summary.CaseNumber)
+	}
+	// Fallback GUI URL should be populated when gui_uri is null
+	wantGUI := "https://ihealth.f5.com/qkview-analyzer/qv/26991271"
+	if summary.GUIURL != wantGUI {
+		t.Errorf("GUIURL = %q, want fallback %q", summary.GUIURL, wantGUI)
+	}
 }

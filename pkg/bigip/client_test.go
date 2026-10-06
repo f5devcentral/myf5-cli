@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"testing"
 )
@@ -126,5 +127,69 @@ func TestDownloadFromURI(t *testing.T) {
 	}
 	if !progressCalled {
 		t.Errorf("expected progress callback to be called")
+	}
+}
+
+func TestDeleteQKView(t *testing.T) {
+	var receivedMethod, receivedPath, receivedAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedMethod = r.Method
+		receivedPath = r.URL.Path
+		receivedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	err := c.DeleteQKView(context.Background(), "test.qkview")
+	if err != nil {
+		t.Fatalf("DeleteQKView failed: %v", err)
+	}
+
+	if receivedMethod != http.MethodDelete {
+		t.Errorf("expected DELETE method, got %s", receivedMethod)
+	}
+	if receivedPath != "/mgmt/cm/autodeploy/qkview/test.qkview" {
+		t.Errorf("unexpected path: %s", receivedPath)
+	}
+	if receivedAuth == "" {
+		t.Errorf("expected basic auth header")
+	}
+
+	// Test invalid filename rejection
+	if err := c.DeleteQKView(context.Background(), "../invalid"); err == nil {
+		t.Errorf("expected error for path traversal filename")
+	}
+}
+
+func TestGenerateQKViewDefaultFilenameISO8601(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"command":"run","utilCmdArgs":"-f /var/tmp/qkviews/test.qkview","status":"completed"}`))
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	filename, err := c.GenerateQKViewWithStatus(context.Background(), "", true, nil)
+	if err != nil {
+		t.Fatalf("GenerateQKViewWithStatus failed: %v", err)
+	}
+
+	re := regexp.MustCompile(`^qkview_.*_\d{8}T\d{6}Z\.qkview$`)
+	if !re.MatchString(filename) {
+		t.Errorf("expected filename matching ISO-8601 UTC timestamp pattern, got %q", filename)
 	}
 }

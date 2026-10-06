@@ -1381,6 +1381,9 @@ func handleIHealth(ctx context.Context, args []string) {
 			os.Exit(1)
 		}
 		bar.Finish(fmt.Sprintf("QKView uploaded. iHealth ID: %s (Status: %s)", resp.ID, resp.Status))
+		if resp.ID != "" {
+			fmt.Printf("    https://ihealth.f5.com/qkview-analyzer/qv/%s\n", resp.ID)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown ihealth action '%s'\n", action)
 		os.Exit(1)
@@ -1577,7 +1580,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		if strings.EqualFold(targetKind, "BIG-IQ") {
 			fmt.Printf("Usage: myf5 %s [ready <host> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
 		} else {
-			fmt.Printf("Usage: myf5 %s [ready <host> | qkview <host> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
+			fmt.Printf("Usage: myf5 %s [ready <host> | qkview <host> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--keep-remote]\n", cmdName)
 		}
 		os.Exit(1)
 	}
@@ -1591,6 +1594,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	method := "auto"
 	destPath := ""
 	keyPath := ""
+	keepRemote := false
 
 	for i := 0; i < len(actionArgs); i++ {
 		arg := actionArgs[i]
@@ -1635,9 +1639,20 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			}
 		} else if strings.HasPrefix(arg, "--identity=") {
 			keyPath = strings.TrimPrefix(arg, "--identity=")
+		} else if arg == "--keep-remote" || arg == "--no-delete" || arg == "--no-cleanup" {
+			keepRemote = true
 		} else if !strings.HasPrefix(arg, "-") {
 			positional = append(positional, arg)
 		}
+	}
+
+	method = strings.ToLower(strings.TrimSpace(method))
+	if method != "auto" && method != "icontrol" && method != "scp" && method != "ssh" {
+		fmt.Fprintf(os.Stderr, "[ERROR] Invalid method %q. Valid methods: 'auto', 'icontrol', 'scp'\n", method)
+		os.Exit(1)
+	}
+	if method == "ssh" {
+		method = "scp"
 	}
 
 	switch action {
@@ -1710,7 +1725,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	case "qkview":
 		if len(positional) < 1 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s qkview <host> [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s qkview <host> [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--keep-remote]\n", cmdName)
 			os.Exit(1)
 		}
 		host := positional[0]
@@ -1739,7 +1754,16 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		client := bigip.NewClient(host, port, user, pw)
 		spinner := progress.NewSpinner(fmt.Sprintf("Generating diagnostic QKView on %s", host))
 		spinner.Start()
-		remoteFile, err := client.GenerateQKViewWithStatus(ctx, "", true, func(status string) {
+
+		var requestedFilename string
+		if destPath != "" && strings.HasSuffix(destPath, ".qkview") {
+			candidate := filepath.Base(destPath)
+			if err := bigip.ValidateQKViewFilename(candidate); err == nil {
+				requestedFilename = candidate
+			}
+		}
+
+		remoteFile, err := client.GenerateQKViewWithStatus(ctx, requestedFilename, true, func(status string) {
 			spinner.SetMessage(status)
 		})
 		if err != nil {
@@ -1754,10 +1778,28 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		spinner.Success(fmt.Sprintf("QKView generated on appliance: /var/tmp/qkviews/%s", remoteFile))
 
 		destFile := filepath.Join(getDefaultDownloadsDir(), remoteFile)
+		if destPath != "" {
+			if fi, err := os.Stat(destPath); err == nil && fi.IsDir() {
+				destFile = filepath.Join(destPath, remoteFile)
+			} else {
+				destFile = destPath
+			}
+		}
+
+		var transferMethod bigip.TransferMethod
+		switch method {
+		case "icontrol":
+			transferMethod = bigip.MethodIControl
+		case "scp":
+			transferMethod = bigip.MethodSCP
+		default:
+			transferMethod = bigip.MethodAuto
+		}
+
 		bar := progress.NewBar(0, "Downloading diagnostic QKView")
 		qkOpts := bigip.TransferOptions{
 			TargetType:   targetKind,
-			Method:       bigip.MethodAuto,
+			Method:       transferMethod,
 			Username:     user,
 			Password:     pw,
 			Port:         port,
@@ -1765,9 +1807,9 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			Timeout:      30 * time.Second,
 		}
 		logFn := func(format string, args ...any) {
-			bar.Abort("REST download failed")
+			bar.Abort("Primary download failed")
 			fmt.Printf("\n[FAILOVER] "+format+"\n", args...)
-			bar = progress.NewBar(0, "Downloading via SCP fallback")
+			bar = progress.NewBar(0, "Downloading via fallback")
 		}
 		savedFile, methodUsed, err := bigip.DownloadFileWithFailover(ctx, host, "/var/tmp/qkviews/"+remoteFile, destFile, qkOpts, logFn, func(transferred, total int64) {
 			bar.Total = total
@@ -1783,6 +1825,16 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			os.Exit(1)
 		}
 		bar.Finish(fmt.Sprintf("Diagnostic QKView saved (%s) to %s", strings.ToUpper(string(methodUsed)), savedFile))
+
+		if !keepRemote {
+			if cleanupErr := client.DeleteQKView(ctx, remoteFile); cleanupErr != nil {
+				fmt.Fprintf(os.Stderr, "[WARNING] Failed to clean up appliance temporary file /var/tmp/qkviews/%s: %v\n", remoteFile, cleanupErr)
+			} else {
+				fmt.Printf("Appliance temporary file /var/tmp/qkviews/%s cleaned up.\n", remoteFile)
+			}
+		} else {
+			fmt.Printf("Appliance temporary file preserved at /var/tmp/qkviews/%s (--keep-remote).\n", remoteFile)
+		}
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown %s action '%s'\n", cmdName, action)
