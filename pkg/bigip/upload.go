@@ -36,6 +36,27 @@ func ValidateRemoteAppliancePath(p string) error {
 	return nil
 }
 
+// ValidateApplianceDownloadPath ensures that appliance file downloads are strictly restricted
+// to diagnostic archives (.qkview) and software images (.iso).
+// Arbitrary remote file retrieval (e.g. /etc/shadow, /config/bigip.conf) is forbidden.
+func ValidateApplianceDownloadPath(p string) error {
+	if p == "" {
+		return errors.New("remote appliance download path cannot be empty")
+	}
+	if strings.Contains(p, "..") {
+		return fmt.Errorf("prohibited remote appliance path %q: path traversal forbidden", p)
+	}
+	clean := path.Clean(p)
+	ext := strings.ToLower(path.Ext(clean))
+	if ext != ".qkview" && ext != ".iso" {
+		return fmt.Errorf("prohibited download file %q: only .qkview and .iso files can be downloaded from appliances", p)
+	}
+	if !validRemotePathRegex.MatchString(clean) {
+		return fmt.Errorf("prohibited remote appliance path %q: contains illegal characters", p)
+	}
+	return nil
+}
+
 // DefaultUploadChunkSize is 512KB (524,288 bytes), the standard chunk size for
 // F5 BIG-IP and BIG-IQ iControl REST file transfer endpoints.
 const DefaultUploadChunkSize = 512 * 1024

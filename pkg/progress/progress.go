@@ -15,6 +15,16 @@ var (
 	brailleFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 )
 
+// getTerminalWidth returns the width of the terminal if w is a TTY file, defaulting to 80.
+func getTerminalWidth(w io.Writer) int {
+	if f, ok := w.(*os.File); ok {
+		if width, _, err := term.GetSize(int(f.Fd())); err == nil && width > 0 {
+			return width
+		}
+	}
+	return 80
+}
+
 // Bar represents a terminal progress bar for bounded transfers (uploads/downloads).
 type Bar struct {
 	Total       int64
@@ -90,20 +100,32 @@ func (b *Bar) Update(current int64) {
 	}
 
 	if b.isTTY {
+		termWidth := getTerminalWidth(b.Writer)
+		if termWidth < 40 {
+			termWidth = 40
+		}
+		// Calculate inner bar width dynamically to avoid 80-col wrap
+		barWidth := termWidth - 55
+		if barWidth < 10 {
+			barWidth = 10
+		} else if barWidth > 30 {
+			barWidth = 30
+		}
+
 		// Render visual bar
 		filled := 0
 		if b.Total > 0 {
-			filled = int((float64(current) / float64(b.Total)) * float64(b.width))
-			if filled > b.width {
-				filled = b.width
+			filled = int((float64(current) / float64(b.Total)) * float64(barWidth))
+			if filled > barWidth {
+				filled = barWidth
 			}
 		}
-		empty := b.width - filled
+		empty := barWidth - filled
 		var barStr string
 		if filled > 0 {
 			barStr = strings.Repeat("=", filled-1) + ">" + strings.Repeat(" ", empty)
 		} else {
-			barStr = strings.Repeat(" ", b.width)
+			barStr = strings.Repeat(" ", barWidth)
 		}
 
 		line := fmt.Sprintf("\r%-12s [%s] %5.1f%% (%s / %s) %s/s  %-10s",
@@ -115,6 +137,10 @@ func (b *Bar) Update(current int64) {
 			FormatBytes(int64(speed)),
 			etaStr,
 		)
+		// Clamp line length to terminal width - 1 to prevent cursor wrap
+		if len(line) >= termWidth {
+			line = line[:termWidth-1]
+		}
 		_, _ = fmt.Fprint(b.Writer, line)
 	} else {
 		// Non-TTY (piped / CI): log at 10% milestones or every 5 seconds
@@ -230,11 +256,23 @@ func (s *Spinner) Start() {
 				frameIdx++
 				s.mu.Unlock()
 
+				termWidth := getTerminalWidth(s.Writer)
+				if termWidth < 40 {
+					termWidth = 40
+				}
 				var line string
 				if msg != "" {
 					line = fmt.Sprintf("\r\033[K[%s] %s... [%s elapsed] (%s)", frame, s.Label, FormatDuration(elapsed), msg)
 				} else {
 					line = fmt.Sprintf("\r\033[K[%s] %s... [%s elapsed]", frame, s.Label, FormatDuration(elapsed))
+				}
+				// Clamp line length to prevent cursor wrap
+				if len(line) >= termWidth {
+					if termWidth > 6 {
+						line = line[:termWidth-5] + "...)"
+					} else {
+						line = line[:termWidth-1]
+					}
 				}
 				_, _ = fmt.Fprint(s.Writer, line)
 			}

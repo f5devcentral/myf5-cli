@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -51,7 +52,22 @@ func DownloadFile(
 	}
 
 	totalSize := resp.ContentLength
-	outputPath = filepath.Clean(outputPath)
+	cleanOut := filepath.Clean(outputPath)
+	if strings.HasSuffix(outputPath, "/") || strings.HasSuffix(outputPath, string(filepath.Separator)) {
+		uBase := path.Base(downloadURL)
+		if uBase == "" || uBase == "." || uBase == "/" {
+			uBase = "download.bin"
+		}
+		cleanOut = filepath.Join(cleanOut, uBase)
+	} else if fi, statErr := os.Stat(cleanOut); statErr == nil && fi.IsDir() {
+		uBase := path.Base(downloadURL)
+		if uBase == "" || uBase == "." || uBase == "/" {
+			uBase = "download.bin"
+		}
+		cleanOut = filepath.Join(cleanOut, uBase)
+	}
+	outputPath = cleanOut
+
 	if dir := filepath.Dir(outputPath); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("failed to create destination directory %s: %w", dir, err)

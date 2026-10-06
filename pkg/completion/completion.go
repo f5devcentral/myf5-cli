@@ -1,5 +1,5 @@
 // Package completion provides shell autocompletion script generators for myf5.
-// Supported shells: Bash, Zsh, and Fish.
+// Supported shells: Bash, Zsh, Fish, and PowerShell.
 package completion
 
 import (
@@ -9,7 +9,7 @@ import (
 
 // SupportedShells returns the list of shells supported for completion script generation.
 func SupportedShells() []string {
-	return []string{"bash", "zsh", "fish"}
+	return []string{"bash", "zsh", "fish", "powershell"}
 }
 
 // Generate writes the completion script for the specified shell to w.
@@ -21,8 +21,10 @@ func Generate(shell string, w io.Writer) error {
 		return GenZshCompletion(w)
 	case "fish":
 		return GenFishCompletion(w)
+	case "powershell", "pwsh":
+		return GenPowerShellCompletion(w)
 	default:
-		return fmt.Errorf("unsupported shell %q (supported: bash, zsh, fish)", shell)
+		return fmt.Errorf("unsupported shell %q (supported: bash, zsh, fish, powershell)", shell)
 	}
 }
 
@@ -40,7 +42,7 @@ _myf5_completions() {
     local ihealth_actions="list upload"
     local bigip_actions="ready info serial qkview push download"
     local bigiq_actions="ready info serial push download"
-    local completion_shells="bash zsh fish"
+    local completion_shells="bash zsh fish powershell"
     local product_families="BIG-IP NGINX BIG-IQ"
 
     if [[ $cword -eq 1 ]]; then
@@ -63,7 +65,7 @@ _myf5_completions() {
                     ;;
             esac
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "--profile -o --output --push --push-method --push-dest --push-user --push-port --push-key --push-target" -- "$cur") )
+                COMPREPLY=( $(compgen -W "--profile -o --output --push --push-method --push-dest --push-user --push-port --push-key --push-cert --push-cert-key --push-key-file --push-target" -- "$cur") )
                 return 0
             fi
             ;;
@@ -93,7 +95,7 @@ _myf5_completions() {
                 return 0
             fi
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "-u --user -p --port -m --method -d --dest -o --output -i --identity" -- "$cur") )
+                COMPREPLY=( $(compgen -W "-u --user -p --port -m --method -d --dest -o --output -i --identity --cert --cert-key --key-file --json --keep-remote" -- "$cur") )
                 return 0
             fi
             ;;
@@ -103,19 +105,19 @@ _myf5_completions() {
                 return 0
             fi
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "-u --user -p --port -m --method -d --dest -o --output -i --identity" -- "$cur") )
+                COMPREPLY=( $(compgen -W "-u --user -p --port -m --method -d --dest -o --output -i --identity --cert --cert-key --key-file --json" -- "$cur") )
                 return 0
             fi
             ;;
         push)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "-m --method -d --dest -t --target -u --user -p --port -i --identity" -- "$cur") )
+                COMPREPLY=( $(compgen -W "-m --method -d --dest -t --target -u --user -p --port -i --identity --cert --cert-key --key-file" -- "$cur") )
                 return 0
             fi
             ;;
         pull|fetch)
             if [[ "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "-m --method -o --output -t --target -u --user -p --port -i --identity" -- "$cur") )
+                COMPREPLY=( $(compgen -W "-m --method -o --output -t --target -u --user -p --port -i --identity --cert --cert-key --key-file" -- "$cur") )
                 return 0
             fi
             ;;
@@ -260,6 +262,10 @@ _myf5() {
                         '(-d --dest)'{-d,--dest}'[Remote destination path]:dest:' \
                         '(-o --output)'{-o,--output}'[Local destination file path]:file:_files' \
                         '(-i --identity)'{-i,--identity}'[SSH private key path]:file:_files' \
+                        '--cert[Path to client certificate file (PEM)]:file:_files' \
+                        '--cert-key[Path to client certificate private key]:file:_files' \
+                        '--key-file[Path to client certificate private key]:file:_files' \
+                        '--keep-remote[Keep remote QKView on appliance after download]' \
                         '--json[Output in JSON format]' \
                         '1: :->b_action' \
                         '2:host:_hosts'
@@ -286,6 +292,9 @@ _myf5() {
                         '(-d --dest)'{-d,--dest}'[Remote destination path]:dest:' \
                         '(-o --output)'{-o,--output}'[Local destination file path]:file:_files' \
                         '(-i --identity)'{-i,--identity}'[SSH private key path]:file:_files' \
+                        '--cert[Path to client certificate file (PEM)]:file:_files' \
+                        '--cert-key[Path to client certificate private key]:file:_files' \
+                        '--key-file[Path to client certificate private key]:file:_files' \
                         '--json[Output in JSON format]' \
                         '1: :->biq_action' \
                         '2:host:_hosts'
@@ -304,6 +313,9 @@ _myf5() {
                         '(-u --user)'{-u,--user}'[Administrative user]:user:' \
                         '(-p --port)'{-p,--port}'[Port]:port:' \
                         '(-i --identity)'{-i,--identity}'[SSH private key path]:file:_files' \
+                        '--cert[Path to client certificate file (PEM)]:file:_files' \
+                        '--cert-key[Path to client certificate private key]:file:_files' \
+                        '--key-file[Path to client certificate private key]:file:_files' \
                         '1:host:_hosts' \
                         '2:file:_files'
                     ;;
@@ -315,12 +327,15 @@ _myf5() {
                         '(-u --user)'{-u,--user}'[Administrative user]:user:' \
                         '(-p --port)'{-p,--port}'[Port]:port:' \
                         '(-i --identity)'{-i,--identity}'[SSH private key path]:file:_files' \
+                        '--cert[Path to client certificate file (PEM)]:file:_files' \
+                        '--cert-key[Path to client certificate private key]:file:_files' \
+                        '--key-file[Path to client certificate private key]:file:_files' \
                         '1:host:_hosts' \
                         '2:remote_file:'
                     ;;
                 completion)
                     local -a shells
-                    shells=('bash:Generate Bash completion script' 'zsh:Generate Zsh completion script' 'fish:Generate Fish completion script')
+                    shells=('bash:Generate Bash completion script' 'zsh:Generate Zsh completion script' 'fish:Generate Fish completion script' 'powershell:Generate PowerShell completion script')
                     _describe -t shells 'shell' shells
                     ;;
             esac
@@ -401,6 +416,10 @@ complete -c myf5 -n "__fish_seen_subcommand_from bigip" -s u -l user -d "BIG-IP 
 complete -c myf5 -n "__fish_seen_subcommand_from bigip" -s p -l port -d "Management HTTPS/SSH port"
 complete -c myf5 -n "__fish_seen_subcommand_from bigip" -s o -l output -F -d "Local destination file path"
 complete -c myf5 -n "__fish_seen_subcommand_from bigip" -s i -l identity -F -d "SSH private key path"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip" -l cert -F -d "Client certificate file (PEM)"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip" -l cert-key -F -d "Client certificate private key"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip" -l key-file -F -d "Client certificate private key"
+complete -c myf5 -n "__fish_seen_subcommand_from bigip" -l keep-remote -d "Keep remote QKView on appliance"
 complete -c myf5 -n "__fish_seen_subcommand_from bigip" -l json -d "Output in JSON format"
 
 # BIG-IQ subcommands
@@ -413,6 +432,9 @@ complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -s u -l user -d "BIG-IQ 
 complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -s p -l port -d "Management HTTPS/SSH port"
 complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -s o -l output -F -d "Local destination file path"
 complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -s i -l identity -F -d "SSH private key path"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -l cert -F -d "Client certificate file (PEM)"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -l cert-key -F -d "Client certificate private key"
+complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -l key-file -F -d "Client certificate private key"
 complete -c myf5 -n "__fish_seen_subcommand_from bigiq" -l json -d "Output in JSON format"
 
 # Push command
@@ -420,15 +442,87 @@ complete -c myf5 -n "__fish_seen_subcommand_from push" -s m -l method -d "Transf
 complete -c myf5 -n "__fish_seen_subcommand_from push" -s t -l target -d "Target appliance (BIG-IP or BIG-IQ)"
 complete -c myf5 -n "__fish_seen_subcommand_from push" -s d -l dest -d "Remote destination directory"
 complete -c myf5 -n "__fish_seen_subcommand_from push" -s i -l identity -F -d "SSH private key path"
+complete -c myf5 -n "__fish_seen_subcommand_from push" -l cert -F -d "Client certificate file (PEM)"
+complete -c myf5 -n "__fish_seen_subcommand_from push" -l cert-key -F -d "Client certificate private key"
+complete -c myf5 -n "__fish_seen_subcommand_from push" -l key-file -F -d "Client certificate private key"
 
 # Pull command
 complete -c myf5 -n "__fish_seen_subcommand_from pull" -s m -l method -d "Transfer method (auto, icontrol, scp)"
 complete -c myf5 -n "__fish_seen_subcommand_from pull" -s t -l target -d "Target appliance (BIG-IP or BIG-IQ)"
 complete -c myf5 -n "__fish_seen_subcommand_from pull" -s o -l output -F -d "Local destination file path"
 complete -c myf5 -n "__fish_seen_subcommand_from pull" -s i -l identity -F -d "SSH private key path"
+complete -c myf5 -n "__fish_seen_subcommand_from pull" -l cert -F -d "Client certificate file (PEM)"
+complete -c myf5 -n "__fish_seen_subcommand_from pull" -l cert-key -F -d "Client certificate private key"
+complete -c myf5 -n "__fish_seen_subcommand_from pull" -l key-file -F -d "Client certificate private key"
 
 # Completion shells
-complete -c myf5 -n "__fish_seen_subcommand_from completion" -a "bash zsh fish"
+complete -c myf5 -n "__fish_seen_subcommand_from completion" -a "bash zsh fish powershell"
+`
+	_, err := io.WriteString(w, script)
+	return err
+}
+
+// GenPowerShellCompletion outputs a PowerShell completion script to w.
+func GenPowerShellCompletion(w io.Writer) error {
+	script := `# powershell completion for myf5
+Register-ArgumentCompleter -Native -CommandName myf5 -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+
+    $commandElements = $commandAst.CommandElements
+    $command = @(
+        $commandElements |
+        Select-Object -ExpandProperty Value |
+        Where-Object { -not [string]::IsNullOrEmpty($_) }
+    )
+
+    $commands = @('downloads', 'cases', 'ihealth', 'bigip', 'bigiq', 'push', 'pull', 'doctor', 'completion', 'version', 'help')
+    $downloadsActions = @('browse', 'families', 'lines', 'versions', 'containers', 'files', 'get')
+    $casesActions = @('list', 'metadata', 'get', 'comment', 'create')
+    $ihealthActions = @('list', 'upload')
+    $bigipActions = @('ready', 'info', 'serial', 'qkview', 'push', 'download')
+    $bigiqActions = @('ready', 'info', 'serial', 'push', 'download')
+    $completionShells = @('bash', 'zsh', 'fish', 'powershell', 'pwsh')
+    $productFamilies = @('BIG-IP', 'NGINX', 'BIG-IQ')
+
+    if ($command.Count -eq 1 -or ($command.Count -eq 2 -and $wordToComplete)) {
+        $commands | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+        }
+        return
+    }
+
+    $subcommand = $command[1]
+    if ($command.Count -eq 2 -or ($command.Count -eq 3 -and $wordToComplete)) {
+        switch ($subcommand) {
+            'downloads' { $downloadsActions }
+            'download'  { $downloadsActions }
+            'cases'     { $casesActions }
+            'case'      { $casesActions }
+            'ihealth'   { $ihealthActions }
+            'bigip'     { $bigipActions }
+            'bigiq'     { $bigiqActions }
+            'completion'{ $completionShells }
+            default     { @() }
+        } | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+        }
+        return
+    }
+
+    if ($subcommand -in @('downloads', 'download')) {
+        $action = $command[2]
+        if ($command.Count -eq 3 -or ($command.Count -eq 4 -and $wordToComplete)) {
+            switch ($action) {
+                { $_ -in @('lines', 'versions', 'containers', 'files', 'get') } {
+                    $productFamilies | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+                    }
+                    return
+                }
+            }
+        }
+    }
+}
 `
 	_, err := io.WriteString(w, script)
 	return err

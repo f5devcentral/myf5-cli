@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -21,16 +22,23 @@ import (
 
 // SystemInfo encapsulates appliance identification, hardware metadata, and licensing.
 type SystemInfo struct {
-	ChassisSerialNumber string `json:"chassisSerialNumber,omitempty"`
-	RegistrationKey     string `json:"registrationKey,omitempty"`
-	Platform            string `json:"platform,omitempty"`
-	Product             string `json:"product,omitempty"`
-	Version             string `json:"version,omitempty"`
-	Build               string `json:"build,omitempty"`
-	Edition             string `json:"edition,omitempty"`
-	Hostname            string `json:"hostname,omitempty"`
-	BaseMac             string `json:"baseMac,omitempty"`
-	Source              string `json:"source,omitempty"`
+	ChassisSerialNumber string            `json:"chassisSerialNumber,omitempty"`
+	RegistrationKey     string            `json:"registrationKey,omitempty"`
+	Platform            string            `json:"platform,omitempty"`
+	Product             string            `json:"product,omitempty"`
+	Version             string            `json:"version,omitempty"`
+	Build               string            `json:"build,omitempty"`
+	Edition             string            `json:"edition,omitempty"`
+	Hostname            string            `json:"hostname,omitempty"`
+	BaseMac             string            `json:"baseMac,omitempty"`
+	ProvisionedModules  map[string]string `json:"provisionedModules,omitempty"`
+	CaseAttributes      map[string]string `json:"caseAttributes,omitempty"`
+	Source              string            `json:"source,omitempty"`
+}
+
+func isInternalModule(mod string) bool {
+	m := strings.ToLower(strings.TrimSpace(mod))
+	return m == "" || m == "mgmt" || m == "tmm" || m == "host" || m == "internal" || m == "none"
 }
 
 // PreferredSerialNumber returns the primary identifier required for support cases and entitlements.
@@ -44,6 +52,46 @@ func (s *SystemInfo) PreferredSerialNumber() string {
 		return s.ChassisSerialNumber
 	}
 	return s.RegistrationKey
+}
+
+// PopulateCaseAttributes computes and stores standard attributes for F5 Support Case creation.
+func (s *SystemInfo) PopulateCaseAttributes() {
+	if s == nil {
+		return
+	}
+	attrs := map[string]string{
+		"productFamily": "BIG-IP",
+		"serialNumber":  s.PreferredSerialNumber(),
+		"version":       s.Version,
+		"hostName":      s.Hostname,
+	}
+
+	product := "BIG-IP"
+	if len(s.ProvisionedModules) > 0 {
+		var active []string
+		for mod, level := range s.ProvisionedModules {
+			if level != "none" && level != "" && !isInternalModule(mod) {
+				active = append(active, strings.ToUpper(mod))
+			}
+		}
+		sort.Strings(active)
+		if len(active) > 0 {
+			product = "BIG-IP " + strings.Join(active, "/")
+		}
+	} else if s.Product != "" {
+		product = s.Product
+	}
+	attrs["product"] = product
+
+	if strings.Contains(s.Hostname, ".ec2.internal") || strings.Contains(s.Hostname, ".compute.internal") || s.Platform == "Z100" {
+		attrs["cloudProvider"] = "AWS"
+	} else if strings.Contains(s.Hostname, "azure") || strings.Contains(s.Hostname, "trafficmanager.net") {
+		attrs["cloudProvider"] = "Azure"
+	} else if strings.Contains(s.Hostname, "google") || strings.Contains(s.Hostname, "gce") {
+		attrs["cloudProvider"] = "Google"
+	}
+
+	s.CaseAttributes = attrs
 }
 
 // Summary returns a human-readable multi-line representation of the appliance info.
@@ -81,8 +129,31 @@ func (s *SystemInfo) Summary() string {
 	if s.Hostname != "" {
 		b.WriteString(fmt.Sprintf("  Hostname:           %s\n", s.Hostname))
 	}
+	if len(s.ProvisionedModules) > 0 {
+		var mods []string
+		for k, v := range s.ProvisionedModules {
+			if v != "" && v != "none" {
+				mods = append(mods, fmt.Sprintf("%s (%s)", k, v))
+			}
+		}
+		sort.Strings(mods)
+		if len(mods) > 0 {
+			b.WriteString(fmt.Sprintf("  Provisioned:        %s\n", strings.Join(mods, ", ")))
+		}
+	}
 	if s.Source != "" {
 		b.WriteString(fmt.Sprintf("  Source:             %s\n", s.Source))
+	}
+	if len(s.CaseAttributes) > 0 {
+		b.WriteString("\nCase Creation Attributes (F5 Support):\n")
+		var keys []string
+		for k := range s.CaseAttributes {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			b.WriteString(fmt.Sprintf("  %-18s: %s\n", k, s.CaseAttributes[k]))
+		}
 	}
 	return b.String()
 }
@@ -197,9 +268,45 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 				}
 			}
 
+		case strings.HasSuffix(name, "var/prompt/hostname"):
+			scanner := bufio.NewScanner(tr)
+			if scanner.Scan() {
+				val := strings.TrimSpace(scanner.Text())
+				if val != "" && info.Hostname == "" {
+					info.Hostname = val
+				}
+			}
+
+		case strings.HasSuffix(name, "bigip_sys.conf"):
+			scanner := bufio.NewScanner(tr)
+			curMod := ""
+			provisionRe := regexp.MustCompile(`(?i)(?:sys\s+)?provision\s+([a-zA-Z0-9_-]+)\s*\{`)
+			levelRe := regexp.MustCompile(`(?i)level\s+([a-zA-Z0-9_-]+)`)
+			for scanner.Scan() {
+				line := scanner.Text()
+				if curMod != "" {
+					if m := levelRe.FindStringSubmatch(line); len(m) > 1 {
+						if !isInternalModule(curMod) {
+							if info.ProvisionedModules == nil {
+								info.ProvisionedModules = make(map[string]string)
+							}
+							info.ProvisionedModules[curMod] = strings.ToLower(m[1])
+						}
+					}
+					if strings.Contains(line, "}") {
+						curMod = ""
+					}
+				} else if m := provisionRe.FindStringSubmatch(line); len(m) > 1 {
+					curMod = strings.ToLower(m[1])
+				}
+			}
+
 		case name == "mcp_module.xml":
 			scanner := bufio.NewScanner(tr)
 			inSysInfo := false
+			isHostnameVar := false
+			curMod := ""
+			inUse := false
 			for scanner.Scan() {
 				line := scanner.Text()
 				if strings.Contains(line, "<system_information>") {
@@ -224,10 +331,61 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 				if m := mcpRegKeyRe.FindStringSubmatch(line); len(m) > 1 && m[1] != "" && info.RegistrationKey == "" {
 					info.RegistrationKey = strings.TrimSpace(m[1])
 				}
+
+				// MCP Hostname DB variable
+				if strings.Contains(line, "<name>hostname</name>") {
+					isHostnameVar = true
+					continue
+				}
+				if isHostnameVar {
+					if strings.Contains(line, "</db_variable>") {
+						isHostnameVar = false
+					} else if m := regexp.MustCompile(`<value>([^<]+)</value>`).FindStringSubmatch(line); len(m) > 1 {
+						val := strings.TrimSpace(m[1])
+						if val != "" && (info.Hostname == "" || !strings.Contains(info.Hostname, ".")) {
+							info.Hostname = val
+						}
+						isHostnameVar = false
+					}
+				}
+
+				// MCP Provision module items
+				if m := regexp.MustCompile(`<provision_name>([^<]+)</provision_name>`).FindStringSubmatch(line); len(m) > 1 {
+					curMod = strings.ToLower(strings.TrimSpace(m[1]))
+					inUse = false
+				}
+				if curMod != "" {
+					if strings.Contains(line, "<in_use>1</in_use>") {
+						inUse = true
+					}
+					if m := regexp.MustCompile(`<provision_level>([0-9]+)</provision_level>`).FindStringSubmatch(line); len(m) > 1 {
+						levelNum := m[1]
+						levelStr := "none"
+						switch levelNum {
+						case "2":
+							levelStr = "minimum"
+						case "3":
+							levelStr = "nominal"
+						case "4":
+							levelStr = "dedicated"
+						}
+						if !isInternalModule(curMod) && (inUse || levelNum != "1") {
+							if info.ProvisionedModules == nil {
+								info.ProvisionedModules = make(map[string]string)
+							}
+							if _, exists := info.ProvisionedModules[curMod]; !exists {
+								info.ProvisionedModules[curMod] = levelStr
+							}
+						}
+						curMod = ""
+						inUse = false
+					}
+				}
 			}
 		}
 	}
 
+	info.PopulateCaseAttributes()
 	return info, nil
 }
 
@@ -303,10 +461,26 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 		}
 	}
 
+	// 5. Provisioned Modules
+	provURL := fmt.Sprintf("%s/mgmt/tm/sys/provision", c.BaseURL())
+	req, err = http.NewRequestWithContext(ctx, http.MethodGet, provURL, nil)
+	if err == nil {
+		c.setAuth(req)
+		resp, err := c.HTTPClient.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+				parseProvisionJSON(body, info)
+			}
+		}
+	}
+
 	if info.ChassisSerialNumber == "" && info.RegistrationKey == "" && info.Version == "" {
 		return nil, fmt.Errorf("failed to retrieve system information from %s via iControl REST", c.Host)
 	}
 
+	info.PopulateCaseAttributes()
 	return info, nil
 }
 
@@ -354,13 +528,14 @@ func GetSystemInfoSSH(ctx context.Context, opts SCPOptions) (*SystemInfo, error)
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
-	cmd := `tmsh -q -c "show sys hardware; show sys version; show sys license; list sys global-settings hostname"`
+	cmd := `tmsh -q -c "show sys hardware; show sys version; show sys license; list sys global-settings hostname; list sys provision"`
 	if err := session.Run(cmd); err != nil {
 		return nil, fmt.Errorf("tmsh commands failed over SSH: %w (stderr: %s)", err, stderr.String())
 	}
 
 	info := parseTmshOutput(stdout.String())
 	info.Source = fmt.Sprintf("appliance: %s (SSH)", host)
+	info.PopulateCaseAttributes()
 	return info, nil
 }
 
@@ -428,6 +603,27 @@ func parseLicenseJSON(body []byte, info *SystemInfo) {
 	})
 }
 
+func parseProvisionJSON(body []byte, info *SystemInfo) {
+	var resp struct {
+		Items []struct {
+			Name  string `json:"name"`
+			Level string `json:"level"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &resp); err == nil && len(resp.Items) > 0 {
+		for _, item := range resp.Items {
+			lvl := strings.ToLower(strings.TrimSpace(item.Level))
+			name := strings.ToLower(strings.TrimSpace(item.Name))
+			if name != "" && lvl != "" && lvl != "none" && !isInternalModule(name) {
+				if info.ProvisionedModules == nil {
+					info.ProvisionedModules = make(map[string]string)
+				}
+				info.ProvisionedModules[name] = lvl
+			}
+		}
+	}
+}
+
 func findNestedString(node any, cb func(key, val string)) {
 	switch v := node.(type) {
 	case map[string]any:
@@ -467,9 +663,31 @@ func parseTmshOutput(output string) *SystemInfo {
 	editionRe := regexp.MustCompile(`(?i)Edition\s+(.+)`)
 	productRe := regexp.MustCompile(`(?i)Product\s+(.+)`)
 	hostnameRe := regexp.MustCompile(`(?i)hostname\s+([^\s;]+)`)
+	provisionRe := regexp.MustCompile(`(?i)(?:sys\s+)?provision\s+([a-zA-Z0-9_-]+)\s*\{`)
+	levelRe := regexp.MustCompile(`(?i)level\s+([a-zA-Z0-9_-]+)`)
 
+	curMod := ""
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
+		if curMod != "" {
+			if m := levelRe.FindStringSubmatch(line); len(m) > 1 {
+				lvl := strings.ToLower(m[1])
+				if !isInternalModule(curMod) && lvl != "none" {
+					if info.ProvisionedModules == nil {
+						info.ProvisionedModules = make(map[string]string)
+					}
+					info.ProvisionedModules[curMod] = lvl
+				}
+			}
+			if strings.Contains(line, "}") {
+				curMod = ""
+			}
+			continue
+		} else if m := provisionRe.FindStringSubmatch(line); len(m) > 1 {
+			curMod = strings.ToLower(m[1])
+			continue
+		}
+
 		if m := chassisRe.FindStringSubmatch(line); len(m) > 1 && info.ChassisSerialNumber == "" {
 			info.ChassisSerialNumber = m[1]
 		}

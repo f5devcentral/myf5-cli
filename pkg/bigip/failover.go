@@ -26,15 +26,17 @@ const (
 
 // TransferOptions configures connection, authentication, and destination parameters for appliance file transfers.
 type TransferOptions struct {
-	TargetType    string         // "bigip" or "bigiq" (default: "bigip")
-	Method        TransferMethod // "auto", "icontrol", "scp" (default: "auto")
-	Username      string         // Username for appliance authentication
-	Password      string         // Password for appliance authentication
-	Port          int            // Port override (0 for default: 443 for REST, 22 for SCP)
-	IdentityFile  string         // SSH private key file path for public key authentication
-	SSHPassphrase string         // Passphrase for encrypted private key
-	DestDir       string         // Remote destination directory for upload (default: "/shared/images")
-	Timeout       time.Duration  // Connection timeout
+	TargetType     string         // "bigip" or "bigiq" (default: "bigip")
+	Method         TransferMethod // "auto", "icontrol", "scp" (default: "auto")
+	Username       string         // Username for appliance authentication
+	Password       string         // Password for appliance authentication
+	Port           int            // Port override (0 for default: 443 for REST, 22 for SCP)
+	IdentityFile   string         // SSH private key file path for public key authentication
+	SSHPassphrase  string         // Passphrase for encrypted private key
+	DestDir        string         // Remote destination directory for upload (default: "/shared/images")
+	ClientCertPath string         // Path to TLS client certificate file (PEM) for mTLS
+	ClientKeyPath  string         // Path to TLS client certificate private key file (PEM)
+	Timeout        time.Duration  // Connection timeout
 }
 
 // FailoverLogger is a callback invoked when a primary transfer method fails and failover occurs.
@@ -76,8 +78,8 @@ func PushFileWithFailover(
 
 	case MethodAuto:
 		// Determine which method to try first based on available credentials.
-		// If an SSH identity key is provided or no password was given, try SCP first.
-		trySCPFirst := opts.IdentityFile != "" || (opts.Password == "" && os.Getenv("BIGIP_PASSWORD") == "" && os.Getenv("BIGIQ_PASSWORD") == "")
+		// If an SSH identity key is provided or no password / client cert was given, try SCP first.
+		trySCPFirst := opts.IdentityFile != "" || (opts.Password == "" && opts.ClientCertPath == "" && os.Getenv("BIGIP_PASSWORD") == "" && os.Getenv("BIGIQ_PASSWORD") == "")
 
 		if trySCPFirst {
 			destPath, scpErr := pushViaSCP(ctx, host, localFile, destDir, opts, progressCb)
@@ -133,6 +135,10 @@ func DownloadFileWithFailover(
 		method = MethodAuto
 	}
 
+	if err := ValidateApplianceDownloadPath(remotePath); err != nil {
+		return "", method, err
+	}
+
 	switch method {
 	case MethodIControl:
 		savedPath, err := downloadViaIControl(ctx, host, remotePath, localDest, opts, progressCb)
@@ -157,7 +163,7 @@ func DownloadFileWithFailover(
 			strings.HasSuffix(cleanRemote, ".iso") ||
 			strings.HasSuffix(cleanRemote, ".qkview")
 
-		tryRestFirst := isRestFriendly || (opts.IdentityFile == "" && (opts.Password != "" || os.Getenv("BIGIP_PASSWORD") != "" || os.Getenv("BIGIQ_PASSWORD") != ""))
+		tryRestFirst := isRestFriendly || opts.ClientCertPath != "" || (opts.IdentityFile == "" && (opts.Password != "" || os.Getenv("BIGIP_PASSWORD") != "" || os.Getenv("BIGIQ_PASSWORD") != ""))
 
 		if tryRestFirst {
 			savedPath, restErr := downloadViaIControl(ctx, host, remotePath, localDest, opts, progressCb)
@@ -199,23 +205,42 @@ func DownloadFileWithFailover(
 	}
 }
 
+func newClientFromOptions(host string, opts TransferOptions, defaultPort int) *Client {
+	port := opts.Port
+	if port <= 0 {
+		port = defaultPort
+	}
+	user := opts.Username
+	if user == "" {
+		user = "admin"
+	}
+	c, err := NewClientWithOptions(ClientOptions{
+		Host:           host,
+		Port:           port,
+		Username:       user,
+		Password:       opts.Password,
+		SkipTLSVerify:  true,
+		ClientCertPath: opts.ClientCertPath,
+		ClientKeyPath:  opts.ClientKeyPath,
+		Timeout:        opts.Timeout,
+	})
+	if err == nil {
+		return c
+	}
+	c = NewClient(host, port, user, opts.Password)
+	if opts.Timeout > 0 {
+		c.HTTPClient.Timeout = opts.Timeout
+	}
+	return c
+}
+
 func pushViaIControl(
 	ctx context.Context,
 	host, localFile, destDir string,
 	opts TransferOptions,
 	progressCb func(transferred, total int64),
 ) (string, error) {
-	port := opts.Port
-	user := opts.Username
-	if user == "" {
-		user = "admin"
-	}
-	pass := opts.Password
-
-	client := NewClient(host, port, user, pass)
-	if opts.Timeout > 0 {
-		client.HTTPClient.Timeout = opts.Timeout
-	}
+	client := newClientFromOptions(host, opts, 443)
 
 	remoteUploaded, err := client.UploadFile(ctx, localFile, "", progressCb)
 	if err != nil {
@@ -258,17 +283,7 @@ func downloadViaIControl(
 	opts TransferOptions,
 	progressCb func(transferred, total int64),
 ) (string, error) {
-	port := opts.Port
-	user := opts.Username
-	if user == "" {
-		user = "admin"
-	}
-	pass := opts.Password
-
-	client := NewClient(host, port, user, pass)
-	if opts.Timeout > 0 {
-		client.HTTPClient.Timeout = opts.Timeout
-	}
+	client := newClientFromOptions(host, opts, 443)
 
 	cleanLocal := filepath.Clean(localDest)
 	base := path.Base(path.Clean(remotePath))
@@ -302,4 +317,131 @@ func downloadViaSCP(
 		Timeout:    opts.Timeout,
 	}
 	return SCPDownload(ctx, remotePath, localDest, scpOpts, progressCb)
+}
+
+// GenerateQKViewWithFailover generates a diagnostic QKView via iControl REST or SSH.
+// In "auto" mode, it chooses based on available credentials and auto-fails over if one fails.
+func GenerateQKViewWithFailover(
+	ctx context.Context,
+	host string,
+	requestedFilename string,
+	complete bool,
+	opts TransferOptions,
+	logFn FailoverLogger,
+	statusCb func(status string),
+) (string, TransferMethod, error) {
+	method := opts.Method
+	if method == "" {
+		method = MethodAuto
+	}
+
+	switch method {
+	case MethodIControl:
+		client := newClientFromOptions(host, opts, 443)
+		filename, err := client.GenerateQKViewWithStatus(ctx, requestedFilename, complete, statusCb)
+		if err != nil {
+			return "", MethodIControl, fmt.Errorf("iControl REST QKView generation failed: %w", err)
+		}
+		return filename, MethodIControl, nil
+
+	case MethodSCP:
+		scpOpts := SCPOptions{
+			Host:       host,
+			Port:       opts.Port,
+			Username:   opts.Username,
+			Password:   opts.Password,
+			KeyPath:    opts.IdentityFile,
+			Passphrase: opts.SSHPassphrase,
+			Timeout:    opts.Timeout,
+		}
+		filename, err := GenerateQKViewSSH(ctx, scpOpts, requestedFilename, complete, statusCb)
+		if err != nil {
+			return "", MethodSCP, fmt.Errorf("SSH QKView generation failed: %w", err)
+		}
+		return filename, MethodSCP, nil
+
+	case MethodAuto:
+		// If password or client certificate is provided and no key, try iControl REST first
+		tryRestFirst := opts.Password != "" || opts.ClientCertPath != "" || (opts.IdentityFile == "" && os.Getenv("BIGIP_PASSWORD") != "")
+
+		if tryRestFirst {
+			client := newClientFromOptions(host, opts, 443)
+			filename, restErr := client.GenerateQKViewWithStatus(ctx, requestedFilename, complete, statusCb)
+			if restErr == nil {
+				return filename, MethodIControl, nil
+			}
+
+			if logFn != nil {
+				logFn("iControl REST QKView generation failed (%v). Automatically falling back to SSH...", restErr)
+			}
+
+			scpOpts := SCPOptions{
+				Host:       host,
+				Port:       opts.Port,
+				Username:   opts.Username,
+				Password:   opts.Password,
+				KeyPath:    opts.IdentityFile,
+				Passphrase: opts.SSHPassphrase,
+				Timeout:    opts.Timeout,
+			}
+			filename, sshErr := GenerateQKViewSSH(ctx, scpOpts, requestedFilename, complete, statusCb)
+			if sshErr == nil {
+				return filename, MethodSCP, nil
+			}
+
+			return "", MethodAuto, fmt.Errorf("both QKView generation methods failed:\n  1. iControl REST error: %v\n  2. SSH error: %v", restErr, sshErr)
+		}
+
+		// Try SSH first
+		scpOpts := SCPOptions{
+			Host:       host,
+			Port:       opts.Port,
+			Username:   opts.Username,
+			Password:   opts.Password,
+			KeyPath:    opts.IdentityFile,
+			Passphrase: opts.SSHPassphrase,
+			Timeout:    opts.Timeout,
+		}
+		filename, sshErr := GenerateQKViewSSH(ctx, scpOpts, requestedFilename, complete, statusCb)
+		if sshErr == nil {
+			return filename, MethodSCP, nil
+		}
+
+		if logFn != nil {
+			logFn("SSH QKView generation failed (%v). Automatically falling back to iControl REST...", sshErr)
+		}
+
+		client := newClientFromOptions(host, opts, 443)
+		filename, restErr := client.GenerateQKViewWithStatus(ctx, requestedFilename, complete, statusCb)
+		if restErr == nil {
+			return filename, MethodIControl, nil
+		}
+
+		return "", MethodAuto, fmt.Errorf("both QKView generation methods failed:\n  1. SSH error: %v\n  2. iControl REST error: %v", sshErr, restErr)
+
+	default:
+		return "", method, fmt.Errorf("unsupported transfer method %q", method)
+	}
+}
+
+// DeleteQKViewWithFailover deletes a generated QKView archive on the appliance via REST or SSH.
+func DeleteQKViewWithFailover(ctx context.Context, host, remoteFilename string, opts TransferOptions) error {
+	method := opts.Method
+	if method == MethodIControl || (method == MethodAuto && (opts.Password != "" || opts.ClientCertPath != "")) {
+		client := newClientFromOptions(host, opts, 443)
+		if err := client.DeleteQKView(ctx, remoteFilename); err == nil {
+			return nil
+		}
+	}
+
+	scpOpts := SCPOptions{
+		Host:       host,
+		Port:       opts.Port,
+		Username:   opts.Username,
+		Password:   opts.Password,
+		KeyPath:    opts.IdentityFile,
+		Passphrase: opts.SSHPassphrase,
+		Timeout:    opts.Timeout,
+	}
+	return DeleteQKViewSSH(ctx, scpOpts, remoteFilename)
 }

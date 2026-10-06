@@ -8,10 +8,10 @@ import (
 
 func TestSupportedShells(t *testing.T) {
 	shells := SupportedShells()
-	if len(shells) != 3 {
-		t.Fatalf("expected 3 supported shells, got %d", len(shells))
+	if len(shells) != 4 {
+		t.Fatalf("expected 4 supported shells, got %d", len(shells))
 	}
-	expected := map[string]bool{"bash": true, "zsh": true, "fish": true}
+	expected := map[string]bool{"bash": true, "zsh": true, "fish": true, "powershell": true}
 	for _, s := range shells {
 		if !expected[s] {
 			t.Errorf("unexpected shell %q in SupportedShells", s)
@@ -78,10 +78,27 @@ func TestGenerateFish(t *testing.T) {
 	}
 }
 
+func TestGeneratePowerShell(t *testing.T) {
+	for _, sh := range []string{"powershell", "pwsh"} {
+		var buf bytes.Buffer
+		err := Generate(sh, &buf)
+		if err != nil {
+			t.Fatalf("unexpected error generating %s completion: %v", sh, err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "Register-ArgumentCompleter") {
+			t.Errorf("%s completion script missing Register-ArgumentCompleter", sh)
+		}
+		if !strings.Contains(out, "-CommandName myf5") {
+			t.Errorf("%s completion script missing -CommandName myf5", sh)
+		}
+	}
+}
+
 func TestGenerateUnsupported(t *testing.T) {
 	var buf bytes.Buffer
-	err := Generate("powershell", &buf)
+	err := Generate("csh", &buf)
 	if err == nil {
-		t.Fatalf("expected error for unsupported shell 'powershell', got nil")
+		t.Fatalf("expected error for unsupported shell 'csh', got nil")
 	}
 }

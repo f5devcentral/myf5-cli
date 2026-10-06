@@ -30,6 +30,11 @@ func TestCleanSSHHost(t *testing.T) {
 		{"http://192.168.1.10:8022", "192.168.1.10", 8022},
 		{"ssh://appliance.lab.local:2222/", "appliance.lab.local", 2222},
 		{"[::1]:2222", "::1", 2222},
+		{"[2001:db8::1]", "2001:db8::1", 22},
+		{"2001:db8::1", "2001:db8::1", 22},
+		{"[2001:db8::1]:2222", "2001:db8::1", 2222},
+		{"ssh://[2001:db8::1]:2222/", "2001:db8::1", 2222},
+		{"https://[2001:db8::1]/", "2001:db8::1", 22},
 	}
 
 	for _, tt := range tests {
@@ -366,7 +371,7 @@ func TestSCPDownloadMockServer(t *testing.T) {
 	}()
 
 	tempDir := t.TempDir()
-	localTarget := filepath.Join(tempDir, "downloaded.txt")
+	localTarget := filepath.Join(tempDir, "downloaded.iso")
 
 	opts := SCPOptions{
 		Host:     "127.0.0.1",
@@ -377,7 +382,7 @@ func TestSCPDownloadMockServer(t *testing.T) {
 	}
 
 	var progressCalled bool
-	savedPath, err := SCPDownload(context.Background(), "/var/tmp/remote-file.txt", localTarget, opts, func(transferred, total int64) {
+	savedPath, err := SCPDownload(context.Background(), "/var/tmp/remote-file.iso", localTarget, opts, func(transferred, total int64) {
 		progressCalled = true
 	})
 	if err != nil {

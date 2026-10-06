@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path"
 	"path/filepath"
@@ -47,6 +48,184 @@ func (c *Client) GoString() string {
 	return c.String()
 }
 
+var (
+	validHostnameLabelRegex = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9\-_]{0,61}[a-zA-Z0-9])?$`)
+)
+
+// ValidateHost validates that host is a valid IPv4 address, IPv6 address, or RFC 1123 hostname.
+// It returns the normalized host (without brackets) and whether it is IPv6.
+func ValidateHost(rawHost string) (cleanHost string, isIPv6 bool, err error) {
+	h := strings.TrimSpace(rawHost)
+	if h == "" {
+		return "", false, fmt.Errorf("host cannot be empty")
+	}
+
+	// Reject shell injection characters or path separators
+	if strings.ContainsAny(h, " ;/\\`$|&\"'\t\r\n<>") {
+		return "", false, fmt.Errorf("invalid host %q: prohibited characters detected", h)
+	}
+
+	// Strip surrounding brackets if IPv6
+	trimmed := h
+	hasBrackets := strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")
+	if hasBrackets {
+		trimmed = trimmed[1 : len(trimmed)-1]
+	}
+
+	// Try parsing as IP address (IPv4 or IPv6)
+	if addr, parseErr := netip.ParseAddr(trimmed); parseErr == nil {
+		if addr.Is4() {
+			if hasBrackets {
+				return "", false, fmt.Errorf("invalid host %q: IPv4 addresses must not be enclosed in brackets", h)
+			}
+			return addr.String(), false, nil
+		}
+		if addr.Is6() {
+			return addr.String(), true, nil
+		}
+	}
+
+	// If it contains colons or was enclosed in brackets, it was intended to be IPv6
+	if strings.Contains(h, ":") || hasBrackets {
+		return "", false, fmt.Errorf("invalid IPv6 address %q", h)
+	}
+
+	// Check if it looks like an attempted IPv4 address (starts with digit and contains dots)
+	if isDottedDecimalCandidate(h) {
+		return "", false, fmt.Errorf("invalid IPv4 address %q", h)
+	}
+
+	// Validate as RFC 1123 hostname
+	if err := validateHostname(h); err != nil {
+		return "", false, err
+	}
+
+	return h, false, nil
+}
+
+func isDottedDecimalCandidate(h string) bool {
+	parts := strings.Split(h, ".")
+	if len(parts) >= 2 {
+		first := parts[0]
+		if len(first) > 0 && first[0] >= '0' && first[0] <= '9' {
+			return true
+		}
+	}
+	return false
+}
+
+func validateHostname(h string) error {
+	if len(h) > 253 {
+		return fmt.Errorf("hostname %q exceeds maximum RFC 1123 length of 253 characters", h)
+	}
+	trimmed := strings.TrimSuffix(h, ".")
+	labels := strings.Split(trimmed, ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 {
+			return fmt.Errorf("invalid hostname %q: label length must be between 1 and 63 characters", h)
+		}
+		if !validHostnameLabelRegex.MatchString(label) {
+			return fmt.Errorf("invalid hostname %q: label %q contains invalid characters or starts/ends with a hyphen", h, label)
+		}
+	}
+	return nil
+}
+
+// ParseAndValidateApplianceHost extracts scheme, normalized host, and port, validating the host.
+func ParseAndValidateApplianceHost(rawHost string, defaultPort int) (scheme, cleanHost string, port int, isIPv6 bool, err error) {
+	s := strings.TrimSpace(rawHost)
+	scheme = "https"
+	if strings.HasPrefix(s, "http://") {
+		scheme = "http"
+		s = strings.TrimPrefix(s, "http://")
+	} else if strings.HasPrefix(s, "https://") {
+		scheme = "https"
+		s = strings.TrimPrefix(s, "https://")
+	} else if strings.HasPrefix(s, "ssh://") {
+		scheme = "ssh"
+		s = strings.TrimPrefix(s, "ssh://")
+	}
+	s = strings.TrimRight(s, "/")
+
+	port = defaultPort
+	// Check for embedded port: e.g. "host:8443" or "[2001:db8::1]:8443"
+	if h, pStr, splitErr := net.SplitHostPort(s); splitErr == nil {
+		s = h
+		if p, atoiErr := strconv.Atoi(pStr); atoiErr == nil && p > 0 {
+			port = p
+		}
+	}
+
+	if port <= 0 {
+		if scheme == "http" {
+			port = 80
+		} else if scheme == "ssh" {
+			port = 22
+		} else {
+			port = 443
+		}
+	}
+
+	cleanHost, isIPv6, err = ValidateHost(s)
+	if err != nil {
+		return "", "", 0, false, err
+	}
+	return scheme, cleanHost, port, isIPv6, nil
+}
+
+// ClientOptions specifies connection and authentication parameters for BIG-IP / BIG-IQ appliances.
+type ClientOptions struct {
+	Host           string
+	Port           int
+	Username       string
+	Password       string
+	SkipTLSVerify  bool
+	ClientCertPath string
+	ClientKeyPath  string
+	Timeout        time.Duration
+}
+
+// NewClientWithOptions initializes a BIG-IP appliance client with validation and optional mTLS client certificates.
+func NewClientWithOptions(opts ClientOptions) (*Client, error) {
+	scheme, cleanHost, port, _, err := ParseAndValidateApplianceHost(opts.Host, opts.Port)
+	if err != nil {
+		return nil, err
+	}
+
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = 60 * time.Minute
+	}
+
+	var httpClient *http.Client
+	if opts.ClientCertPath != "" {
+		cert, err := client.LoadClientCertificate(opts.ClientCertPath, opts.ClientKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client certificate: %w", err)
+		}
+		if opts.SkipTLSVerify {
+			httpClient = client.NewInsecureHTTPClientWithCert(timeout, cert)
+		} else {
+			httpClient = client.NewSecureHTTPClientWithCert(timeout, cert)
+		}
+	} else {
+		if opts.SkipTLSVerify {
+			httpClient = client.NewInsecureHTTPClient(timeout)
+		} else {
+			httpClient = client.NewSecureHTTPClient(timeout)
+		}
+	}
+
+	return &Client{
+		Scheme:     scheme,
+		Host:       cleanHost,
+		Port:       port,
+		Username:   opts.Username,
+		Password:   opts.Password,
+		HTTPClient: httpClient,
+	}, nil
+}
+
 // NewClient initializes a BIG-IP appliance client with insecure TLS bypass enabled by default for lab/self-signed appliances.
 func NewClient(rawHost string, port int, username, password string) *Client {
 	return NewClientWithTLS(rawHost, port, username, password, true)
@@ -54,6 +233,18 @@ func NewClient(rawHost string, port int, username, password string) *Client {
 
 // NewClientWithTLS initializes a BIG-IP appliance client with selectable TLS verification.
 func NewClientWithTLS(rawHost string, port int, username, password string, skipTLSVerify bool) *Client {
+	c, err := NewClientWithOptions(ClientOptions{
+		Host:          rawHost,
+		Port:          port,
+		Username:      username,
+		Password:      password,
+		SkipTLSVerify: skipTLSVerify,
+	})
+	if err == nil {
+		return c
+	}
+
+	// Fallback to preserve best-effort initialization if caller passed an unconventional host
 	scheme := "https"
 	host := strings.TrimSpace(rawHost)
 	if strings.HasPrefix(host, "http://") {
@@ -65,13 +256,13 @@ func NewClientWithTLS(rawHost string, port int, username, password string, skipT
 	}
 	host = strings.TrimRight(host, "/")
 
-	// If host contains embedded port (e.g. host:8443)
-	if h, pStr, err := net.SplitHostPort(host); err == nil {
+	if h, pStr, splitErr := net.SplitHostPort(host); splitErr == nil {
 		host = h
-		if p, err := strconv.Atoi(pStr); err == nil && p > 0 {
+		if p, splitErr := strconv.Atoi(pStr); splitErr == nil && p > 0 {
 			port = p
 		}
 	}
+	host = strings.Trim(host, "[]")
 
 	if port <= 0 {
 		if scheme == "http" {
@@ -98,16 +289,20 @@ func NewClientWithTLS(rawHost string, port int, username, password string, skipT
 	}
 }
 
-// BaseURL returns the canonical base URL for the appliance.
+// BaseURL returns the canonical base URL for the appliance, wrapping IPv6 addresses in RFC 3986 brackets.
 func (c *Client) BaseURL() string {
 	scheme := c.Scheme
 	if scheme == "" {
 		scheme = "https"
 	}
-	if (scheme == "https" && c.Port == 443) || (scheme == "http" && c.Port == 80) {
-		return fmt.Sprintf("%s://%s", scheme, c.Host)
+	host := c.Host
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		host = "[" + host + "]"
 	}
-	return fmt.Sprintf("%s://%s:%d", scheme, c.Host, c.Port)
+	if (scheme == "https" && c.Port == 443) || (scheme == "http" && c.Port == 80) {
+		return fmt.Sprintf("%s://%s", scheme, host)
+	}
+	return fmt.Sprintf("%s://%s:%d", scheme, host, c.Port)
 }
 
 // CheckReady queries /mgmt/tm/sys/ready (or /mgmt/shared/echo for BIG-IQ) to verify appliance availability.
@@ -171,13 +366,31 @@ type QKViewTask struct {
 	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
+// QKViewTaskRequest represents the payload for creating a QKView task on TMOS autodeploy endpoint.
+type QKViewTaskRequest struct {
+	Name    string   `json:"name"`
+	Options []string `json:"options,omitempty"`
+}
+
 // CreateQKViewTask creates an asynchronous QKView generation task on the BIG-IP appliance.
+// By default, it requests unlimited snaplen ("-s0") as recommended for F5 iHealth diagnostics.
 func (c *Client) CreateQKViewTask(ctx context.Context, filename string) (*QKViewTask, error) {
+	return c.CreateQKViewTaskWithOptions(ctx, filename, []string{"-s0"})
+}
+
+// CreateQKViewTaskWithOptions creates an asynchronous QKView generation task with custom options.
+func (c *Client) CreateQKViewTaskWithOptions(ctx context.Context, filename string, options []string) (*QKViewTask, error) {
 	if err := ValidateQKViewFilename(filename); err != nil {
 		return nil, err
 	}
-	payload := map[string]string{"name": filename}
-	jsonBytes, _ := json.Marshal(payload)
+	payload := QKViewTaskRequest{
+		Name:    filename,
+		Options: options,
+	}
+	jsonBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
 
 	url := fmt.Sprintf("%s/mgmt/cm/autodeploy/qkview", c.BaseURL())
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBytes))
@@ -291,22 +504,24 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 		statusCb("Connecting to appliance")
 	}
 
-	if !complete {
-		// Use autodeploy async task with status polling
-		task, err := c.CreateQKViewTask(ctx, filename)
-		if err == nil && task != nil && task.ID != "" {
-			if statusCb != nil {
-				statusCb("Task ID: " + task.ID)
-			}
-			completedTask, err := c.WaitForQKViewTask(ctx, task.ID, 2*time.Second, statusCb)
-			if err != nil {
-				return "", err
-			}
-			return completedTask.Name, nil
+	// 1. Try autodeploy async task with options (defaults to -s0 unlimited snaplen) first
+	var taskOptions []string
+	if complete {
+		taskOptions = []string{"-s0"}
+	}
+	task, err := c.CreateQKViewTaskWithOptions(ctx, filename, taskOptions)
+	if err == nil && task != nil && task.ID != "" {
+		if statusCb != nil {
+			statusCb("Task ID: " + task.ID)
 		}
+		completedTask, err := c.WaitForQKViewTask(ctx, task.ID, 2*time.Second, statusCb)
+		if err != nil {
+			return "", err
+		}
+		return completedTask.Name, nil
 	}
 
-	// Use /mgmt/tm/util/qkview
+	// 2. Fallback to /mgmt/tm/util/qkview
 	args := fmt.Sprintf("-f /var/tmp/qkviews/%s", filename)
 	if complete {
 		args = "-s0 " + args
@@ -474,22 +689,24 @@ func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath s
 }
 
 // DownloadFile downloads a file from the BIG-IP or BIG-IQ appliance via iControl REST.
-// If remotePath is an autodeploy URI or starts with /mgmt/, it downloads directly.
+// Downloads are strictly restricted to .qkview and .iso files.
 // For files in /shared/images/, it queries /mgmt/cm/autodeploy/software-image-downloads/.
 // For files in /var/tmp/qkviews/, it queries /mgmt/cm/autodeploy/qkview-downloads/.
-// For other paths, it attempts software-image-downloads first, then qkview-downloads,
-// and can stage via TMOS bash utility.
 func (c *Client) DownloadFile(ctx context.Context, remotePath, localPath string, progressCb func(transferred, total int64)) error {
+	cleanRemote := path.Clean(remotePath)
 	if strings.HasPrefix(remotePath, "/mgmt/") {
+		ext := strings.ToLower(path.Ext(cleanRemote))
+		if ext != ".qkview" && ext != ".iso" {
+			return fmt.Errorf("prohibited download file %q: only .qkview and .iso files can be downloaded from appliances", remotePath)
+		}
 		return c.DownloadFromURI(ctx, remotePath, localPath, progressCb)
 	}
 
-	// Validate remote appliance path to reject path traversal and malicious filenames
-	if err := ValidateRemoteAppliancePath(remotePath); err != nil {
+	// Validate remote appliance path to reject path traversal and non-ISO/QKView extensions
+	if err := ValidateApplianceDownloadPath(remotePath); err != nil {
 		return err
 	}
 
-	cleanRemote := path.Clean(remotePath)
 	baseFilename := path.Base(cleanRemote)
 
 	if strings.HasPrefix(cleanRemote, "/shared/images/") || strings.HasSuffix(baseFilename, ".iso") {
@@ -509,25 +726,6 @@ func (c *Client) DownloadFile(ctx context.Context, remotePath, localPath string,
 	err = c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/qkview-downloads/%s", baseFilename), localPath, progressCb)
 	if err == nil {
 		return nil
-	}
-
-	// Staging attempt via TMOS bash utility to /shared/images
-	stagedPath, copyErr := c.CopyRemoteFile(ctx, cleanRemote, "/shared/images")
-	if copyErr == nil {
-		stagedBase := path.Base(stagedPath)
-		defer func() {
-			// clean up staged copy in /shared/images
-			payload := map[string]string{
-				"command":     "run",
-				"utilCmdArgs": fmt.Sprintf("-c 'rm -f %s'", stagedPath),
-			}
-			jb, _ := json.Marshal(payload)
-			req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, fmt.Sprintf("%s/mgmt/tm/util/bash", c.BaseURL()), bytes.NewReader(jb))
-			c.setAuth(req)
-			req.Header.Set("Content-Type", "application/json")
-			_, _ = c.HTTPClient.Do(req)
-		}()
-		return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/software-image-downloads/%s", stagedBase), localPath, progressCb)
 	}
 
 	return fmt.Errorf("iControl REST download failed for %s: %w", remotePath, err)

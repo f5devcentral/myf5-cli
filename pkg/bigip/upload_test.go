@@ -175,3 +175,31 @@ func TestCopyRemoteFileValidation(t *testing.T) {
 		t.Fatal("expected error on invalid dest dir, got nil")
 	}
 }
+
+func TestValidateApplianceDownloadPath(t *testing.T) {
+	tests := []struct {
+		path    string
+		wantErr bool
+	}{
+		{"/var/tmp/qkviews/test.qkview", false},
+		{"/var/tmp/box_20261005.QKVIEW", false},
+		{"/shared/images/BIGIP-17.1.1.iso", false},
+		{"/var/tmp/image.ISO", false},
+		{"/etc/shadow", true},
+		{"/config/bigip.conf", true},
+		{"/var/tmp/file.txt", true},
+		{"/var/tmp/script.sh", true},
+		{"", true},
+		{"../var/tmp/test.qkview", true},
+		{"/var/tmp/../etc/shadow", true},
+		{"/var/tmp/test.qkview;rm -rf /", true},
+		{"/var/tmp/test file.qkview", true},
+	}
+
+	for _, tt := range tests {
+		err := ValidateApplianceDownloadPath(tt.path)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("ValidateApplianceDownloadPath(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
+		}
+	}
+}
