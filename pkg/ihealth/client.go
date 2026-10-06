@@ -1,6 +1,7 @@
 package ihealth
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,7 +11,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,7 +121,18 @@ func (c *Client) UploadQKViewWithProgress(ctx context.Context, filePath, caseNum
 			}
 		}()
 
+		// visible_in_gui must be True for uploads to appear in the web GUI (K000130498).
+		if err := writer.WriteField("visible_in_gui", "True"); err != nil {
+			writeErr = err
+			return
+		}
 		if caseNumber != "" {
+			// K000130498 specifies f5_support_case; we write both f5_support_case
+			// and case_number for gateway compatibility.
+			if err := writer.WriteField("f5_support_case", caseNumber); err != nil {
+				writeErr = err
+				return
+			}
 			if err := writer.WriteField("case_number", caseNumber); err != nil {
 				writeErr = err
 				return
@@ -204,11 +219,143 @@ func (c *Client) UploadQKViewWithProgress(ctx context.Context, filePath, caseNum
 		return nil, fmt.Errorf("upload failed with HTTP %d: %s", resp.StatusCode, string(respBytes))
 	}
 
-	var uploadResp UploadQKViewResponse
-	if err := json.Unmarshal(respBytes, &uploadResp); err != nil {
+	uploadResp, err := parseUploadResponse(respBytes, resp.Header.Get("Location"))
+	if err != nil {
 		return nil, fmt.Errorf("failed to decode upload response: %w", err)
 	}
-	return &uploadResp, nil
+	return uploadResp, nil
+}
+
+// parseUploadResponse extracts the uploaded QKView ID, status, and message from
+// the API response body or headers.
+//
+// iHealth responds to uploads with either an XML-derived JSON wrapper:
+//
+//	{"qkview_upload": {"result": "OK", "id": 26991271, "location": "..."}}
+//
+// or a flat object:
+//
+//	{"id": "...", "status": "..."}
+//
+// or returns the ID in a Location response header (or XML body fallback).
+func parseUploadResponse(respBytes []byte, locationHeader string) (*UploadQKViewResponse, error) {
+	var raw struct {
+		ID           any    `json:"id"`
+		Status       string `json:"status"`
+		Result       string `json:"result"`
+		Location     string `json:"location"`
+		Message      string `json:"message"`
+		QKViewUpload *struct {
+			ID       any    `json:"id"`
+			Status   string `json:"status"`
+			Result   string `json:"result"`
+			Location string `json:"location"`
+			Message  string `json:"message"`
+		} `json:"qkview_upload"`
+	}
+
+	var id, status, msg, loc string
+
+	if len(respBytes) > 0 {
+		dec := json.NewDecoder(bytes.NewReader(respBytes))
+		dec.UseNumber()
+		if err := dec.Decode(&raw); err == nil {
+			if raw.QKViewUpload != nil {
+				id = stringifyUploadID(raw.QKViewUpload.ID)
+				status = raw.QKViewUpload.Status
+				if status == "" {
+					status = raw.QKViewUpload.Result
+				}
+				msg = raw.QKViewUpload.Message
+				loc = raw.QKViewUpload.Location
+			}
+			if id == "" {
+				id = stringifyUploadID(raw.ID)
+			}
+			if status == "" {
+				status = raw.Status
+				if status == "" {
+					status = raw.Result
+				}
+			}
+			if msg == "" {
+				msg = raw.Message
+			}
+			if loc == "" {
+				loc = raw.Location
+			}
+		} else {
+			// If JSON decode failed (e.g. XML response), attempt regex fallback
+			if m := regexp.MustCompile(`<id>([^<]+)</id>`).FindSubmatch(respBytes); len(m) > 1 {
+				id = string(m[1])
+			}
+			if m := regexp.MustCompile(`<result>([^<]+)</result>`).FindSubmatch(respBytes); len(m) > 1 {
+				status = string(m[1])
+			}
+			if m := regexp.MustCompile(`<location>([^<]+)</location>`).FindSubmatch(respBytes); len(m) > 1 {
+				loc = string(m[1])
+			}
+		}
+	}
+
+	if id == "" && loc != "" {
+		id = idFromURL(loc)
+	}
+	if id == "" && locationHeader != "" {
+		id = idFromURL(locationHeader)
+	}
+	if status == "" && id != "" {
+		status = "OK"
+	}
+
+	if id == "" && status == "" && msg == "" && len(respBytes) > 0 {
+		msg = strings.TrimSpace(string(respBytes))
+	}
+
+	return &UploadQKViewResponse{
+		ID:      id,
+		Status:  status,
+		Message: msg,
+	}, nil
+}
+
+func stringifyUploadID(v any) string {
+	if v == nil {
+		return ""
+	}
+	switch val := v.(type) {
+	case string:
+		return strings.TrimSpace(val)
+	case float64:
+		return strconv.FormatInt(int64(val), 10)
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case int:
+		return strconv.Itoa(val)
+	case json.Number:
+		return val.String()
+	default:
+		return fmt.Sprintf("%v", val)
+	}
+}
+
+func idFromURL(rawURL string) string {
+	if rawURL == "" {
+		return ""
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		parts := strings.Split(strings.TrimRight(rawURL, "/"), "/")
+		if len(parts) > 0 {
+			return parts[len(parts)-1]
+		}
+		return ""
+	}
+	base := path.Base(u.Path)
+	if base == "/" || base == "." {
+		return ""
+	}
+	return base
 }
 
 // ListQKViews retrieves uploaded QKViews from iHealth.
@@ -301,7 +448,10 @@ func (c *Client) GetQKView(ctx context.Context, id string) (*QKViewSummary, erro
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
-	if resp.StatusCode != http.StatusOK {
+	// The iHealth API returns HTTP 200 when processing is complete, and
+	// HTTP 202 (Accepted) while diagnostic analysis is RUNNING. Both carry
+	// the qkviewDetail JSON body.
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		return nil, fmt.Errorf("failed with HTTP %d: %s", resp.StatusCode, string(respBytes))
 	}
 

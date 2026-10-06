@@ -1,6 +1,9 @@
 package ihealth
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // QKViewSummary represents a QKView record uploaded to iHealth.
 //
@@ -47,13 +50,17 @@ type qkviewDetail struct {
 
 // toSummary projects the API's detail representation onto the CLI's view.
 func (d qkviewDetail) toSummary(id string) *QKViewSummary {
+	guiURL := d.GUIURI
+	if guiURL == "" && id != "" {
+		guiURL = fmt.Sprintf("https://ihealth.f5.com/qkview-analyzer/qv/%s", id)
+	}
 	s := &QKViewSummary{
 		ID:          id,
 		FileName:    d.FileName,
 		Description: d.Description,
 		CaseNumber:  d.F5SupportCase,
 		Status:      d.ProcessingStatus,
-		GUIURL:      d.GUIURI,
+		GUIURL:      guiURL,
 		Hostname:    d.Hostname,
 		FileSize:    d.FileSize,
 	}
