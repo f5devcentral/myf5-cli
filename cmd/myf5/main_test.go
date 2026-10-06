@@ -32,9 +32,9 @@ func TestNormalizeHelpArgs(t *testing.T) {
 		}
 	}
 
-	// doctor runs its audit on a bare invocation, so blanking its arguments
-	// would make `doctor --help` perform a live credential and network audit.
-	for _, cmd := range []string{"doctor"} {
+	// doctor runs its audit on a bare invocation, and wizard starts interactive mode,
+	// so blanking their arguments would make --help perform an action instead of printing help.
+	for _, cmd := range []string{"doctor", "wizard"} {
 		got := normalizeHelpArgs(cmd, []string{"--help"})
 		if len(got) != 1 || got[0] != "--help" {
 			t.Errorf("normalizeHelpArgs(%q, [--help]) = %v, want the flag preserved for the handler to see", cmd, got)

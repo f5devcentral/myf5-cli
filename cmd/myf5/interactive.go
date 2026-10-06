@@ -189,6 +189,7 @@ func completeLine(line string, pos int) (string, int, bool) {
 		candidates = []string{
 			"downloads",
 			"cases",
+			"wizard",
 			"ihealth",
 			"bigip",
 			"bigiq",
@@ -213,10 +214,10 @@ func completeLine(line string, pos int) (string, int, bool) {
 			}
 		case "cases", "case":
 			candidates = []string{
-				"list", "get", "comment", "create", "metadata",
+				"list", "get", "comment", "create", "wizard", "metadata",
 				"--json", "--all", "--family", "--product", "--version", "--serial",
-				"--subject", "--description", "--priority", "--reason", "--email",
-				"--contact-method", "--timezone", "--hostname", "--dry-run",
+				"--subscription", "--subject", "--description", "--priority", "--reason", "--email",
+				"--contact-method", "--timezone", "--hostname", "--customer-ticket", "--dry-run", "--wizard",
 			}
 		case "ihealth":
 			candidates = []string{"list", "upload", "--json"}
@@ -242,7 +243,7 @@ func completeLine(line string, pos int) (string, int, bool) {
 				"-o", "--method", "--target", "--user", "--port", "-i",
 				"--cert", "--cert-key",
 			}
-		case "doctor", "interactive", "version", "help", "clear", "exit", "quit":
+		case "wizard", "doctor", "interactive", "version", "help", "clear", "exit", "quit":
 			candidates = []string{"--help"}
 		}
 	}

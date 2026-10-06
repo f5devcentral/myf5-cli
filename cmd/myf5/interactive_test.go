@@ -70,6 +70,18 @@ func TestCompleteLine(t *testing.T) {
 		t.Errorf("expected completeLine('bigip rea') -> ('bigip ready ', 12, true), got (%q, %d, %v)", line, pos, ok)
 	}
 
+	// Top-level wizard command match
+	line, pos, ok = completeLine("wiz", 3)
+	if !ok || line != "wizard " || pos != 7 {
+		t.Errorf("expected completeLine('wiz') -> ('wizard ', 7, true), got (%q, %d, %v)", line, pos, ok)
+	}
+
+	// Cases wizard subcommand match
+	line, pos, ok = completeLine("cases wiz", 9)
+	if !ok || line != "cases wizard " || pos != 13 {
+		t.Errorf("expected completeLine('cases wiz') -> ('cases wizard ', 13, true), got (%q, %d, %v)", line, pos, ok)
+	}
+
 	// Longest common prefix match
 	line, pos, ok = completeLine("bigi", 4)
 	if !ok || line != "bigi" || pos != 4 {
