@@ -306,7 +306,12 @@ func (c *Client) doLegacyFallback(ctx context.Context, path string) ([]byte, err
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests && attempt < 2 {
-			time.Sleep(time.Duration(attempt+2) * time.Second)
+			backoff := time.Duration(attempt+2) * time.Second
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
 			continue
 		}
 

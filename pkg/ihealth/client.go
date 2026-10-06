@@ -154,6 +154,13 @@ func (c *Client) UploadQKViewWithProgress(ctx context.Context, filePath, caseNum
 		buf := make([]byte, 64*1024)
 		var transferred int64
 		for {
+			select {
+			case <-ctx.Done():
+				writeErr = ctx.Err()
+				return
+			default:
+			}
+
 			n, rErr := file.Read(buf)
 			if n > 0 {
 				if _, wErr := part.Write(buf[:n]); wErr != nil {

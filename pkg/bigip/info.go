@@ -398,84 +398,65 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 		Source: fmt.Sprintf("appliance: %s (iControl REST)", c.Host),
 	}
 
-	// 1. Hardware & Serial
-	hwURL := fmt.Sprintf("%s/mgmt/tm/sys/hardware", c.BaseURL())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, hwURL, nil)
-	if err == nil {
+	doGet := func(apiPath string, maxBytes int64) ([]byte, error) {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		u := fmt.Sprintf("%s%s", c.BaseURL(), apiPath)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return nil, err
+		}
 		c.setAuth(req)
 		resp, err := c.HTTPClient.Do(req)
-		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-				parseHardwareJSON(body, info)
-			}
+		if err != nil {
+			return nil, err
 		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("status %d", resp.StatusCode)
+		}
+		return io.ReadAll(io.LimitReader(resp.Body, maxBytes))
+	}
+
+	// 1. Hardware & Serial
+	if body, err := doGet("/mgmt/tm/sys/hardware", 1024*1024); err == nil {
+		parseHardwareJSON(body, info)
+	} else if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 
 	// 2. Version & Build
-	verURL := fmt.Sprintf("%s/mgmt/tm/sys/version", c.BaseURL())
-	req, err = http.NewRequestWithContext(ctx, http.MethodGet, verURL, nil)
-	if err == nil {
-		c.setAuth(req)
-		resp, err := c.HTTPClient.Do(req)
-		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
-				parseVersionJSON(body, info)
-			}
-		}
+	if body, err := doGet("/mgmt/tm/sys/version", 512*1024); err == nil {
+		parseVersionJSON(body, info)
+	} else if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 
 	// 3. License
-	licURL := fmt.Sprintf("%s/mgmt/tm/sys/license", c.BaseURL())
-	req, err = http.NewRequestWithContext(ctx, http.MethodGet, licURL, nil)
-	if err == nil {
-		c.setAuth(req)
-		resp, err := c.HTTPClient.Do(req)
-		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
-				parseLicenseJSON(body, info)
-			}
-		}
+	if body, err := doGet("/mgmt/tm/sys/license", 512*1024); err == nil {
+		parseLicenseJSON(body, info)
+	} else if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 
 	// 4. Hostname
-	globalURL := fmt.Sprintf("%s/mgmt/tm/sys/global-settings", c.BaseURL())
-	req, err = http.NewRequestWithContext(ctx, http.MethodGet, globalURL, nil)
-	if err == nil {
-		c.setAuth(req)
-		resp, err := c.HTTPClient.Do(req)
-		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
-				var gs struct {
-					Hostname string `json:"hostname"`
-				}
-				if json.Unmarshal(body, &gs) == nil && gs.Hostname != "" {
-					info.Hostname = gs.Hostname
-				}
-			}
+	if body, err := doGet("/mgmt/tm/sys/global-settings", 256*1024); err == nil {
+		var gs struct {
+			Hostname string `json:"hostname"`
 		}
+		if json.Unmarshal(body, &gs) == nil && gs.Hostname != "" {
+			info.Hostname = gs.Hostname
+		}
+	} else if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 
 	// 5. Provisioned Modules
-	provURL := fmt.Sprintf("%s/mgmt/tm/sys/provision", c.BaseURL())
-	req, err = http.NewRequestWithContext(ctx, http.MethodGet, provURL, nil)
-	if err == nil {
-		c.setAuth(req)
-		resp, err := c.HTTPClient.Do(req)
-		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				body, _ := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
-				parseProvisionJSON(body, info)
-			}
-		}
+	if body, err := doGet("/mgmt/tm/sys/provision", 256*1024); err == nil {
+		parseProvisionJSON(body, info)
+	} else if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 
 	if info.ChassisSerialNumber == "" && info.RegistrationKey == "" && info.Version == "" {
@@ -533,8 +514,20 @@ func GetSystemInfoSSH(ctx context.Context, opts SCPOptions) (*SystemInfo, error)
 	session.Stderr = &stderr
 
 	cmd := `tmsh -q -c "show sys hardware; show sys version; show sys license; list sys global-settings hostname; list sys provision"`
-	if err := session.Run(cmd); err != nil {
-		return nil, fmt.Errorf("tmsh commands failed over SSH: %w (stderr: %s)", err, stderr.String())
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- session.Run(cmd)
+	}()
+
+	select {
+	case <-ctx.Done():
+		_ = session.Signal(ssh.SIGINT)
+		_ = session.Close()
+		return nil, ctx.Err()
+	case err := <-runDone:
+		if err != nil {
+			return nil, fmt.Errorf("tmsh commands failed over SSH: %w (stderr: %s)", err, stderr.String())
+		}
 	}
 
 	info := parseTmshOutput(stdout.String())

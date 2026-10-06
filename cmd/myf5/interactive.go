@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"unicode"
 
 	"myf5-cli/pkg/client"
@@ -23,7 +25,7 @@ var exitFunc = os.Exit
 
 // startInteractive launches the interactive CLI shell with command history
 // and tab-completion.
-func startInteractive(ctx context.Context) {
+func startInteractive() {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
 		fmt.Fprintln(os.Stderr, "[ERROR] Interactive mode requires a terminal TTY.")
@@ -100,12 +102,12 @@ func startInteractive(ctx context.Context) {
 		}
 
 		// Execute command in-process with panic recovery for exitFunc
-		runSafely(ctx, args)
+		runSafely(args)
 	}
 }
 
-// runSafely executes a command line, recovering from exitPanic.
-func runSafely(ctx context.Context, rawArgs []string) {
+// runSafely executes a command line with an isolated per-command signal context, recovering from exitPanic.
+func runSafely(rawArgs []string) {
 	defer func() {
 		if r := recover(); r != nil {
 			if _, ok := r.(exitPanic); ok {
@@ -128,7 +130,12 @@ func runSafely(ctx context.Context, rawArgs []string) {
 		return
 	}
 
-	executeSubcommand(ctx, args[0], args[1:])
+	// Create an isolated context for this interactive command invocation.
+	// Hitting Ctrl+C cancels only this command's execution and cleanly returns to the shell prompt.
+	cmdCtx, cmdCancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cmdCancel()
+
+	executeSubcommand(cmdCtx, args[0], args[1:])
 }
 
 // splitCommandLine splits a string into arguments respecting single and double quotes.
