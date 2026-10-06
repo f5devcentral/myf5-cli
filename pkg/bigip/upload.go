@@ -138,8 +138,9 @@ func (c *Client) UploadFile(ctx context.Context, localPath string, remoteFilenam
 	return remotePath, nil
 }
 
-// CopyRemoteFile uses the TMOS bash utility (/mgmt/tm/util/bash) to copy a file
-// from one path to another on the appliance (e.g., from /var/config/rest/downloads to /shared/images).
+// CopyRemoteFile uses the TMOS bash utility (/mgmt/tm/util/bash) as a last resort
+// to move an uploaded file from /var/config/rest/downloads to another directory (e.g. /shared/images).
+// Where available, SCP is preferred because it transfers directly into target directories without invoking bash.
 func (c *Client) CopyRemoteFile(ctx context.Context, srcPath, destDir string) (string, error) {
 	// Defensively validate source and destination paths to prevent path traversal (..) and TMOS shell command injection
 	if err := ValidateRemoteAppliancePath(srcPath); err != nil {
@@ -178,7 +179,10 @@ func (c *Client) CopyRemoteFile(ctx context.Context, srcPath, destDir string) (s
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-		return "", fmt.Errorf("remote copy failed with HTTP %d: %s", resp.StatusCode, string(b))
+		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
+			return "", fmt.Errorf("remote copy via TMOS bash utility (/mgmt/tm/util/bash) returned HTTP %d (bash utility may be disabled or appliance in Appliance Mode): %s\nRemediation: Use '--method scp' to write directly to %s without invoking bash", resp.StatusCode, strings.TrimSpace(string(b)), destDir)
+		}
+		return "", fmt.Errorf("remote copy failed with HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
 	return destPath, nil

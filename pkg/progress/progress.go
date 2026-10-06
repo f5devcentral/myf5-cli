@@ -42,8 +42,9 @@ type Bar struct {
 }
 
 // NewBar creates a new progress bar with a total byte count and label.
+// It writes to os.Stderr by default to preserve stdout for machine-readable data / piping.
 func NewBar(total int64, label string) *Bar {
-	w := os.Stdout
+	w := os.Stderr
 	isTTY := term.IsTerminal(int(w.Fd()))
 	return &Bar{
 		Total:       total,
@@ -210,8 +211,9 @@ type Spinner struct {
 }
 
 // NewSpinner creates a new indeterminate spinner.
+// It writes to os.Stderr by default to preserve stdout for machine-readable data / piping.
 func NewSpinner(label string) *Spinner {
-	w := os.Stdout
+	w := os.Stderr
 	isTTY := term.IsTerminal(int(w.Fd()))
 	return &Spinner{
 		Label:    label,

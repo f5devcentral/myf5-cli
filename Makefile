@@ -13,7 +13,7 @@ LDFLAGS       := -s -w -X main.Version=$(VERSION)
 # Supported cross-compilation matrix
 PLATFORMS     := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: all build test test-coverage fmt vet lint vulncheck sbom clean cross-compile run help
+.PHONY: all build test test-coverage fmt vet lint vulncheck fuzz sbom clean cross-compile run help
 
 # Default target
 all: fmt vet test build
@@ -62,8 +62,19 @@ lint:
 ## vulncheck: Run Go official vulnerability scanner
 vulncheck:
 	@echo "==> Running govulncheck..."
-	@which govulncheck > /dev/null 2>&1 || (echo "govulncheck not found. Installing..." && go install golang.org/x/vuln/cmd/govulncheck@latest)
-	govulncheck ./...
+	@PATH="$$PATH:$$(go env GOPATH)/bin" which govulncheck > /dev/null 2>&1 || (echo "govulncheck not found. Installing..." && go install golang.org/x/vuln/cmd/govulncheck@latest)
+	@PATH="$$PATH:$$(go env GOPATH)/bin" govulncheck ./...
+
+## fuzz: Run native Go coverage-guided fuzz testing to uncover edge-case exploits
+fuzz:
+	@echo "==> Running Go native fuzz tests..."
+	go test -fuzz=FuzzValidateRemoteAppliancePath -fuzztime=5s ./pkg/bigip
+	go test -fuzz=FuzzValidateApplianceDownloadPath -fuzztime=5s ./pkg/bigip
+	go test -fuzz=FuzzValidateHost -fuzztime=5s ./pkg/bigip
+	go test -fuzz=FuzzCleanSSHHost -fuzztime=5s ./pkg/bigip
+	go test -fuzz=FuzzInspectQKViewReader -fuzztime=5s ./pkg/bigip
+	go test -fuzz=FuzzParseUploadResponse -fuzztime=5s ./pkg/ihealth
+	go test -fuzz=FuzzCheckNoCLISecrets -fuzztime=5s ./pkg/auth
 
 ## cross-compile: Compile standalone static binaries for all target architectures
 cross-compile: clean

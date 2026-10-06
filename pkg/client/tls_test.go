@@ -27,6 +27,14 @@ func TestSecureTLSConfig(t *testing.T) {
 	if len(cfgSecure.CipherSuites) == 0 {
 		t.Errorf("expected non-empty cipher suites")
 	}
+	// Assert 256-bit ciphers are prioritized over 128-bit
+	if cfgSecure.CipherSuites[0] != tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 {
+		t.Errorf("expected TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 as first cipher, got %x", cfgSecure.CipherSuites[0])
+	}
+	// Assert Post-Quantum Cryptography (PQC) hybrid key exchange is first preference
+	if len(cfgSecure.CurvePreferences) == 0 || cfgSecure.CurvePreferences[0] != tls.X25519MLKEM768 {
+		t.Errorf("expected X25519MLKEM768 as first curve preference for PQC, got %v", cfgSecure.CurvePreferences)
+	}
 
 	cfgInsecure := SecureTLSConfig(true)
 	if !cfgInsecure.InsecureSkipVerify {

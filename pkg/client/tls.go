@@ -9,20 +9,27 @@ import (
 	"time"
 )
 
-// SecureTLSConfig returns a tls.Config enforcing TLS 1.2+ with modern PFS/AEAD ciphers.
+// SecureTLSConfig returns a tls.Config enforcing TLS 1.2+ with modern PFS/AEAD ciphers
+// and Post-Quantum Cryptography (PQC) hybrid key encapsulation mechanisms prioritized.
 func SecureTLSConfig(insecureSkipVerify bool) *tls.Config {
 	return &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: insecureSkipVerify, // #nosec G402 -- isolated to lab appliances when explicitly set
 		CipherSuites: []uint16{
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			// Prioritize 256-bit AEAD ciphers over 128-bit
 			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
 			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 		},
 		CurvePreferences: []tls.CurveID{
+			// Post-Quantum Cryptography (PQC) hybrid key exchange (FIPS 203 / ML-KEM)
+			tls.X25519MLKEM768,
+			tls.SecP256r1MLKEM768,
+			tls.SecP384r1MLKEM1024,
+			// Classical curve fallbacks
 			tls.X25519,
 			tls.CurveP256,
 			tls.CurveP384,

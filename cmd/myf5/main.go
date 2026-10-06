@@ -23,6 +23,7 @@ import (
 	"myf5-cli/pkg/completion"
 	"myf5-cli/pkg/downloads"
 	"myf5-cli/pkg/ihealth"
+	"myf5-cli/pkg/logger"
 	"myf5-cli/pkg/progress"
 
 	"golang.org/x/term"
@@ -35,7 +36,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Handle cancellation: first signal cancels context gracefully, second signal forces immediate exit
+	// Handle cancellation: first signal cancels context gracefully, allowing deferred file
+	// flushing and network connection teardown; second signal forces immediate exit.
 	go func() {
 		<-ctx.Done()
 		sigChan := make(chan os.Signal, 1)
@@ -46,9 +48,9 @@ func main() {
 		case <-sigChan:
 			fmt.Fprintln(os.Stderr, "\n[FORCED] Aborted immediately by user.")
 			os.Exit(130)
-		case <-time.After(500 * time.Millisecond):
-			// If blocked on interactive stdin or inactive network, exit cleanly
-			fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+		case <-time.After(10 * time.Second):
+			// Safety net: if cleanup takes longer than 10s, force exit
+			fmt.Fprintln(os.Stderr, "\n[TIMEOUT] Graceful shutdown timed out; exiting.")
 			os.Exit(130)
 		}
 	}()
@@ -67,14 +69,13 @@ func main() {
 	subcommand := os.Args[1]
 	args := os.Args[2:]
 
-	// The top-level usage tells people to run `myf5 <command> --help`, so every
-	// command has to honour it. Most handlers print their usage when given no
-	// arguments, so a help request becomes an empty argument list. Without
-	// this, `--help` fell through to each handler's action switch and was
-	// reported as an unknown action — and `doctor --help` was worse, running a
-	// live credential and network audit instead of explaining itself.
-	//
-	args = normalizeHelpArgs(subcommand, args)
+	logger.Get().Info("Invoking command %s", subcommand)
+
+	// If help is requested for a subcommand (e.g. `myf5 downloads --help`), print usage and exit 0
+	if isSubcommandHelp(args) {
+		printCommandHelp(subcommand)
+		os.Exit(0)
+	}
 
 	switch subcommand {
 	case "downloads", "download":
@@ -110,20 +111,13 @@ func isHelpFlag(a string) bool {
 	return a == "--help" || a == "-h" || a == "help"
 }
 
-// normalizeHelpArgs turns `myf5 <command> --help` into the bare invocation
-// that each handler already answers with its own usage text.
-//
-// The top-level usage tells people to run `myf5 <command> --help`, so every
-// command has to honour it. Most handlers print usage when given no arguments,
-// so a help request is best expressed by dropping the argument. Without this,
-// `--help` fell through to each handler's action switch and came back as
-// "Unknown cases action '--help'".
-//
-// `completion` and `doctor` are returned untouched: `completion` takes a shell
-// name and documents itself when called bare, while `doctor` runs its audit on
-// a bare invocation — blanking its arguments would make `doctor --help`
-// perform a live credential and network audit instead of explaining itself.
-// Both inspect the flag themselves.
+// isSubcommandHelp reports whether args consists of a single help request flag.
+func isSubcommandHelp(args []string) bool {
+	return len(args) == 1 && isHelpFlag(args[0])
+}
+
+// normalizeHelpArgs converts a trailing help flag into an empty argument list
+// for commands that print usage when called with no arguments.
 func normalizeHelpArgs(subcommand string, args []string) []string {
 	if len(args) != 1 || !isHelpFlag(args[0]) {
 		return args
@@ -134,6 +128,167 @@ func normalizeHelpArgs(subcommand string, args []string) []string {
 	default:
 		return nil
 	}
+}
+
+// printCommandHelp dispatches to the corresponding command's usage documentation.
+func printCommandHelp(subcommand string) {
+	switch subcommand {
+	case "downloads", "download":
+		printDownloadsUsage()
+	case "cases", "case":
+		printCasesUsage()
+	case "ihealth":
+		printIHealthUsage()
+	case "bigip":
+		printApplianceUsage("BIG-IP")
+	case "bigiq":
+		printApplianceUsage("BIG-IQ")
+	case "push":
+		printPushUsage()
+	case "pull", "fetch":
+		printPullUsage()
+	case "doctor":
+		printDoctorUsage()
+	case "completion":
+		printCompletionUsage()
+	default:
+		printUsage()
+	}
+}
+
+func printCasesUsage() {
+	fmt.Println(`myf5 cases - View & Manage Support Cases
+
+USAGE:
+    myf5 cases list [--all] [--json]
+    myf5 cases get <case-number> [--json]
+    myf5 cases comment <case-number> <note>
+    myf5 cases create [flags]
+    myf5 cases metadata
+
+Run 'myf5 cases create --help' for details on creating support cases.`)
+}
+
+func printIHealthUsage() {
+	fmt.Println(`myf5 ihealth - Diagnostics & QKView Management
+
+USAGE:
+    myf5 ihealth list [--json]
+    myf5 ihealth upload <file.qkview> [case-number] [description]`)
+}
+
+func printApplianceUsage(targetKind string) {
+	cmdName := strings.ToLower(targetKind)
+	if strings.EqualFold(targetKind, "BIG-IQ") {
+		fmt.Printf(`myf5 %s - Manage BIG-IQ Appliance
+
+USAGE:
+    myf5 %s ready <host>
+    myf5 %s info <host | file.qkview> [--json]
+    myf5 %s serial <host | file.qkview> [--json]
+    myf5 %s example <host> <endpoint>
+    myf5 %s push <host> <file> [--dest <path>] [--method auto|icontrol|scp]
+    myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp]
+
+OPTIONS:
+    --user <username>       Appliance username (default: admin)
+    --port <port>           Port override (default: 443 for REST, 22 for SCP)
+    -i <key-path>           SSH private key file
+    --cert <cert-path>      TLS client certificate for mTLS
+    --cert-key <key-path>   TLS client private key
+    --method <method>       Transfer method: auto, icontrol, or scp
+    --json                  Output machine-readable JSON
+`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName)
+	} else {
+		fmt.Printf(`myf5 %s - Manage BIG-IP TMOS Appliance
+
+USAGE:
+    myf5 %s ready <host>
+    myf5 %s info <host | file.qkview> [--json]
+    myf5 %s serial <host | file.qkview> [--json]
+    myf5 %s example <host> <endpoint>
+    myf5 %s qkview <host> [--dest <path>] [--keep-remote] [--method auto|icontrol|scp]
+    myf5 %s push <host> <file> [--dest <path>] [--method auto|icontrol|scp]
+    myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp]
+
+OPTIONS:
+    --user <username>       Appliance username (default: admin)
+    --port <port>           Port override (default: 443 for REST, 22 for SCP)
+    -i <key-path>           SSH private key file
+    --cert <cert-path>      TLS client certificate for mTLS
+    --cert-key <key-path>   TLS client private key
+    --method <method>       Transfer method: auto, icontrol, or scp
+    --keep-remote           Keep generated QKView file on appliance after download
+    --json                  Output machine-readable JSON
+`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName)
+	}
+}
+
+func printPushUsage() {
+	fmt.Println(`myf5 push - Transfer Files to BIG-IP / BIG-IQ with Automatic Failover
+
+USAGE:
+    myf5 push <host> <file> [options]
+
+OPTIONS:
+    --target <type>         Target appliance type: bigip or bigiq (default: bigip)
+    --dest <path>           Remote destination directory (default: /shared/images)
+    --method <method>       auto, icontrol, or scp (default: auto)
+    --user <username>       Appliance user (default: admin)
+    --port <port>           Port override
+    -i <key-path>           SSH private key path
+    --cert <cert-path>      TLS client certificate
+    --cert-key <key-path>   TLS client private key`)
+}
+
+func printPullUsage() {
+	fmt.Println(`myf5 pull - Retrieve Files from BIG-IP / BIG-IQ with Automatic Failover
+
+USAGE:
+    myf5 pull <host> <remote-file> [options]
+
+OPTIONS:
+    -o <path>               Local output destination (default: OS Downloads directory)
+    --target <type>         Target appliance type: bigip or bigiq (default: bigip)
+    --method <method>       auto, icontrol, or scp (default: auto)
+    --user <username>       Appliance user (default: admin)
+    --port <port>           Port override
+    -i <key-path>           SSH private key path
+    --cert <cert-path>      TLS client certificate
+    --cert-key <key-path>   TLS client private key`)
+}
+
+func printDoctorUsage() {
+	fmt.Print(`myf5 doctor - Verify credentials, DNS, and firewall egress
+
+USAGE:
+    myf5 doctor
+
+Runs a read-only diagnostic: audits ~/.f5api_credentials permissions and
+environment variables, resolves the MyF5 API hostnames, and checks outbound
+HTTPS reachability. Takes no arguments and changes nothing.
+`)
+}
+
+func printCompletionUsage() {
+	fmt.Fprintf(os.Stdout, `myf5 completion - Generate Shell Tab Completion Script
+
+USAGE:
+    myf5 completion [bash | zsh | fish | powershell]
+
+EXAMPLES:
+  # Bash (current session)
+  source <(myf5 completion bash)
+
+  # Zsh (current session)
+  source <(myf5 completion zsh)
+
+  # Fish (persistent)
+  myf5 completion fish > ~/.config/fish/completions/myf5.fish
+
+  # PowerShell (current session)
+  myf5 completion powershell | Out-String | Invoke-Expression
+`)
 }
 
 func printUsage() {
@@ -151,8 +306,8 @@ COMMANDS:
     downloads    Browse MyF5 catalog and stream multi-GB software images
     cases        View and manage MyF5 support cases
     ihealth      Upload and inspect QKView diagnostic bundles on iHealth
-    bigip        Manage BIG-IP TMOS appliances (ready check, info, serial, QKView generation, push, download)
-    bigiq        Manage BIG-IQ appliances (ready check, info, serial, push, download)
+    bigip        Manage BIG-IP TMOS appliances (ready check, info, serial, example schema, QKView generation, push, download)
+    bigiq        Manage BIG-IQ appliances (ready check, info, serial, example schema, push, download)
     push         Push software downloads or files to BIG-IP / BIG-IQ (auto failover)
     pull         Download files from BIG-IP / BIG-IQ (auto failover)
     doctor       Verify API credentials, DNS, and network firewall egress
@@ -168,7 +323,7 @@ Run 'myf5 <command> --help' for details on specific commands.
 `, Version)
 }
 
-// checkErr terminates the process with 130 if the context was cancelled (Ctrl-C), or 1 on normal errors.
+// checkErr terminates the process with 130 if the context was cancelled (Ctrl-C), or 1 on normal errors with remediation.
 func checkErr(ctx context.Context, err error, prefix string) {
 	if err == nil {
 		return
@@ -177,12 +332,48 @@ func checkErr(ctx context.Context, err error, prefix string) {
 		fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
 		os.Exit(130)
 	}
-	if prefix != "" {
-		fmt.Fprintf(os.Stderr, "[ERROR] %s: %v\n", prefix, err)
-	} else {
-		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
-	}
+	printDetailedError(prefix, err)
 	os.Exit(1)
+}
+
+func printDetailedError(prefix string, err error) {
+	if prefix != "" {
+		fmt.Fprintf(os.Stderr, "\n[ERROR] %s: %v\n", prefix, err)
+		logger.Get().Error("%s: %v", prefix, err)
+	} else {
+		fmt.Fprintf(os.Stderr, "\n[ERROR] %v\n", err)
+		logger.Get().Error("%v", err)
+	}
+	if rem := suggestRemediation(err); rem != "" {
+		fmt.Fprintf(os.Stderr, "\nREMEDIATION:\n%s\n", rem)
+	}
+}
+
+func suggestRemediation(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+
+	if strings.Contains(msg, "unencrypted HTTP is forbidden") {
+		return "  • Appliance management strictly requires HTTPS.\n  • Use https://<host> or pass the bare hostname/IP (e.g. 'myf5 bigip ready 10.1.1.4')."
+	}
+	if strings.Contains(msg, "Appliance Mode") || strings.Contains(msg, "/mgmt/tm/util/bash") {
+		return "  • The TMOS bash utility is restricted or disabled on this appliance.\n  • Use native SCP ('--method scp') to transfer files directly without invoking bash."
+	}
+	if strings.Contains(msg, "401") || strings.Contains(msg, "Unauthorized") || strings.Contains(msg, "invalid_client") || strings.Contains(msg, "credentials") {
+		return "  • Run 'myf5 doctor' to verify your cloud credentials and network connectivity.\n  • Check ~/.f5api_credentials permissions (chmod 600 ~/.f5api_credentials).\n  • For BIG-IP/BIG-IQ, verify username/password or set BIGIP_PASSWORD / BIGIP_SSH_KEY."
+	}
+	if strings.Contains(msg, "429") || strings.Contains(msg, "Too Many Requests") {
+		return "  • MyF5 APIs enforce a rate limit of approximately 10 requests per minute.\n  • Wait 60 seconds before retrying your command."
+	}
+	if strings.Contains(msg, "connection refused") || strings.Contains(msg, "timeout") || strings.Contains(msg, "no such host") || strings.Contains(msg, "i/o timeout") {
+		return "  • Verify hostname DNS resolution and that port 443 (HTTPS) or 22 (SSH) is reachable.\n  • Check security group and firewall egress rules.\n  • Run 'myf5 doctor' to test network egress."
+	}
+	if strings.Contains(msg, "traversal") || strings.Contains(msg, "outside destination") {
+		return "  • The specified target path contains illegal directory traversal characters.\n  • Provide a valid path located within the target directory."
+	}
+	return ""
 }
 
 // ----------------------------------------------------------------------------
@@ -1012,16 +1203,9 @@ familyLoop:
 	}
 }
 
-// getDefaultDownloadsDir returns ~/Downloads if it exists, falling back to home dir or current dir.
+// getDefaultDownloadsDir returns the canonical OS downloads directory using platform standards.
 func getDefaultDownloadsDir() string {
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		dl := filepath.Join(home, "Downloads")
-		if info, err := os.Stat(dl); err == nil && info.IsDir() {
-			return dl
-		}
-		return home
-	}
-	return "."
+	return downloads.DefaultDownloadsDir()
 }
 
 // ----------------------------------------------------------------------------
@@ -1030,9 +1214,7 @@ func getDefaultDownloadsDir() string {
 
 func handleCases(ctx context.Context, args []string) {
 	if len(args) == 0 {
-		fmt.Println("Usage: myf5 cases [list [--all] | metadata | get <case-num> | comment <case-num> <note> | create <flags>]")
-		fmt.Println()
-		fmt.Println("Run 'myf5 cases create' with no flags for the full create usage.")
+		printCasesUsage()
 		os.Exit(1)
 	}
 
@@ -1323,7 +1505,7 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 
 func handleIHealth(ctx context.Context, args []string) {
 	if len(args) == 0 {
-		fmt.Println("Usage: myf5 ihealth [list | upload <file.qkview>]")
+		printIHealthUsage()
 		os.Exit(1)
 	}
 
@@ -1428,7 +1610,7 @@ func handleBIGIQ(ctx context.Context, args []string) {
 
 func handlePush(ctx context.Context, args []string) {
 	if len(args) < 2 {
-		fmt.Println("Usage: myf5 push <host> <file> [--method auto|icontrol|scp] [--dest <path>] [--target bigip|bigiq] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]")
+		printPushUsage()
 		os.Exit(1)
 	}
 
@@ -1535,7 +1717,7 @@ func handlePush(ctx context.Context, args []string) {
 	}
 
 	if len(positional) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: myf5 push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--target bigip|bigiq] [--cert <cert>] [--cert-key <key>] ...\n")
+		printPushUsage()
 		os.Exit(1)
 	}
 
@@ -1546,7 +1728,7 @@ func handlePush(ctx context.Context, args []string) {
 
 func handlePull(ctx context.Context, args []string) {
 	if len(args) < 2 {
-		fmt.Println("Usage: myf5 pull <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--target bigip|bigiq] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]")
+		printPullUsage()
 		os.Exit(1)
 	}
 
@@ -1655,7 +1837,7 @@ func handlePull(ctx context.Context, args []string) {
 	}
 
 	if len(positional) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: myf5 pull <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--target bigip|bigiq] [--cert <cert>] [--cert-key <key>] ...\n")
+		printPullUsage()
 		os.Exit(1)
 	}
 
@@ -1671,11 +1853,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	}
 
 	if len(args) == 0 {
-		if strings.EqualFold(targetKind, "BIG-IQ") {
-			fmt.Printf("Usage: myf5 %s [ready <host> | info <target> | serial <target> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--json]\n", cmdName)
-		} else {
-			fmt.Printf("Usage: myf5 %s [ready <host> | info <target> | serial <target> | qkview <host> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--json] [--keep-remote]\n", cmdName)
-		}
+		printApplianceUsage(targetKind)
 		os.Exit(1)
 	}
 
@@ -1890,6 +2068,60 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 				os.Exit(1)
 			}
 		}
+
+	case "example", "schema":
+		if len(positional) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s example <host> <endpoint> [--user <user>] [--port <port>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
+			os.Exit(1)
+		}
+		host := positional[0]
+		endpoint := positional[1]
+		if user == "" {
+			if strings.EqualFold(targetKind, "BIG-IQ") {
+				user = os.Getenv("BIGIQ_USER")
+			}
+			if user == "" {
+				user = os.Getenv("BIGIP_USER")
+			}
+			if user == "" {
+				user = "admin"
+			}
+		}
+
+		pw := ""
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			pw = os.Getenv("BIGIQ_PASSWORD")
+		}
+		if pw == "" {
+			pw = os.Getenv("BIGIP_PASSWORD")
+		}
+		if pw == "" && certPath == "" && term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
+			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Println()
+			if err == nil {
+				pw = strings.TrimSpace(string(bytePw))
+				// Zero raw password byte buffer immediately to scrub cleartext secret from memory
+				auth.ZeroBytes(bytePw)
+			}
+		}
+		if pw == "" && certPath == "" {
+			fmt.Fprintf(os.Stderr, "[ERROR] Password or client certificate required. Set BIGIP_PASSWORD / BIGIQ_PASSWORD / BIGIP_CERT or enter at prompt.\n")
+			os.Exit(1)
+		}
+
+		client, err := bigip.NewClientWithOptions(bigip.ClientOptions{
+			Host:           host,
+			Port:           port,
+			Username:       user,
+			Password:       pw,
+			ClientCertPath: certPath,
+			ClientKeyPath:  certKeyPath,
+		})
+		checkErr(ctx, err, "Failed to initialize appliance client")
+		ex, err := client.GetEndpointExample(ctx, endpoint)
+		checkErr(ctx, err, fmt.Sprintf("Failed to get example for endpoint %s", endpoint))
+		fmt.Println(string(ex))
 
 	case "push", "upload":
 		if len(positional) < 2 {
@@ -2483,15 +2715,7 @@ func handleDoctor(ctx context.Context, args []string) {
 	// credential and network audit instead of describing itself.
 	for _, a := range args {
 		if isHelpFlag(a) {
-			fmt.Print(`myf5 doctor - Verify credentials, DNS, and firewall egress
-
-USAGE:
-    myf5 doctor
-
-Runs a read-only diagnostic: audits ~/.f5api_credentials permissions and
-environment variables, resolves the MyF5 API hostnames, and checks outbound
-HTTPS reachability. Takes no arguments and changes nothing.
-`)
+			printDoctorUsage()
 			return
 		}
 	}
@@ -2499,18 +2723,17 @@ HTTPS reachability. Takes no arguments and changes nothing.
 	fmt.Println("=== myf5 System Doctor & Security Audit ===")
 	fmt.Printf("Timestamp: %s\n\n", time.Now().Format(time.RFC3339))
 
+	hasError := false
+
 	// 1. Audit Credentials
 	fmt.Println("1. Credential Security Audit:")
 	creds, err := auth.ResolveCredentials("default")
 	if err != nil {
 		fmt.Printf("   [FAIL] Credentials: %v\n", err)
+		hasError = true
 	} else {
-		maskedSecret := "******"
-		if len(creds.ClientSecret) > 4 {
-			maskedSecret = creds.ClientSecret[:2] + "..." + creds.ClientSecret[len(creds.ClientSecret)-2:]
-		}
 		fmt.Printf("   [PASS] Found Client ID:     %s\n", creds.ClientID)
-		fmt.Printf("   [PASS] Found Client Secret: %s (Zero CLI Exposure)\n", maskedSecret)
+		fmt.Println("   [PASS] Found Client Secret: [REDACTED] (Zero CLI Exposure)")
 	}
 
 	// 2. DNS & Egress Reachability
@@ -2537,6 +2760,7 @@ HTTPS reachability. Takes no arguments and changes nothing.
 		conn, err := net.DialTimeout("tcp", target, 3*time.Second)
 		if err != nil {
 			fmt.Printf("   [FAIL] %-25s (%s): %v\n", ep.name, ep.fqdn, err)
+			hasError = true
 		} else {
 			conn.Close()
 			fmt.Printf("   [PASS] %-25s (%s): Reachable\n", ep.name, ep.fqdn)
@@ -2544,6 +2768,9 @@ HTTPS reachability. Takes no arguments and changes nothing.
 	}
 
 	fmt.Println("\nDoctor audit complete.")
+	if hasError {
+		os.Exit(1)
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -2552,33 +2779,12 @@ HTTPS reachability. Takes no arguments and changes nothing.
 
 func handleCompletion(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, `Usage: myf5 completion [bash | zsh | fish | powershell]
-
-Generate shell completion scripts to enable tab autocompletion.
-
-EXAMPLES:
-  # Bash (current session)
-  source <(myf5 completion bash)
-
-  # Bash (system-wide installation on Linux)
-  myf5 completion bash | sudo tee /etc/bash_completion.d/myf5 > /dev/null
-
-  # Zsh (current session)
-  source <(myf5 completion zsh)
-
-  # Zsh (persistent installation)
-  myf5 completion zsh > "${fpath[1]}/_myf5"
-
-  # Fish (persistent installation)
-  myf5 completion fish > ~/.config/fish/completions/myf5.fish
-
-  # PowerShell (current session)
-  myf5 completion powershell | Out-String | Invoke-Expression
-
-  # PowerShell (profile)
-  myf5 completion powershell >> $PROFILE
-`)
+		printCompletionUsage()
 		os.Exit(1)
+	}
+	if isHelpFlag(args[0]) {
+		printCompletionUsage()
+		return
 	}
 
 	shell := strings.ToLower(args[0])
