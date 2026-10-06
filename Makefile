@@ -13,7 +13,7 @@ LDFLAGS       := -s -w -X main.Version=$(VERSION)
 # Supported cross-compilation matrix
 PLATFORMS     := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: all build test test-coverage fmt vet lint vulncheck clean cross-compile run help
+.PHONY: all build test test-coverage fmt vet lint vulncheck sbom clean cross-compile run help
 
 # Default target
 all: fmt vet test build
@@ -24,6 +24,10 @@ build:
 	@echo "==> Building $(BINARY_NAME) ($(VERSION)) for host..."
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) $(CMD_PATH)
 	@echo "==> Binary created: $(BIN_DIR)/$(BINARY_NAME)"
+
+## sbom: Generate a CycloneDX SBOM from the built binary
+sbom: build
+	@./scripts/gen-sbom.sh $(BIN_DIR)/$(BINARY_NAME) $(BIN_DIR)/sbom.json
 
 ## test: Run unit tests with race detection
 test:
@@ -76,6 +80,8 @@ cross-compile: clean
 	done
 	@echo "==> Generating SHA-256 checksums..."
 	@cd $(DIST_DIR) && shasum -a 256 $(BINARY_NAME)-* > checksums.txt
+	@echo "==> Generating SBOM..."
+	@./scripts/gen-sbom.sh $(DIST_DIR)/$(BINARY_NAME)-linux-amd64 $(DIST_DIR)/sbom.json
 	@echo "==> Cross-compilation complete:"
 	@ls -lh $(DIST_DIR)
 

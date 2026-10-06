@@ -84,6 +84,22 @@ jobs:
           sha256sum myf5-* > checksums.txt
           cat checksums.txt
 
+      # The SBOM is read back out of the compiled binary rather than from
+      # go.mod: Go stamps the module graph, versions and h1: hashes into the
+      # binary, and only the modules actually linked appear there. go.mod
+      # lists golang.org/x/net and golang.org/x/text as transitive
+      # requirements that no reachable code imports, so a go.mod-derived SBOM
+      # would claim this release ships code it does not contain.
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Generate SBOM
+        run: |
+          ./scripts/gen-sbom.sh release-binaries/myf5-linux-amd64 release-binaries/sbom.json
+          cat release-binaries/sbom.json
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -98,3 +114,4 @@ jobs:
             release-binaries/myf5-linux-arm64
             release-binaries/myf5-windows-amd64.exe
             release-binaries/checksums.txt
+            release-binaries/sbom.json
