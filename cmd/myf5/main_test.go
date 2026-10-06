@@ -190,3 +190,21 @@ func TestExecuteSubcommand_GeoIPUsage(t *testing.T) {
 		t.Errorf("expected exit code 1 for bigiq geoip rejection, got code=%d exited=%v", code, exited)
 	}
 }
+
+func TestCaseComment_Usage(t *testing.T) {
+	code, exited := runWithExitCapture(func() {
+		handleCases(context.Background(), []string{"comment"})
+	})
+	if !exited || code != 1 {
+		t.Errorf("expected exit code 1 for comment without args, got code=%d exited=%v", code, exited)
+	}
+}
+
+func TestCaseCreate_NoArgsNonTTY(t *testing.T) {
+	code, exited := runWithExitCapture(func() {
+		handleCaseCreate(context.Background(), nil, []string{})
+	})
+	if !exited || code != 1 {
+		t.Errorf("expected exit code 1 for case create without args, got code=%d exited=%v", code, exited)
+	}
+}

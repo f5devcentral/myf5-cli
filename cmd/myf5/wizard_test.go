@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -227,5 +229,129 @@ func TestRunCaseWizard_MultilineDescriptionFlow(t *testing.T) {
 	outStr := out.String()
 	if !strings.Contains(outStr, "Line 1: High CPU observed on TMM0") || !strings.Contains(outStr, "Line 2: Cluster state degraded to Standby") {
 		t.Errorf("expected multiline description in payload, got:\n%s", outStr)
+	}
+}
+
+func TestPromptMultilineBuffer_Commands(t *testing.T) {
+	inputLines := []string{
+		"First line",
+		"Mistake line",
+		":p",
+		":u",
+		"Replaced second line",
+		":done",
+	}
+	input := strings.Join(inputLines, "\n") + "\n"
+	in := bufio.NewReader(strings.NewReader(input))
+	var out bytes.Buffer
+
+	result, err := promptMultilineBuffer(in, &out, "Test Notes", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := "First line\nReplaced second line"
+	if result != expected {
+		t.Errorf("got %q, want %q", result, expected)
+	}
+	outStr := out.String()
+	if !strings.Contains(outStr, "[undo] Removed line 2") {
+		t.Errorf("expected undo output in %s", outStr)
+	}
+	if !strings.Contains(outStr, "Current Buffer (2 line(s))") {
+		t.Errorf("expected show/preview output in %s", outStr)
+	}
+}
+
+func TestPromptMultilineBuffer_ClearAndCancel(t *testing.T) {
+	// Test :c (clear)
+	inputLines := []string{
+		"Line to be cleared",
+		":c",
+		"Fresh line after clear",
+		".",
+	}
+	in := bufio.NewReader(strings.NewReader(strings.Join(inputLines, "\n") + "\n"))
+	var out bytes.Buffer
+	result, err := promptMultilineBuffer(in, &out, "Test Notes", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "Fresh line after clear" {
+		t.Errorf("got %q, want 'Fresh line after clear'", result)
+	}
+
+	// Test :b (back / cancel)
+	inBack := bufio.NewReader(strings.NewReader(":b\n"))
+	var outBack bytes.Buffer
+	_, err = promptMultilineBuffer(inBack, &outBack, "Test Notes", "")
+	if !errors.Is(err, ErrWizardBack) {
+		t.Errorf("expected ErrWizardBack, got %v", err)
+	}
+}
+
+func TestRunCaseWizard_StepBackNavigation(t *testing.T) {
+	// Tests bi-directional field and step navigation:
+	// Step 1: Skip (3)
+	// Step 2: Accept defaults, enter serial
+	// Step 3: Enter Priority (4), Reason (1), Subject ("Initial subject"),
+	//         at Description prompt type ":b" to backtrack to Subject!
+	//         at Subject prompt enter "Corrected subject",
+	//         at Description prompt enter "Valid description"
+	// Step 4: at Email prompt type ":b" to backtrack across steps back to Step 3 Description!
+	// Step 3: at Description prompt enter "Final revised description"
+	// Step 4: enter Email ("testuser@example.com"), accept defaults for rest
+	// Step 5: at review prompt type "b" to backtrack to Step 4!
+	// Step 4: accept defaults
+	// Step 5: Dry Run ("d"), then exit without submitting ("n")
+	inputLines := []string{
+		"3",                         // Step 1: skip auto-detect
+		"",                          // Step 2: Product family (default)
+		"",                          // Product (default)
+		"",                          // Version (default)
+		"test-serial-nav",           // Serial number
+		"4",                         // Step 3: Priority 4
+		"1",                         // Reason 1
+		"Initial subject",           // Subject
+		":b",                        // Description: backtrack to Subject!
+		"Corrected subject",         // Subject (corrected)
+		"Valid description",         // Description
+		":b",                        // Step 4: Email prompt: backtrack to Step 3 Description!
+		"Final revised description", // Description (final revised)
+		"testuser@example.com",      // Step 4: Email
+		"",                          // Contact Method (default)
+		"",                          // Timezone (default)
+		"",                          // Hostname (default)
+		"",                          // Ticket Ref (default)
+		"b",                         // Step 5: backtrack to Step 4!
+		"",                          // Step 4: Email (keep default testuser@example.com)
+		"",                          // Contact Method (default)
+		"",                          // Timezone (default)
+		"",                          // Hostname (default)
+		"",                          // Ticket Ref (default)
+		"d",                         // Step 5: Dry Run
+		"n",                         // Submit now? No
+	}
+
+	input := strings.Join(inputLines, "\n") + "\n"
+	in := strings.NewReader(input)
+	var out bytes.Buffer
+
+	err := RunCaseWizard(context.Background(), in, &out, nil)
+	if err != nil {
+		t.Fatalf("wizard returned unexpected error: %v", err)
+	}
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "\"subject\": \"Corrected subject\"") {
+		t.Errorf("expected corrected subject in dry run payload, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "\"description\": \"Final revised description\"") {
+		t.Errorf("expected final revised description in dry run payload, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "\"caseOwnerEmail\": \"testuser@example.com\"") {
+		t.Errorf("expected email in dry run payload, got:\n%s", outStr)
+	}
+	if strings.Contains(outStr, "\"subject\": \"Initial subject\"") {
+		t.Errorf("found discarded initial subject in dry run payload")
 	}
 }

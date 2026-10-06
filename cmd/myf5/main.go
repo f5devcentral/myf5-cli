@@ -225,7 +225,7 @@ func printCasesUsage() {
 USAGE:
     myf5 cases list [--all] [--json]
     myf5 cases get <case-number> [--json]
-    myf5 cases comment <case-number> <note>
+    myf5 cases comment <case-number> [note] (interactive buffer if note omitted)
     myf5 cases create [flags]
     myf5 cases wizard                       (guided interactive case creator)
     myf5 cases metadata
@@ -1341,7 +1341,7 @@ func handleCases(ctx context.Context, args []string) {
 	action := args[0]
 
 	var client *cases.Client
-	if action == "wizard" || action == "new" {
+	if action == "wizard" || action == "new" || (action == "create" && len(args) == 1) {
 		creds, err := auth.ResolveCredentials("default")
 		if err == nil {
 			token, aErr := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
@@ -1404,11 +1404,50 @@ func handleCases(ctx context.Context, args []string) {
 		checkErr(ctx, err, "Failed to get metadata")
 		fmt.Printf("Case Metadata Schema retrieved (%d root keys).\n", len(resp.Data))
 	case "comment":
-		if len(args) < 3 {
-			fmt.Fprintln(os.Stderr, "Usage: myf5 cases comment <case-number> <note>")
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "Usage: myf5 cases comment <case-number> [note]")
 			exitFunc(1)
 		}
-		resp, err := client.AddComment(ctx, args[1], args[2])
+		caseNum := args[1]
+		var note string
+		if len(args) >= 3 {
+			note = strings.Join(args[2:], " ")
+		} else {
+			fmt.Printf("Enter comment notes for case %s:\n", caseNum)
+			reader := bufio.NewReader(os.Stdin)
+			var err error
+			note, err = promptMultilineBuffer(reader, os.Stdout, fmt.Sprintf("Case %s Comment Notes", caseNum), "")
+			if err != nil {
+				if errors.Is(err, ErrWizardBack) {
+					fmt.Println("Comment entry cancelled.")
+					return
+				}
+				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+					fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
+					exitFunc(130)
+				}
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				exitFunc(1)
+			}
+			note = strings.TrimSpace(note)
+			if note == "" {
+				fmt.Println("Empty comment. No comment was submitted.")
+				return
+			}
+
+			// Safety confirmation
+			fmt.Fprintln(os.Stdout, "\n--- Comment Preview ---")
+			for _, l := range strings.Split(note, "\n") {
+				fmt.Fprintf(os.Stdout, "  %s\n", l)
+			}
+			fmt.Fprintln(os.Stdout, "-----------------------")
+			confirm, _ := promptWithDefault(reader, os.Stdout, fmt.Sprintf("Submit this comment to case %s? [y/N]", caseNum), "n")
+			if !strings.EqualFold(confirm, "y") && !strings.EqualFold(confirm, "yes") {
+				fmt.Println("Submission cancelled. No comment was submitted.")
+				return
+			}
+		}
+		resp, err := client.AddComment(ctx, caseNum, note)
 		checkErr(ctx, err, "Failed to add comment")
 		// The API carries an isError flag in the body, so a 2xx does not by
 		// itself mean the comment landed. Discarding the response here would
@@ -1531,6 +1570,21 @@ Copy them from an existing case ('myf5 cases get <num>') until it returns.`
 
 func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) {
 	if len(args) == 0 {
+		if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+			fmt.Print("No case parameters specified. Launch interactive Support Case Wizard? [Y/n]: ")
+			reader := bufio.NewReader(os.Stdin)
+			ans, err := reader.ReadString('\n')
+			if err == nil {
+				ans = strings.TrimSpace(ans)
+				if ans == "" || strings.EqualFold(ans, "y") || strings.EqualFold(ans, "yes") {
+					if err := RunCaseWizard(ctx, os.Stdin, os.Stdout, client); err != nil {
+						fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+						exitFunc(1)
+					}
+					return
+				}
+			}
+		}
 		fmt.Println(caseCreateUsage)
 		exitFunc(1)
 	}
