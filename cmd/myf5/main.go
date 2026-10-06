@@ -151,8 +151,8 @@ COMMANDS:
     downloads    Browse MyF5 catalog and stream multi-GB software images
     cases        View and manage MyF5 support cases
     ihealth      Upload and inspect QKView diagnostic bundles on iHealth
-    bigip        Manage BIG-IP TMOS appliances (ready check, QKView generation, push, download)
-    bigiq        Manage BIG-IQ appliances (ready check, push, download)
+    bigip        Manage BIG-IP TMOS appliances (ready check, info, serial, QKView generation, push, download)
+    bigiq        Manage BIG-IQ appliances (ready check, info, serial, push, download)
     push         Push software downloads or files to BIG-IP / BIG-IQ (auto failover)
     pull         Download files from BIG-IP / BIG-IQ (auto failover)
     doctor       Verify API credentials, DNS, and network firewall egress
@@ -1578,9 +1578,9 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	if len(args) == 0 {
 		if strings.EqualFold(targetKind, "BIG-IQ") {
-			fmt.Printf("Usage: myf5 %s [ready <host> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
+			fmt.Printf("Usage: myf5 %s [ready <host> | info <target> | serial <target> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--json]\n", cmdName)
 		} else {
-			fmt.Printf("Usage: myf5 %s [ready <host> | qkview <host> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--keep-remote]\n", cmdName)
+			fmt.Printf("Usage: myf5 %s [ready <host> | info <target> | serial <target> | qkview <host> | push <host> <file> | download <host> <file>] [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--json] [--keep-remote]\n", cmdName)
 		}
 		os.Exit(1)
 	}
@@ -1595,6 +1595,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	destPath := ""
 	keyPath := ""
 	keepRemote := false
+	jsonOutput := false
 
 	for i := 0; i < len(actionArgs); i++ {
 		arg := actionArgs[i]
@@ -1641,6 +1642,8 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			keyPath = strings.TrimPrefix(arg, "--identity=")
 		} else if arg == "--keep-remote" || arg == "--no-delete" || arg == "--no-cleanup" {
 			keepRemote = true
+		} else if arg == "--json" {
+			jsonOutput = true
 		} else if !strings.HasPrefix(arg, "-") {
 			positional = append(positional, arg)
 		}
@@ -1703,6 +1706,52 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			fmt.Printf("%s appliance at %s is READY (HTTP 200).\n", targetKind, host)
 		} else {
 			fmt.Printf("%s appliance at %s is NOT READY.\n", targetKind, host)
+		}
+
+	case "info", "system-info", "sysinfo":
+		if len(positional) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s info <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
+			os.Exit(1)
+		}
+		target := positional[0]
+		info := getSystemInfoTarget(ctx, target, targetKind, user, port, keyPath, method)
+		if jsonOutput {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(info); err != nil {
+				checkErr(ctx, err, "Failed to encode JSON")
+			}
+		} else {
+			fmt.Print(info.Summary())
+		}
+
+	case "serial", "sn", "serialnumber":
+		if len(positional) < 1 {
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s serial <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>]\n", cmdName)
+			os.Exit(1)
+		}
+		target := positional[0]
+		info := getSystemInfoTarget(ctx, target, targetKind, user, port, keyPath, method)
+		sn := info.PreferredSerialNumber()
+		if jsonOutput {
+			res := map[string]string{
+				"serialNumber":        sn,
+				"chassisSerialNumber": info.ChassisSerialNumber,
+				"registrationKey":     info.RegistrationKey,
+				"source":              info.Source,
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			if err := enc.Encode(res); err != nil {
+				checkErr(ctx, err, "Failed to encode JSON")
+			}
+		} else {
+			if sn != "" {
+				fmt.Println(sn)
+			} else {
+				fmt.Fprintln(os.Stderr, "[WARNING] No serial number or registration key found.")
+				os.Exit(1)
+			}
 		}
 
 	case "push", "upload":
@@ -1840,6 +1889,90 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		fmt.Fprintf(os.Stderr, "Unknown %s action '%s'\n", cmdName, action)
 		os.Exit(1)
 	}
+}
+
+func getSystemInfoTarget(ctx context.Context, target, targetKind, user string, port int, keyPath, method string) *bigip.SystemInfo {
+	if fi, err := os.Stat(target); err == nil && !fi.IsDir() {
+		info, err := bigip.InspectQKView(target)
+		checkErr(ctx, err, fmt.Sprintf("Failed to inspect QKView %s", target))
+		return info
+	}
+	if strings.HasSuffix(strings.ToLower(target), ".qkview") {
+		fmt.Fprintf(os.Stderr, "[ERROR] QKView file not found: %s\n", target)
+		os.Exit(1)
+	}
+
+	host := target
+	if user == "" {
+		if strings.EqualFold(targetKind, "BIG-IQ") {
+			user = os.Getenv("BIGIQ_USER")
+		}
+		if user == "" {
+			user = os.Getenv("BIGIP_USER")
+		}
+		if user == "" {
+			user = "admin"
+		}
+	}
+
+	pw := ""
+	if strings.EqualFold(targetKind, "BIG-IQ") {
+		pw = os.Getenv("BIGIQ_PASSWORD")
+	}
+	if pw == "" {
+		pw = os.Getenv("BIGIP_PASSWORD")
+	}
+	if pw == "" && keyPath == "" && term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Printf("Enter %s password for %s@%s: ", targetKind, user, host)
+		bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
+		fmt.Println()
+		if err == nil {
+			pw = strings.TrimSpace(string(bytePw))
+			auth.ZeroBytes(bytePw)
+		}
+	}
+
+	info, err := resolveApplianceSystemInfo(ctx, host, port, user, pw, keyPath, method, targetKind)
+	checkErr(ctx, err, fmt.Sprintf("Failed to retrieve system info from %s", host))
+	return info
+}
+
+func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user, pw, keyPath, method, targetKind string) (*bigip.SystemInfo, error) {
+	if method == "scp" || method == "ssh" {
+		opts := bigip.SCPOptions{
+			Host:     host,
+			Port:     port,
+			Username: user,
+			Password: pw,
+			KeyPath:  keyPath,
+			Timeout:  30 * time.Second,
+		}
+		return bigip.GetSystemInfoSSH(ctx, opts)
+	}
+
+	client := bigip.NewClient(host, port, user, pw)
+	info, err := client.GetSystemInfo(ctx)
+	if err == nil {
+		return info, nil
+	}
+
+	if method == "auto" {
+		opts := bigip.SCPOptions{
+			Host:     host,
+			Port:     port,
+			Username: user,
+			Password: pw,
+			KeyPath:  keyPath,
+			Timeout:  30 * time.Second,
+		}
+		sshInfo, sshErr := bigip.GetSystemInfoSSH(ctx, opts)
+		if sshErr == nil {
+			return sshInfo, nil
+		}
+		return nil, fmt.Errorf("iControl REST error: %w; SSH error: %v", err, sshErr)
+	}
+
+	return nil, err
 }
 
 // executePushToAppliance handles streaming upload of a local file to a BIG-IP or BIG-IQ appliance
