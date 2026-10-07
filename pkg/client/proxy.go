@@ -305,6 +305,16 @@ func dialHTTPConnect(ctx context.Context, proxyURL *url.URL, targetAddr string) 
 		_ = conn.SetDeadline(deadline)
 	}
 
+	handshakeDone := make(chan struct{})
+	defer close(handshakeDone)
+	go func() {
+		select {
+		case <-handshakeDone:
+		case <-ctx.Done():
+			_ = conn.Close()
+		}
+	}()
+
 	// Prepare HTTP CONNECT request
 	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: myf5-cli-tunnel/1.0\r\n", targetAddr, targetAddr)
 	if proxyURL.User != nil {
@@ -356,6 +366,16 @@ func dialSOCKS5(ctx context.Context, proxyURL *url.URL, targetAddr string) (net.
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	}
+
+	handshakeDone := make(chan struct{})
+	defer close(handshakeDone)
+	go func() {
+		select {
+		case <-handshakeDone:
+		case <-ctx.Done():
+			_ = conn.Close()
+		}
+	}()
 
 	// 1. Initial greeting: negotiate authentication method
 	var methods []byte

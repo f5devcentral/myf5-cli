@@ -2,6 +2,7 @@ package bigip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -86,6 +87,9 @@ func PushFileWithFailover(
 			if scpErr == nil {
 				return destPath, MethodSCP, nil
 			}
+			if errors.Is(scpErr, context.Canceled) || ctx.Err() != nil {
+				return "", MethodSCP, scpErr
+			}
 
 			if logFn != nil {
 				logFn("SCP upload failed (%v). Automatically falling back to iControl REST...", scpErr)
@@ -103,6 +107,9 @@ func PushFileWithFailover(
 		destPath, icontrolErr := pushViaIControl(ctx, host, localFile, destDir, opts, progressCb)
 		if icontrolErr == nil {
 			return destPath, MethodIControl, nil
+		}
+		if errors.Is(icontrolErr, context.Canceled) || ctx.Err() != nil {
+			return "", MethodIControl, icontrolErr
 		}
 
 		if logFn != nil {
@@ -170,6 +177,9 @@ func DownloadFileWithFailover(
 			if restErr == nil {
 				return savedPath, MethodIControl, nil
 			}
+			if errors.Is(restErr, context.Canceled) || ctx.Err() != nil {
+				return "", MethodIControl, restErr
+			}
 
 			if logFn != nil {
 				logFn("iControl REST download failed (%v). Automatically falling back to SCP over SSH...", restErr)
@@ -187,6 +197,9 @@ func DownloadFileWithFailover(
 		savedPath, scpErr := downloadViaSCP(ctx, host, remotePath, localDest, opts, progressCb)
 		if scpErr == nil {
 			return savedPath, MethodSCP, nil
+		}
+		if errors.Is(scpErr, context.Canceled) || ctx.Err() != nil {
+			return "", MethodSCP, scpErr
 		}
 
 		if logFn != nil {
@@ -370,6 +383,9 @@ func GenerateQKViewWithFailover(
 			if restErr == nil {
 				return filename, MethodIControl, nil
 			}
+			if errors.Is(restErr, context.Canceled) || ctx.Err() != nil {
+				return "", MethodIControl, restErr
+			}
 
 			if logFn != nil {
 				logFn("iControl REST QKView generation failed (%v). Automatically falling back to SSH...", restErr)
@@ -406,6 +422,9 @@ func GenerateQKViewWithFailover(
 		if sshErr == nil {
 			return filename, MethodSCP, nil
 		}
+		if errors.Is(sshErr, context.Canceled) || ctx.Err() != nil {
+			return "", MethodSCP, sshErr
+		}
 
 		if logFn != nil {
 			logFn("SSH QKView generation failed (%v). Automatically falling back to iControl REST...", sshErr)
@@ -431,6 +450,8 @@ func DeleteQKViewWithFailover(ctx context.Context, host, remoteFilename string, 
 		client := newClientFromOptions(host, opts, 443)
 		if err := client.DeleteQKView(ctx, remoteFilename); err == nil {
 			return nil
+		} else if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			return err
 		}
 	}
 

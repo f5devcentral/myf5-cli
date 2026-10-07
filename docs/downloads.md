@@ -96,6 +96,7 @@ MyF5 CDN ---> io.TeeReader ---> SHA-256 Checksum Verification
 | `--push-user <user>` | `$BIGIP_USER` / `"admin"` | Appliance administrative user. |
 | `--push-port <port>` | `443` (iControl) / `22` (SCP) | Appliance management port. |
 | `--push-key <key>` | *Auto-detected* | SSH private key path for SCP authentication. |
+| `--apply-geoip` | `false` | Automatically extract and apply GeoIP RPMs to TMM via `geoip_update_data` post-upload. |
 
 ### Practical Examples
 

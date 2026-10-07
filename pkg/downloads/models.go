@@ -2,8 +2,11 @@ package downloads
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // HashItem represents a cryptographic hash for a download file.
@@ -211,6 +214,74 @@ func (d *DownloadLink) GetRegion() string {
 		return d.Region
 	}
 	return d.Location
+}
+
+// ExpirationTime extracts the expiration timestamp of the signed mirror URL.
+// It checks the explicit ExpiresAt field first (supporting RFC3339 or Unix timestamp formats),
+// and falls back to extracting the AWS CloudFront 'Expires' query parameter from Href.
+func (d *DownloadLink) ExpirationTime() (time.Time, bool) {
+	if d == nil {
+		return time.Time{}, false
+	}
+	if d.ExpiresAt != "" {
+		if t, err := time.Parse(time.RFC3339, d.ExpiresAt); err == nil {
+			return t, true
+		}
+		if t, err := time.Parse("2006-01-02T15:04:05", d.ExpiresAt); err == nil {
+			return t, true
+		}
+		if sec, err := strconv.ParseInt(d.ExpiresAt, 10, 64); err == nil && sec > 0 {
+			return time.Unix(sec, 0), true
+		}
+	}
+	if d.Href != "" {
+		if u, err := url.Parse(d.Href); err == nil {
+			expStr := u.Query().Get("Expires")
+			if expStr != "" {
+				if sec, err := strconv.ParseInt(expStr, 10, 64); err == nil && sec > 0 {
+					return time.Unix(sec, 0), true
+				}
+			}
+			amzDate := u.Query().Get("X-Amz-Date")
+			amzExp := u.Query().Get("X-Amz-Expires")
+			if amzDate != "" && amzExp != "" {
+				if t, err := time.Parse("20060102T150405Z", amzDate); err == nil {
+					if durSec, err := strconv.Atoi(amzExp); err == nil {
+						return t.Add(time.Duration(durSec) * time.Second), true
+					}
+				}
+			}
+		}
+	}
+	return time.Time{}, false
+}
+
+// IsExpired reports whether the signed download URL has passed its expiration timestamp.
+func (d *DownloadLink) IsExpired() bool {
+	t, ok := d.ExpirationTime()
+	if !ok {
+		return false
+	}
+	return time.Now().After(t)
+}
+
+// FormattedExpires returns a human-readable expiration description (e.g. "in 42m (at 14:32:00 EDT)" or "EXPIRED").
+func (d *DownloadLink) FormattedExpires() string {
+	t, ok := d.ExpirationTime()
+	if !ok {
+		if d.ExpiresAt != "" {
+			return d.ExpiresAt
+		}
+		return "temporary (time unknown)"
+	}
+	rem := time.Until(t)
+	if rem <= 0 {
+		return "EXPIRED"
+	}
+	if rem < time.Hour {
+		return fmt.Sprintf("in %dm (at %s)", int(rem.Minutes()), t.Local().Format("15:04:05 MST"))
+	}
+	return fmt.Sprintf("in %dh%dm (at %s)", int(rem.Hours()), int(rem.Minutes())%60, t.Local().Format("15:04:05 MST"))
 }
 
 // FileLinksResponse is the API response for /downloads-management/v1/downloads/product/.../{file}.

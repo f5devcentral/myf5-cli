@@ -11,9 +11,11 @@ import (
 	"hash"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +50,26 @@ func DownloadFile(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		bodySnippet, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		bodyStr := string(bodySnippet)
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+			if u, uErr := url.Parse(downloadURL); uErr == nil {
+				if expStr := u.Query().Get("Expires"); expStr != "" {
+					if sec, sErr := strconv.ParseInt(expStr, 10, 64); sErr == nil && sec > 0 {
+						expTime := time.Unix(sec, 0)
+						if time.Now().After(expTime) {
+							return fmt.Errorf("download link expired at %s: AWS CloudFront presigned links are temporary (re-run command to fetch fresh link)", expTime.Local().Format("15:04:05 MST"))
+						}
+					}
+				}
+			}
+			if strings.Contains(bodyStr, "Request has expired") {
+				return errors.New("download link expired: AWS CloudFront presigned URL has expired (re-run command to fetch fresh link)")
+			}
+			if strings.Contains(bodyStr, "AccessDenied") {
+				return errors.New("download access denied: signed CDN link may have expired or is invalid (re-run command to fetch fresh link)")
+			}
+		}
 		return fmt.Errorf("server returned HTTP %d for download URL", resp.StatusCode)
 	}
 

@@ -15,10 +15,14 @@ A high-performance, memory-safe, zero-dependency Go CLI and client library for *
 - **Wire-Speed Multi-GB Streaming**: Streams 2.5 GB – 10+ GB BIG-IP ISOs, OVAs, and qcow2 images directly to disk using `io.TeeReader` with simultaneous SHA-256 verification and minimal RAM footprint (< 10 MB).
 - **Direct Appliance Push & Pull Engine**: Transfers software ISOs, engineering hotfixes, diagnostic QKViews, and configuration files directly between local systems and BIG-IP / BIG-IQ appliances with **automatic seamless failover** between **iControl REST chunked transfer** (HTTPS) and **native Go SCP streaming** (SSH).
 - **End-to-End Download & Deploy**: Downloads an image from MyF5, cryptographically verifies its SHA-256 checksum, and immediately pushes it to target appliances in a single atomic pipeline (`myf5 downloads get ... --push <host>`).
+- **Automated GeoIP Deployment Engine**: Downloads, stages, unpacks, installs, and reloads MaxMind/Digital Envoy GeoIP databases into BIG-IP TMOS in a single atomic pipeline (`myf5 geoip` or `myf5 downloads get ... --apply-geoip`).
+- **Outbound Corporate & Lab Proxy Support**: Universal support for HTTP, HTTPS, SOCKS5, and SOCKS5h proxies via `--proxy` or standard environment variables (`ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`). Includes diagnostic probe command `myf5 proxy`.
+- **Interactive Case Creation Wizard**: Step-by-step TUI wizard (`myf5 wizard`) with automatic serial and version discovery from live appliances or `.qkview` files, interactive multiline text buffer with undo (`Ctrl+Z`), and dry-run safety gates.
+- **Signal Handling & Interruption Safety**: Comprehensive trap for `SIGINT` (Ctrl+C) and `SIGTERM` across all commands; ensures partial `.part` downloads are pruned, active SSH channels and TCP sockets are closed gracefully, and no orphaned processes linger.
 - **MyF5 Downloads (ESDP) Ready**: Targets `api.software.downloads.f5.com` without the legacy `k` query parameter, over the gateway's doubled-`v1` path prefix (`/v1/downloads-management/v1/...` — not a typo; see `pkg/downloads`), with a legacy fallback and HTTP 429 rate-limit backoff.
 - **Strict Zero-Secret CLI Security**: Rejects plaintext secret arguments (`--password`, `--client-secret`) with exit code `2` to protect against process table (`ps aux`) and shell history leaks.
 - **Multiple Credential Formats**: Automatically discovers credentials in `F5_CLIENT_ID` / `F5_CLIENT_SECRET` environment variables or `~/.f5api_credentials` (both `KEY=VALUE` and `[profile]` INI formats).
-- **Interactive Console Browser**: Menu-driven terminal TUI for exploring product families, branches, release versions, and signed CDN download links.
+- **Interactive Console & REPL**: Menu-driven terminal TUI for catalog exploration (`myf5 downloads browse`) and interactive CLI shell (`myf5 interactive`).
 - **Universal Appliance Connectivity**: Seamlessly supports standard LAN management IPs (`10.1.1.4`), custom management ports (`:8443`), and cloud/UDF access proxies (`https://*.access.udf.f5.com`).
 
 ---
@@ -29,17 +33,19 @@ A high-performance, memory-safe, zero-dependency Go CLI and client library for *
 myf5-cli/
 ├── cmd/
 │   └── myf5/
-│       └── main.go             # Unified CLI entrypoint & Zero-Secret validator
+│       ├── main.go             # Unified CLI entrypoint, flag parsing, signal handling
+│       └── wizard.go           # Interactive case creation wizard & multiline text editor
 ├── pkg/
 │   ├── auth/                   # OAuth2 authentication, Zero-Secret validator, credentials resolver
-│   ├── client/                 # Secure TLS 1.2+ HTTP transport with AEAD/PFS ciphers
+│   ├── client/                 # Secure TLS 1.2+ HTTP transport, SOCKS5/HTTP proxy dialer, timeouts
 │   ├── downloads/              # Downloads API catalog client and streaming downloader
-│   ├── cases/                  # MyF5 Support Case API client
+│   ├── cases/                  # MyF5 Support Case API client & fallback metadata schema
 │   ├── ihealth/                # F5 iHealth QKView multipart upload and status client
 │   ├── bigip/                  # BIG-IP & BIG-IQ client (iControl REST chunking, bash promotion, native SCP, failover)
 │   │   ├── client.go           # Appliance HTTP client, readiness, QKView automation, REST download
 │   │   ├── upload.go           # iControl REST chunked file transfer & bash promotion
 │   │   ├── scp.go              # Native Go SCP streaming (upload & download) over SSH
+│   │   ├── geoip.go            # TMOS GeoIP extraction, RPM installation, and reload engine
 │   │   └── failover.go         # Dual-protocol automatic failover engine
 │   └── completion/             # Zero-dependency shell tab completion generator (bash, zsh, fish)
 ├── .github/
@@ -53,7 +59,8 @@ myf5-cli/
 │   ├── downloads.md            # Downloads catalog taxonomy, GeoDB automation & direct push
 │   ├── credentials.md          # Zero-Secret policy & credential management
 │   ├── shell_completion.md     # Shell tab autocompletion guide (zsh, bash, fish)
-│   └── network_and_firewall.md # Egress firewall rules and DNS cutover documentation
+│   └── network_and_firewall.md # Egress firewall rules, proxy routing, and DNS cutover documentation
+├── testenv/                    # Automated AWS test lab (OpenTofu / Terraform: Proxy + BIG-IP VE BYOL)
 ├── Makefile                    # Developer build, test, and release automation
 ├── SECURITY.md                 # Security & vulnerability reporting policy
 ├── CONTRIBUTING.md             # Developer workflow & coding standards
@@ -173,14 +180,18 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
 ./bin/myf5 cases list --all
 
 # Retrieve case creation schema metadata
+# Note: Remote F5 metadata endpoint currently returns HTTP 500 (server-side bug);
+# the CLI handles this gracefully, and the interactive wizard uses offline schema fallback.
 ./bin/myf5 cases metadata
 
 # Show one case in full, including contacts and the email thread
 ./bin/myf5 cases get 01287164
 
-# Add a note or comment to a case
+# Add a note or comment to a case (supports interactive multiline editor with Ctrl+Z undo)
 # Case numbers are 8 digits, no prefix - exactly as MyF5 displays them.
 ./bin/myf5 cases comment 01287164 "Investigating packet captures."
+# Or launch multiline buffer:
+./bin/myf5 cases comment 01287164
 
 # Open a case. An entitlement identifier is required and is validated against
 # F5's records, but WHICH one depends on the product family: BIG-IP and other
@@ -197,7 +208,7 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
 
 # Alternatively, launch the interactive step-by-step case creation wizard.
 # Supports auto-detecting serials/versions from live BIG-IPs or .qkview files,
-# auto-detects your system timezone, and includes a dry-run review safety gate:
+# auto-detects your system timezone, multiline buffer with Ctrl+Z undo, and dry-run safety gates:
 ./bin/myf5 cases wizard
 # Or top-level shortcut:
 ./bin/myf5 wizard
@@ -222,6 +233,12 @@ Works with local management IPs, lab appliances, or cloud/UDF external access pr
 # Check TMOS readiness (via UDF or Cloud Access Proxy)
 ./bin/myf5 bigip ready https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com/
 
+# Inspect appliance version, edition, and build details
+./bin/myf5 bigip info 10.1.1.4 --user admin
+
+# Retrieve chassis/system serial number (useful for case creation)
+./bin/myf5 bigip serial 10.1.1.4 --user admin
+
 # Trigger full, non-truncating QKView generation (-s0) with resilient download
 ./bin/myf5 bigip qkview 10.1.1.4 --user admin
 
@@ -233,6 +250,11 @@ Works with local management IPs, lab appliances, or cloud/UDF external access pr
 
 # Download software image from BIG-IP appliance
 ./bin/myf5 bigip download 10.1.1.4 /shared/images/BIGIP-17.1.1.iso -o ./BIGIP-17.1.1.iso
+
+# Push and activate GeoIP database archive in one step
+./bin/myf5 bigip push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --apply-geoip
+# Or invoke direct GeoIP installer
+./bin/myf5 bigip geoip 10.1.1.4 /var/tmp/ip-geolocation-default.zip
 ```
 
 ### 6. BIG-IQ Centralized Management & Image Transfer
@@ -256,7 +278,54 @@ Works with local management IPs, lab appliances, or cloud/UDF external access pr
 ./bin/myf5 pull 10.1.1.4 /var/log/ltm -o ./ltm.log --method scp -u root -i ~/.ssh/id_ed25519
 ```
 
-### 8. Shell Tab Autocompletion (`bash`, `zsh`, `fish`)
+### 8. Automated GeoIP Deployment Engine
+Automate the end-to-end lifecycle of MaxMind / Digital Envoy GeoIP updates (askF5 K11176 / K78974041):
+```bash
+# Download latest GeoIP update package and apply to appliance in a single pipeline:
+./bin/myf5 downloads get "BIG-IP" "big-ip_v17.x" "17.1.1" "GeoLocationUpdates" \
+    "ip-geolocation-default.zip" -o /var/tmp/geoip.zip \
+    --push 10.1.1.4 --apply-geoip
+
+# Or apply an already downloaded archive directly to a BIG-IP:
+./bin/myf5 geoip 10.1.1.4 /var/tmp/ip-geolocation-default.zip
+```
+
+### 9. Outbound Corporate & Lab Proxy Support
+`myf5` supports outbound HTTP, HTTPS, SOCKS5, and SOCKS5h proxies for corporate networks and isolated lab environments:
+```bash
+# Probe and test proxy connectivity:
+./bin/myf5 proxy
+./bin/myf5 proxy --proxy socks5://proxy.corp.internal:1080
+
+# Run commands through proxy via global flag:
+./bin/myf5 --proxy socks5://10.0.0.1:1080 doctor
+./bin/myf5 --proxy http://10.0.0.1:8080 downloads families
+
+# Or configure via standard environment variables:
+export ALL_PROXY="socks5://proxy.corp.internal:1080"
+export HTTPS_PROXY="http://proxy.corp.internal:8080"
+export NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,.internal"
+```
+
+### 10. Interactive Case Creation Wizard
+Launch a guided terminal interface that validates input at every step:
+```bash
+./bin/myf5 wizard
+# Or:
+./bin/myf5 cases wizard
+```
+- Auto-detects serial number and TMOS version from a live appliance IP or local `.qkview` archive.
+- System timezone detection automatically maps to F5's expected string representation.
+- Multiline description text buffer supports live editing with undo (`Ctrl+Z`) and redo (`Ctrl+Y`).
+- Pre-submission dry-run safety review ensures you never open an accidental case against production.
+
+### 11. Interactive Console REPL
+Launch an interactive shell session for continuous operation without repeated binary invocations:
+```bash
+./bin/myf5 interactive
+```
+
+### 12. Shell Tab Autocompletion (`bash`, `zsh`, `fish`)
 Enable fast tab autocompletion for commands, subcommands, flags, and product families:
 
 ```bash
@@ -309,6 +378,11 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
   4. Interactive Masked Terminal Prompt (Echo suppressed via term.ReadPassword)
   ```
 - **Masked Diagnostics:** Diagnostic utilities (`myf5 doctor`) mask all secret strings, displaying only non-sensitive metadata (e.g. `Client ID: 9x8*************************`).
+
+### 3. Interruption Safety & Resource Cleanup (CTRL+C / SIGINT / SIGTERM)
+- **Top-Level Signal Trapping:** Global context (`signal.NotifyContext`) traps interruption signals across all CLI operations, ensuring clean cancellation rather than abrupt process termination.
+- **Atomic File Cleanup:** Streaming file downloads write to temporary `.part` files. If interrupted via `Ctrl+C`, the `.part` files are immediately removed from disk to prevent corrupt or incomplete files from accumulating.
+- **Graceful Network & Session Teardown:** In-flight HTTP request bodies, TLS connection pools, native SSH client sessions, and SCP channels are closed cleanly upon signal receipt, preventing connection hangs and orphaned appliance processes.
 
 ---
 

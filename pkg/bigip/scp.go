@@ -247,6 +247,17 @@ func SCPUpload(ctx context.Context, localPath string, destDir string, opts SCPOp
 		return "", fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
+	uploadDone := make(chan struct{})
+	defer close(uploadDone)
+	go func() {
+		select {
+		case <-uploadDone:
+		case <-ctx.Done():
+			_ = session.Close()
+			_ = sshClient.Close()
+		}
+	}()
+
 	scpCmd := fmt.Sprintf("scp -t %s", destDir)
 	if err := session.Start(scpCmd); err != nil {
 		return "", fmt.Errorf("failed to start scp sink on remote appliance: %w", err)
@@ -399,10 +410,15 @@ func SCPDownload(ctx context.Context, remotePath, localDest string, opts SCPOpti
 		return "", fmt.Errorf("failed to open session stdout: %w", err)
 	}
 
+	downloadDone := make(chan struct{})
+	defer close(downloadDone)
 	go func() {
-		<-ctx.Done()
-		_ = session.Close()
-		_ = sshClient.Close()
+		select {
+		case <-downloadDone:
+		case <-ctx.Done():
+			_ = session.Close()
+			_ = sshClient.Close()
+		}
 	}()
 
 	cmd := fmt.Sprintf("scp -f %s", cleanRemote)
@@ -453,6 +469,13 @@ func SCPDownload(ctx context.Context, remotePath, localDest string, opts SCPOpti
 	if err != nil {
 		return "", fmt.Errorf("failed creating local file %s: %w", partFile, err)
 	}
+	var transferSuccess bool
+	defer func() {
+		_ = outFile.Close()
+		if !transferSuccess {
+			_ = os.Remove(partFile)
+		}
+	}()
 
 	buf := make([]byte, 64*1024)
 	var transferred int64
@@ -460,8 +483,6 @@ func SCPDownload(ctx context.Context, remotePath, localDest string, opts SCPOpti
 
 	for transferred < fileSize {
 		if ctx.Err() != nil {
-			_ = outFile.Close()
-			_ = os.Remove(partFile)
 			return "", ctx.Err()
 		}
 
@@ -490,20 +511,16 @@ func SCPDownload(ctx context.Context, remotePath, localDest string, opts SCPOpti
 		}
 	}
 
-	_ = outFile.Close()
 	if writeErr != nil {
-		_ = os.Remove(partFile)
 		return "", writeErr
 	}
 
 	// Step 4: Verify server EOF acknowledgement byte (\x00)
 	ackByte, err := rd.ReadByte()
 	if err != nil && err != io.EOF {
-		_ = os.Remove(partFile)
 		return "", fmt.Errorf("failed reading scp completion byte: %w", err)
 	}
 	if ackByte != 0 && err == nil {
-		_ = os.Remove(partFile)
 		return "", fmt.Errorf("server sent unexpected scp completion status: %d", ackByte)
 	}
 
@@ -514,14 +531,18 @@ func SCPDownload(ctx context.Context, remotePath, localDest string, opts SCPOpti
 	if err := session.Wait(); err != nil {
 		var exitMissing *ssh.ExitMissingError
 		if !errors.As(err, &exitMissing) {
-			_ = os.Remove(partFile)
 			return "", fmt.Errorf("scp session completed with error: %w", err)
 		}
+	}
+
+	if err := outFile.Close(); err != nil {
+		return "", fmt.Errorf("failed closing downloaded file: %w", err)
 	}
 
 	if err := os.Rename(partFile, cleanLocal); err != nil {
 		return "", fmt.Errorf("failed finalizing downloaded file: %w", err)
 	}
+	transferSuccess = true
 
 	return cleanLocal, nil
 }
@@ -705,5 +726,15 @@ func DeleteQKViewSSH(ctx context.Context, opts SCPOptions, filename string) erro
 
 	remotePath := "/var/tmp/qkviews/" + filename
 	cmd := fmt.Sprintf("rm -f %s", remotePath)
-	return session.Run(cmd)
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- session.Run(cmd)
+	}()
+	select {
+	case <-ctx.Done():
+		_ = session.Close()
+		return ctx.Err()
+	case err := <-runDone:
+		return err
+	}
 }

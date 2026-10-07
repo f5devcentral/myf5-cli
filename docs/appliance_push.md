@@ -206,10 +206,21 @@ BIG-IP Application Security Manager (ASM / Advanced WAF), Advanced Firewall Mana
 
 Active databases reside on the appliance filesystem under `/shared/GeoIP/` (and `/shared/GeoIP/v2/`).
 
-#### Staging the Update Archive
-The packages downloaded from the MyF5 `GeoLocationUpdates` container are delivered as a compressed `.zip` archive (e.g., `ip-geolocation-default.zip` or `ip-geolocation-*.zip`) containing individual `.rpm` packages for region, ISP, and organization data.
+#### Automated One-Step Push and Activation (Recommended)
+`myf5` provides native automation that stages the archive, unpacks the internal `.rpm` files, executes `geoip_update_data -f` for each package, and triggers `tmsh load sys geoip` across TMOS:
 
-Stage the archive in `/var/tmp` or `/shared/tmp`:
+```bash
+# Push and automatically apply GeoIP updates in a single command:
+myf5 bigip push 192.0.2.10 /var/tmp/ip-geolocation-default.zip --apply-geoip
+
+# Or use the dedicated GeoIP command:
+myf5 bigip geoip 192.0.2.10 /var/tmp/ip-geolocation-default.zip
+# Top-level alias:
+myf5 geoip 192.0.2.10 /var/tmp/ip-geolocation-default.zip
+```
+
+#### Manual Staging and TMOS Execution (Alternative)
+If preferred, you can stage the archive manually in `/var/tmp` or `/shared/tmp`:
 
 ```bash
 # Push GeoDB update archive to appliance staging directory via iControl REST

@@ -25,12 +25,16 @@ In accordance with enterprise DevSecOps standards, **passing credentials or toke
 | :--- | :--- |
 | [`downloads`](#1-myf5-downloads) | Browse the MyF5 software catalog and stream multi-GB images |
 | [`cases`](#2-myf5-cases) | Inspect, query, and comment on MyF5 support cases |
+| [`wizard`](#11-myf5-wizard) | Interactive guided support case creation wizard with live appliance auto-fill |
 | [`ihealth`](#3-myf5-ihealth) | Upload and audit QKView diagnostic bundles on F5 iHealth |
-| [`bigip`](#4-myf5-bigip) | Orchestrate BIG-IP TMOS appliances (readiness, QKView generation, push) |
+| [`bigip`](#4-myf5-bigip) | Orchestrate BIG-IP TMOS appliances (readiness, QKView generation, push, GeoIP) |
 | [`bigiq`](#5-myf5-bigiq) | Orchestrate BIG-IQ Centralized Management appliances (readiness, push) |
 | [`push`](#6-myf5-push) | Push downloads or files to BIG-IP / BIG-IQ via iControl REST or SCP |
 | [`pull`](#7-myf5-pull) | Pull files or diagnostics from BIG-IP / BIG-IQ via iControl REST or SCP |
+| [`geoip`](#12-myf5-geoip) | Apply GeoIP updates directly to BIG-IP appliances (alias: `bigip geoip`) |
+| [`proxy`](#13-myf5-proxy) | View or configure HTTP/HTTPS/SOCKS5 outbound egress proxy |
 | [`doctor`](#8-myf5-doctor) | Run connectivity, DNS, egress, and credential diagnostics |
+| [`interactive`](#14-myf5-interactive) | Launch interactive REPL shell with tab completion (`shell`, `repl`) |
 | [`completion`](#9-myf5-completion) | Generate native shell autocompletion scripts (`bash`, `zsh`, `fish`) |
 | [`version`](#10-myf5-version) | Display application version and toolchain info |
 
@@ -145,7 +149,7 @@ Retrieves the authoritative schema metadata and valid values for case creation.
 myf5 cases metadata
 ```
 
-> **Known outage (2026-10-05):** this endpoint returns
+> **Known outage (re-verified 2026-10-06):** this endpoint returns
 > `500 "Malformed JSON: Expected '{' at the beginning of object"` for every
 > request, including a plain `GET` with no body. The fault is server-side at
 > F5 and there is no client-side workaround. It is the documented source of
@@ -153,19 +157,32 @@ myf5 cases metadata
 > so those values currently cannot be enumerated from the API.
 >
 > Until it recovers, copy the values from an existing case with
-> `myf5 cases get <case-number>`, or use `--dry-run` on `cases create`, which
+> `myf5 cases get <case-number>`, use `myf5 cases wizard` (which incorporates
+> known-valid schemas offline), or use `--dry-run` on `cases create`, which
 > validates your field values and reports what the API would reject without
 > opening a case.
 
-#### `comment <case-number> <note>`
-Appends a status comment or investigation update to an open support case.
+#### `comment <case-number> [note]`
+Appends a status comment or investigation update to an open support case. If `[note]` is omitted, launches an interactive multiline text buffer with editing, undo/redo (`Ctrl+Z`), and word wrapping.
 ```bash
+# Pass comment directly
 myf5 cases comment 01287164 "Uploaded new diagnostic packet captures."
+
+# Launch interactive multiline editor
+myf5 cases comment 01287164
 ```
 
 > The API reports failure in the response body (`isError`) as well as by
 > status code, so a `2xx` alone does not mean the comment landed. The CLI
 > checks both. Confirm in the MyF5 web UI when it matters.
+
+#### `wizard`
+Launches the interactive, step-by-step case creation wizard. Auto-detects system timezone, prompts for product family and entitlements, supports live auto-detection from appliances or QKViews, and provides a dry-run review before submission.
+```bash
+myf5 cases wizard
+# Or top-level shortcut:
+myf5 wizard
+```
 
 #### `get <case-number>`
 Shows one case in full: status, priority, product, account, contacts, the
@@ -283,13 +300,29 @@ myf5 bigip ready 10.1.1.4
 myf5 bigip ready https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com/
 ```
 
+#### `info <host | file.qkview> [--json]`
+Inspects a live BIG-IP appliance or local `.qkview` archive to extract TMOS version, build, chassis/platform model, base registration key, and chassis serial number.
+```bash
+# Query live appliance
+myf5 bigip info 10.1.1.4 --user admin
+
+# Query offline QKView diagnostic archive
+myf5 bigip info /path/to/diagnostic.qkview
+```
+
+#### `serial <host | file.qkview> [--json]`
+Quickly extracts and prints the hardware chassis serial number from a live appliance or offline `.qkview`.
+```bash
+myf5 bigip serial 10.1.1.4
+```
+
 #### `qkview <host> [--user <user>] [--port <port>]`
 Generates a complete, non-truncating (`-s0`) diagnostic QKView archive on the BIG-IP appliance via `/mgmt/tm/util/qkview` or `/mgmt/cm/autodeploy/qkview` with live spinner status updates, then downloads it directly to local disk (falling back to native Go SCP if autodeploy download is unavailable).
 ```bash
 myf5 bigip qkview 10.1.1.4 --user admin
 ```
 
-#### `push <host> <file> [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>]`
+#### `push <host> <file> [--method auto|icontrol|scp] [--dest <path>] [--apply-geoip] [--user <user>] [--port <port>] [-i <key>]`
 Pushes a local software image, engineering hotfix, or GeoDB archive to the BIG-IP appliance with automatic seamless failover between iControl REST and SCP.
 ```bash
 # Push ISO to /shared/images with automatic failover (default)
@@ -298,8 +331,14 @@ myf5 bigip push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --dest /shared/images
 # Push hotfix explicitly via native Go SCP
 myf5 bigip push 10.1.1.4 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso --method scp -i ~/.ssh/f5_key
 
-# Push GeoDB update archive to /var/tmp staging directory via iControl REST
-myf5 bigip push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --dest /var/tmp --method icontrol
+# Push GeoDB update archive and immediately extract & activate in TMM
+myf5 bigip push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --apply-geoip
+```
+
+#### `geoip <host> <zip-path> [--keep-extracted] [--method auto|icontrol|scp] [--json]`
+Uploads a GeoIP update ZIP archive, extracts the RPM packages on the appliance, installs them via `geoip_update_data`, and signals TMM to reload the geolocation database.
+```bash
+myf5 bigip geoip 10.1.1.4 /var/tmp/ip-geolocation-default.zip
 ```
 
 #### `download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--user <user>] [--port <port>] [-i <key>]`
@@ -460,7 +499,94 @@ myf5 version
 
 ---
 
-## 11. Process Exit Codes
+## 11. `myf5 wizard`
+
+Top-level alias for `myf5 cases wizard`. Launches an interactive, multi-step terminal wizard to guide you through creating an F5 Support Case with zero memorization of product schema strings:
+
+```bash
+myf5 wizard
+```
+
+### Features:
+- **Automatic Environment Detection**: Reads local machine timezone and maps it to valid F5 Salesforce timezone strings automatically.
+- **Live Device Autofill**: Optionally connects to a live BIG-IP appliance (`--user admin`) or parses a local `.qkview` file to extract the chassis serial number, TMOS product version, and software line automatically.
+- **Multiline Text Buffer with Undo**: The description step launches an interactive multiline text buffer with editing, word wrapping, undo/redo (`Ctrl+Z`), and line navigation.
+- **Bidirectional Step Navigation**: Type `back` or `b` at any prompt to re-visit previous steps and adjust earlier selections.
+- **Safety Dry-Run Gate**: Displays the full JSON payload before making any network write. Requests explicit final confirmation before sending to the live API.
+
+---
+
+## 12. `myf5 geoip`
+
+Top-level alias for `myf5 bigip geoip`. Uploads, unpacks, installs, and reloads F5 GeoIP database packages directly on a BIG-IP appliance in a single automated command:
+
+```bash
+myf5 geoip <host> <zip-path> [--keep-extracted] [--method auto|icontrol|scp] [--json]
+```
+
+### Actions:
+1. Validates the local ZIP package and inspects contained GeoIP RPMs (`F5GeoIPData`, `F5GeoIPDataV6`, etc.).
+2. Transfers the package to `/var/tmp` on the appliance via iControl REST or SCP.
+3. Automatically unzips packages and applies updates using TMOS `geoip_update_data -f`.
+4. Executes `tmsh load sys geoip-data` to activate updated geolocation routing in TMM memory without disruption.
+5. Cleans up temporary files on the appliance (unless `--keep-extracted` is specified).
+
+---
+
+## 13. `myf5 proxy`
+
+Manage outbound HTTP, HTTPS, and SOCKS5 proxy settings for routing API traffic through corporate forward proxies, bastion hosts, or air-gapped jump boxes.
+
+```bash
+myf5 proxy show            # Display active egress proxy configuration
+myf5 proxy set <url>       # Persistently configure default proxy (http://, https://, socks5://)
+myf5 proxy clear           # Remove persistent proxy configuration
+myf5 --proxy <url> <cmd>   # Specify proxy for a single command invocation
+```
+
+### Supported Schemes:
+- `http://[user:pass@]host:port`: Standard HTTP CONNECT proxy.
+- `https://[user:pass@]host:port`: TLS CONNECT proxy.
+- `socks5://[user:pass@]host:port`: RFC 1928 SOCKS5 proxy (local DNS resolution).
+- `socks5h://[user:pass@]host:port`: SOCKS5 proxy with remote DNS resolution on the proxy server.
+
+### Environment Variable Fallback:
+If no `--proxy` flag or persistent configuration is found, `myf5` respects `MYF5_PROXY`, `F5_PROXY`, `ALL_PROXY`, `HTTPS_PROXY`, and `HTTP_PROXY`. Proxy bypass rules can be specified via `NO_PROXY`.
+
+---
+
+## 14. `myf5 interactive` (alias: `shell`, `repl`)
+
+Launches an interactive Read-Eval-Print-Loop (REPL) shell environment with built-in tab autocompletion, command history, and session state:
+
+```bash
+myf5 interactive
+# Or shortcuts:
+myf5 shell
+myf5 repl
+```
+
+Within the interactive shell, execute commands directly without the `myf5` prefix:
+```
+myf5> doctor
+myf5> downloads families
+myf5> cases list
+myf5> exit
+```
+
+---
+
+## 15. Signal Handling & Interruption Safety (CTRL+C)
+
+All long-running network connections, streaming file transfers, and appliance operations in `myf5-cli` implement robust interrupt and cancellation handling:
+- **Clean Signal Traps**: Intercepts `SIGINT` (Ctrl+C) and `SIGTERM` via isolated command contexts (`signal.NotifyContext`).
+- **Safe Connection Teardown**: Immediately aborts in-flight HTTP requests, closes SOCKS5 proxy tunnels, and gracefully closes SSH/SCP channels without socket leaks or hanging child processes.
+- **Atomic Partial File Cleanup**: Streaming file downloads automatically scrub and remove temporary `.part` files on disk upon interrupt, preventing corrupted or incomplete downloads from being mistaken for valid files.
+- **Exit Code 130**: Returns standard POSIX exit code `130` (`128 + SIGINT`) on cancellation.
+
+---
+
+## 16. Process Exit Codes
 
 `myf5` returns standard POSIX exit codes to support reliable shell script branching and CI/CD pipelines:
 
@@ -470,3 +596,4 @@ myf5 version
 | `1` | **General Error** | Command syntax error, invalid arguments, network failure, missing credentials in non-interactive environment, or appliance error. |
 | `2` | **Zero-Secret Violation** | Security error triggered when prohibited credential flags (`--password`, `--client-secret`) are supplied on the command line. |
 | `130` | **Cancelled / Interrupted** | Execution aborted by user via `SIGINT` (Ctrl+C) or `SIGTERM`. |
+

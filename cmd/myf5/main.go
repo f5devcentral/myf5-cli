@@ -32,7 +32,36 @@ import (
 const Version = "1.1.0"
 
 func main() {
-	// Set up graceful SIGINT / SIGTERM context
+	// Enforce Zero-Secret CLI Policy
+	if err := auth.CheckNoCLISecrets(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "\n[SECURITY ERROR] %s\n\n", err.Error())
+		exitFunc(2)
+	}
+
+	// Extract global --proxy flag if present
+	cleanArgs, proxyFlag := extractProxyFlag(os.Args[1:])
+	if proxyFlag != "" {
+		if err := client.SetGlobalProxy(proxyFlag); err != nil {
+			fmt.Fprintf(os.Stderr, "\n[ERROR] Invalid proxy URL: %v\n\n", err)
+			exitFunc(1)
+		}
+	}
+
+	isInteractive := (len(cleanArgs) < 1 && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))) ||
+		(len(cleanArgs) > 0 && (cleanArgs[0] == "interactive" || cleanArgs[0] == "shell" || cleanArgs[0] == "repl" || cleanArgs[0] == "i"))
+
+	if isInteractive {
+		startInteractive()
+		return
+	}
+
+	if len(cleanArgs) < 1 {
+		printUsage()
+		exitFunc(1)
+		return
+	}
+
+	// Set up graceful SIGINT / SIGTERM context for one-shot command execution
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -54,31 +83,6 @@ func main() {
 			os.Exit(130)
 		}
 	}()
-
-	// Enforce Zero-Secret CLI Policy
-	if err := auth.CheckNoCLISecrets(os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "\n[SECURITY ERROR] %s\n\n", err.Error())
-		exitFunc(2)
-	}
-
-	// Extract global --proxy flag if present
-	cleanArgs, proxyFlag := extractProxyFlag(os.Args[1:])
-	if proxyFlag != "" {
-		if err := client.SetGlobalProxy(proxyFlag); err != nil {
-			fmt.Fprintf(os.Stderr, "\n[ERROR] Invalid proxy URL: %v\n\n", err)
-			exitFunc(1)
-		}
-	}
-
-	if len(cleanArgs) < 1 {
-		if term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
-			startInteractive(ctx)
-			return
-		}
-		printUsage()
-		exitFunc(1)
-		return
-	}
 
 	subcommand := cleanArgs[0]
 	args := cleanArgs[1:]
@@ -141,7 +145,7 @@ func executeSubcommand(ctx context.Context, subcommand string, args []string) {
 	case "doctor":
 		handleDoctor(ctx, args)
 	case "interactive", "shell", "repl", "i":
-		startInteractive(ctx)
+		startInteractive()
 	case "version", "--version", "-v":
 		fmt.Printf("myf5-cli version %s (Go 1.27.1 / darwin-arm64)\n", Version)
 	case "help", "--help", "-h":
@@ -791,7 +795,7 @@ func handleDownloads(ctx context.Context, args []string) {
 		}
 
 		link := links[0]
-		fmt.Printf("Mirror Region: %s\n", link.GetRegion())
+		fmt.Printf("Mirror Region: %s (link expires %s)\n", link.GetRegion(), link.FormattedExpires())
 		fmt.Printf("Target File:   %s\n", outPath)
 		if expectedHash != "" {
 			fmt.Printf("Expected SHA:  %s\n", expectedHash)
@@ -1279,7 +1283,7 @@ familyLoop:
 							}
 
 							link := links[0]
-							fmt.Printf("Mirror URL (expires %s, Region: %s):\n%s\n\n", link.ExpiresAt, link.GetRegion(), link.Href)
+							fmt.Printf("Mirror URL (expires %s, Region: %s):\n%s\n\n", link.FormattedExpires(), link.GetRegion(), link.Href)
 							targetPath := filepath.Join(getDefaultDownloadsDir(), filepath.Base(selectedTarget.file.Name))
 							fmt.Printf("Download this file directly to %s? [y/N]: ", targetPath)
 							confirmInput, err := reader.ReadString('\n')
@@ -2646,21 +2650,28 @@ func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user
 		ClientKeyPath:  certKeyPath,
 	})
 	if err == nil {
-		info, err := client.GetSystemInfo(ctx)
-		if err == nil {
+		var info *bigip.SystemInfo
+		var restErr error
+		info, restErr = client.GetSystemInfo(ctx)
+		if restErr == nil {
 			return info, nil
 		}
 		if method != "auto" {
-			return nil, err
+			return nil, restErr
 		}
+		err = restErr
 	} else if method != "auto" {
 		return nil, err
 	}
 
 	if method == "auto" {
+		sshPort := 22
+		if port > 0 && port != 443 && port != 8443 {
+			sshPort = port
+		}
 		opts := bigip.SCPOptions{
 			Host:     host,
-			Port:     port,
+			Port:     sshPort,
 			Username: user,
 			Password: pw,
 			KeyPath:  keyPath,
@@ -3147,6 +3158,12 @@ func handleDoctor(ctx context.Context, args []string) {
 
 	fmt.Println("\n3. Network Egress & DNS Connectivity Audit (TCP 443):")
 	for _, ep := range endpoints {
+		if ctx.Err() != nil {
+			fmt.Fprintln(os.Stderr, "\n[CANCELLED] Doctor audit aborted by user.")
+			exitFunc(130)
+			return
+		}
+
 		target := net.JoinHostPort(ep.fqdn, strconv.Itoa(ep.port))
 		dialCtx, dialCancel := context.WithTimeout(ctx, 4*time.Second)
 		conn, err := client.DialProxy(dialCtx, "tcp", target, nil)
