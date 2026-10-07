@@ -240,13 +240,31 @@ func TestEvaluatePlatformLifecycle(t *testing.T) {
 			wantFamily:  "BIG-IP iSeries",
 		},
 		{
-			name:        "iSeries D110 code (i2800)",
-			platform:    "BIG-IP D110",
+			name:        "iSeries C117 code (i850/i2600/i2800)",
+			platform:    "BIG-IP C117",
 			asOf:        now2026,
 			wantStatus:  StatusApproachingEOL,
 			wantEOL:     false,
 			wantVirtual: false,
 			wantFamily:  "BIG-IP iSeries",
+		},
+		{
+			name:        "iSeries C119 code (i5600/i5800)",
+			platform:    "C119",
+			asOf:        now2026,
+			wantStatus:  StatusApproachingEOL,
+			wantEOL:     false,
+			wantVirtual: false,
+			wantFamily:  "BIG-IP iSeries",
+		},
+		{
+			name:        "Legacy D110 code (7000s/7200v/BIG-IQ 7000)",
+			platform:    "BIG-IP D110",
+			asOf:        now2026,
+			wantStatus:  StatusEOL,
+			wantEOL:     true,
+			wantVirtual: false,
+			wantFamily:  "BIG-IP Legacy Hardware",
 		},
 		{
 			name:        "iSeries i15800 High-End",
@@ -372,5 +390,55 @@ func TestEvaluateLifecycle_Combined(t *testing.T) {
 	veInfo.EvaluateLifecycle(now2026)
 	if len(veInfo.Lifecycle.Warnings) != 0 {
 		t.Errorf("expected 0 warnings for 17.5.1 on Z100, got: %v", veInfo.Lifecycle.Warnings)
+	}
+}
+
+func TestLookupPlatform(t *testing.T) {
+	tests := []struct {
+		input       string
+		wantCode    string
+		wantModel   string
+		wantFamily  string
+		wantVirtual bool
+		wantFound   bool
+	}{
+		{"C119", "C119", "BIG-IP i5600 / i5800", "BIG-IP iSeries", false, true},
+		{"c119", "C119", "BIG-IP i5600 / i5800", "BIG-IP iSeries", false, true},
+		{"C117", "C117", "BIG-IP i850 / i2600 / i2800", "BIG-IP iSeries", false, true},
+		{"C115", "C115", "BIG-IP i4600 / i4800", "BIG-IP iSeries", false, true},
+		{"C113", "C113", "BIG-IP 4000s / 4200v", "BIG-IP Legacy Hardware", false, true},
+		{"D110", "D110", "BIG-IP 7000s / 7200v / BIG-IQ 7000", "BIG-IP Legacy Hardware", false, true},
+		{"Z100", "Z100", "BIG-IP Virtual Edition", "Virtual Edition", true, true},
+		{"Z100A", "Z100A", "BIG-IP Virtual Edition (AWS)", "Virtual Edition", true, true},
+		{"F100", "F100", "VIPRION C2400 Chassis", "VIPRION", false, true},
+		{"A108", "A108", "VIPRION B4300 Blade", "VIPRION (Legacy)", false, true},
+		{"CX410", "CX410", "VELOS CX410 Chassis", "F5 VELOS", false, true},
+		{"BX110", "BX110", "VELOS BX110 Blade", "F5 VELOS", false, true},
+		{"platform=C119", "C119", "BIG-IP i5600 / i5800", "BIG-IP iSeries", false, true},
+		{"BIG-IP i5800 (C119)", "C119", "BIG-IP i5600 / i5800", "BIG-IP iSeries", false, true},
+		{"NonExistentPlatform", "", "", "", false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			rec, found := LookupPlatform(tt.input)
+			if found != tt.wantFound {
+				t.Fatalf("LookupPlatform(%q) found = %v; want %v", tt.input, found, tt.wantFound)
+			}
+			if found {
+				if rec.Code != tt.wantCode {
+					t.Errorf("LookupPlatform(%q).Code = %q; want %q", tt.input, rec.Code, tt.wantCode)
+				}
+				if rec.Model != tt.wantModel {
+					t.Errorf("LookupPlatform(%q).Model = %q; want %q", tt.input, rec.Model, tt.wantModel)
+				}
+				if rec.Family != tt.wantFamily {
+					t.Errorf("LookupPlatform(%q).Family = %q; want %q", tt.input, rec.Family, tt.wantFamily)
+				}
+				if rec.IsVirtual != tt.wantVirtual {
+					t.Errorf("LookupPlatform(%q).IsVirtual = %v; want %v", tt.input, rec.IsVirtual, tt.wantVirtual)
+				}
+			}
+		})
 	}
 }

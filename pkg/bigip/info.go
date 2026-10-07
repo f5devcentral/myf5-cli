@@ -87,12 +87,24 @@ func (s *SystemInfo) PopulateCaseAttributes() {
 	}
 	attrs["product"] = product
 
-	if strings.Contains(s.Hostname, ".ec2.internal") || strings.Contains(s.Hostname, ".compute.internal") || s.Platform == "Z100" {
-		attrs["cloudProvider"] = "AWS"
-	} else if strings.Contains(s.Hostname, "azure") || strings.Contains(s.Hostname, "trafficmanager.net") {
-		attrs["cloudProvider"] = "Azure"
-	} else if strings.Contains(s.Hostname, "google") || strings.Contains(s.Hostname, "gce") {
-		attrs["cloudProvider"] = "Google"
+	cloud := ""
+	if rec, ok := LookupPlatform(s.Platform); ok {
+		switch rec.Code {
+		case "Z100", "Z100A":
+			cloud = "AWS"
+		}
+	}
+	if cloud == "" {
+		if strings.Contains(s.Hostname, ".ec2.internal") || strings.Contains(s.Hostname, ".compute.internal") || s.Platform == "Z100" {
+			cloud = "AWS"
+		} else if strings.Contains(s.Hostname, "azure") || strings.Contains(s.Hostname, "trafficmanager.net") {
+			cloud = "Azure"
+		} else if strings.Contains(s.Hostname, "google") || strings.Contains(s.Hostname, "gce") {
+			cloud = "Google"
+		}
+	}
+	if cloud != "" {
+		attrs["cloudProvider"] = cloud
 	}
 
 	s.CaseAttributes = attrs
@@ -119,7 +131,13 @@ func (s *SystemInfo) Summary() string {
 		b.WriteString(fmt.Sprintf("  Version:            %s\n", ver))
 	}
 	if s.Platform != "" {
-		b.WriteString(fmt.Sprintf("  Platform:           %s\n", s.Platform))
+		platDisplay := s.Platform
+		if rec, ok := LookupPlatform(s.Platform); ok && rec.Model != "" {
+			if !strings.Contains(s.Platform, rec.Model) && s.Platform != rec.Model {
+				platDisplay = fmt.Sprintf("%s (%s)", s.Platform, rec.Model)
+			}
+		}
+		b.WriteString(fmt.Sprintf("  Platform:           %s\n", platDisplay))
 	}
 	if s.ChassisSerialNumber != "" {
 		b.WriteString(fmt.Sprintf("  Chassis Serial:     %s\n", s.ChassisSerialNumber))
@@ -703,7 +721,8 @@ func parseTmshOutput(output string) *SystemInfo {
 
 	chassisRe := regexp.MustCompile(`(?i)(?:Chassis Serial|Serial Number)\s+([^\s]+)`)
 	regKeyRe := regexp.MustCompile(`(?i)Registration Key\s+([A-Z0-9-]+)`)
-	platformRe := regexp.MustCompile(`(?i)(?:Platform\s+Name|Platform)\s+([^\s]+)`)
+	platformRe := regexp.MustCompile(`(?i)(?:Platform\s+Name|Platform)\s+([^\r\n]+)`)
+	hardwareTypeRe := regexp.MustCompile(`(?i)^\s*Type\s+([A-Z0-9]+)`)
 	macRe := regexp.MustCompile(`(?i)Base MAC\s+([0-9a-fA-F:]+)`)
 	versionRe := regexp.MustCompile(`(?i)Version\s+([0-9.]+)`)
 	buildRe := regexp.MustCompile(`(?i)Build\s+([0-9.]+)`)
@@ -748,6 +767,12 @@ func parseTmshOutput(output string) *SystemInfo {
 			val := strings.TrimSpace(m[1])
 			if !strings.EqualFold(val, "information") && !strings.EqualFold(val, "status") {
 				info.Platform = val
+			}
+		}
+		if m := hardwareTypeRe.FindStringSubmatch(line); len(m) > 1 {
+			typeCode := strings.ToUpper(strings.TrimSpace(m[1]))
+			if _, ok := LookupPlatformByID(typeCode); ok {
+				info.Platform = typeCode
 			}
 		}
 		if m := versionRe.FindStringSubmatch(line); len(m) > 1 && info.Version == "" {
