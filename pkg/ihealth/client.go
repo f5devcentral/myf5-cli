@@ -77,6 +77,14 @@ func (c *Client) GoString() string {
 	return c.String()
 }
 
+// Zero clears bearer token from memory.
+func (c *Client) Zero() {
+	if c == nil {
+		return
+	}
+	c.Token = ""
+}
+
 // NewClient initializes a new iHealth API client.
 func NewClient(token string, baseFQDN string) *Client {
 	if baseFQDN == "" {

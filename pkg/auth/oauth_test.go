@@ -86,3 +86,27 @@ func TestAuthenticateAudienceSelection(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthenticateWithSecretBytes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "Basic Y2xpZW50X2lkOnNlY3JldF9ieXRlcw==" { // base64 of "client_id:secret_bytes"
+			t.Errorf("unexpected Authorization header: %s", authHeader)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(TokenResponse{
+			AccessToken: "bytes-token-xyz",
+			TokenType:   "Bearer",
+		})
+	}))
+	defer server.Close()
+
+	sec := []byte("secret_bytes")
+	tok, err := AuthenticateWithSecretBytes(context.Background(), server.Client(), server.URL, "app", "client_id", sec, "myf5_scope")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if tok != "bytes-token-xyz" {
+		t.Errorf("got token %s, want bytes-token-xyz", tok)
+	}
+}

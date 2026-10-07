@@ -113,6 +113,15 @@ func (c *Client) GoString() string {
 	return c.String()
 }
 
+// Zero clears bearer tokens and API keys from memory.
+func (c *Client) Zero() {
+	if c == nil {
+		return
+	}
+	c.Token = ""
+	c.APIKey = ""
+}
+
 // NewClient initializes a MyF5 Downloads API client without an explicit API
 // usage key. The key matters only on the legacy fallback path; prefer
 // NewClientWithKey.

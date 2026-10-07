@@ -72,6 +72,9 @@ type Credentials struct {
 	ClientID     string
 	ClientSecret string
 
+	// SecretBytes holds the client secret as a mutable byte slice for in-place memory scrubbing.
+	SecretBytes []byte
+
 	// APIKey is the "API usage key" sent as the required `k` query parameter
 	// on support.apis.f5.com endpoints. It is a SECOND credential, distinct
 	// from the OAuth bearer token built from ClientID/ClientSecret: the F5
@@ -84,9 +87,30 @@ type Credentials struct {
 	// a single shared constant. Empty means "fall back to the package default".
 	APIKey string
 
+	// APIKeyBytes holds the API usage key as a mutable byte slice for in-place memory scrubbing.
+	APIKeyBytes []byte
+
 	// Proxy specifies an HTTP, HTTPS, or SOCKS5 proxy URL for outbound egress.
 	// Loaded from environment (MYF5_PROXY, F5_PROXY, HTTPS_PROXY, etc.) or credentials file.
 	Proxy string
+}
+
+// Zero securely overwrites all secret byte slices with zeros to scrub them from RAM,
+// then clears secret string fields.
+func (c *Credentials) Zero() {
+	if c == nil {
+		return
+	}
+	if len(c.SecretBytes) > 0 {
+		ZeroBytes(c.SecretBytes)
+		c.SecretBytes = nil
+	}
+	if len(c.APIKeyBytes) > 0 {
+		ZeroBytes(c.APIKeyBytes)
+		c.APIKeyBytes = nil
+	}
+	c.ClientSecret = ""
+	c.APIKey = ""
 }
 
 // String implements fmt.Stringer to ensure secrets are never leaked into logs or stdout.
@@ -166,8 +190,12 @@ func ResolveCredentialsForService(profile, service string) (*Credentials, error)
 		creds := &Credentials{
 			ClientID:     clientID,
 			ClientSecret: clientSecret,
+			SecretBytes:  []byte(clientSecret),
 			APIKey:       apiKey,
 			Proxy:        envProxy,
+		}
+		if apiKey != "" {
+			creds.APIKeyBytes = []byte(apiKey)
 		}
 		if envProxy != "" && client.GetGlobalProxy() == nil {
 			_ = client.SetGlobalProxy(envProxy)
@@ -203,6 +231,10 @@ func ResolveCredentialsForService(profile, service string) (*Credentials, error)
 			// for the OAuth pair above.
 			if apiKey != "" {
 				creds.APIKey = apiKey
+				if creds.APIKeyBytes != nil {
+					ZeroBytes(creds.APIKeyBytes)
+				}
+				creds.APIKeyBytes = []byte(apiKey)
 			}
 			if envProxy != "" {
 				creds.Proxy = envProxy
@@ -259,6 +291,16 @@ func readCredentialsFile(filePath, profile, servicePrefix string) (*Credentials,
 	currentSection := ""
 	kvStore := make(map[string]string)
 	profileStore := make(map[string]map[string]string)
+	defer func() {
+		for k := range kvStore {
+			delete(kvStore, k)
+		}
+		for _, m := range profileStore {
+			for k := range m {
+				delete(m, k)
+			}
+		}
+	}()
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -328,7 +370,17 @@ func readCredentialsFile(filePath, profile, servicePrefix string) (*Credentials,
 			if prx == "" {
 				prx = lookupKey(kvStore, "proxy", "f5_proxy", "https_proxy", "http_proxy")
 			}
-			return &Credentials{ClientID: cid, ClientSecret: csec, APIKey: ak, Proxy: prx}, nil
+			creds := &Credentials{
+				ClientID:     cid,
+				ClientSecret: csec,
+				SecretBytes:  []byte(csec),
+				APIKey:       ak,
+				Proxy:        prx,
+			}
+			if ak != "" {
+				creds.APIKeyBytes = []byte(ak)
+			}
+			return creds, nil
 		}
 	}
 
@@ -338,7 +390,17 @@ func readCredentialsFile(filePath, profile, servicePrefix string) (*Credentials,
 	if cid != "" && csec != "" {
 		ak := lookupKey(kvStore, "api_key", "apikey", "k", "f5_api_key")
 		prx := lookupKey(kvStore, "proxy", "f5_proxy", "https_proxy", "http_proxy")
-		return &Credentials{ClientID: cid, ClientSecret: csec, APIKey: ak, Proxy: prx}, nil
+		creds := &Credentials{
+			ClientID:     cid,
+			ClientSecret: csec,
+			SecretBytes:  []byte(csec),
+			APIKey:       ak,
+			Proxy:        prx,
+		}
+		if ak != "" {
+			creds.APIKeyBytes = []byte(ak)
+		}
+		return creds, nil
 	}
 
 	return nil, fmt.Errorf("no credentials found in %s for profile %s", filePath, profile)

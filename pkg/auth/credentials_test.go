@@ -311,3 +311,49 @@ func TestResolveCredentialsCustomFile(t *testing.T) {
 		t.Errorf("got %v, want custom-id/custom-sec", creds)
 	}
 }
+
+func TestCredentialsZero(t *testing.T) {
+	t.Run("scrubs byte slices and clears strings", func(t *testing.T) {
+		sec := []byte("my-client-secret-12345")
+		key := []byte("my-api-key-67890")
+		c := &Credentials{
+			ClientID:     "my-client-id",
+			ClientSecret: string(sec),
+			SecretBytes:  sec,
+			APIKey:       string(key),
+			APIKeyBytes:  key,
+		}
+
+		c.Zero()
+
+		if c.ClientSecret != "" {
+			t.Errorf("ClientSecret not cleared: %q", c.ClientSecret)
+		}
+		if c.APIKey != "" {
+			t.Errorf("APIKey not cleared: %q", c.APIKey)
+		}
+		if c.SecretBytes != nil {
+			t.Errorf("SecretBytes should be nil")
+		}
+		if c.APIKeyBytes != nil {
+			t.Errorf("APIKeyBytes should be nil")
+		}
+
+		// Verify underlying backing arrays were zeroed out
+		for i, v := range sec {
+			if v != 0 {
+				t.Errorf("sec byte %d not zeroed: %d", i, v)
+			}
+		}
+		for i, v := range key {
+			if v != 0 {
+				t.Errorf("key byte %d not zeroed: %d", i, v)
+			}
+		}
+	})
+
+	t.Run("handles nil safely", func(t *testing.T) {
+		var nilCreds *Credentials
+		nilCreds.Zero() // Must not panic
+	})
+}

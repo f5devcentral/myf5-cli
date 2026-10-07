@@ -18,23 +18,43 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"myf5-cli/pkg/auth"
 	"myf5-cli/pkg/client"
 )
 
 // GeoIPOptions configures connection, execution, and cleanup parameters for appliance GeoIP updates.
 type GeoIPOptions struct {
-	TargetType     string         // Appliance kind: must be "BIG-IP" (BIG-IQ is unsupported)
-	Method         TransferMethod // "auto", "icontrol", "scp", or "ssh"
-	Username       string         // Appliance username (default: "admin")
-	Password       string         // Appliance password
-	Port           int            // Management port override (default: 443 for REST, 22 for SSH)
-	IdentityFile   string         // SSH private key path
-	SSHPassphrase  string         // SSH private key passphrase
-	ClientCertPath string         // mTLS client certificate path
-	ClientKeyPath  string         // mTLS client private key path
-	Timeout        time.Duration  // Execution timeout (default: 3 minutes)
-	Force          bool           // Pass --force to rpm via geoip_update_data -f (default: true)
-	KeepExtracted  bool           // Retain extracted files on appliance (default: false, cleans up temp dir)
+	TargetType         string         // Appliance kind: must be "BIG-IP" (BIG-IQ is unsupported)
+	Method             TransferMethod // "auto", "icontrol", "scp", or "ssh"
+	Username           string         // Appliance username (default: "admin")
+	Password           string         // Appliance password
+	PasswordBytes      []byte         // Mutable appliance password bytes for memory scrubbing
+	Port               int            // Management port override (default: 443 for REST, 22 for SSH)
+	IdentityFile       string         // SSH private key path
+	SSHPassphrase      string         // SSH private key passphrase
+	SSHPassphraseBytes []byte         // Mutable SSH passphrase bytes for memory scrubbing
+	ClientCertPath     string         // mTLS client certificate path
+	ClientKeyPath      string         // mTLS client private key path
+	Timeout            time.Duration  // Execution timeout (default: 3 minutes)
+	Force              bool           // Pass --force to rpm via geoip_update_data -f (default: true)
+	KeepExtracted      bool           // Retain extracted files on appliance (default: false, cleans up temp dir)
+}
+
+// Zero securely scrubs password and passphrase bytes from RAM and clears secret fields.
+func (opts *GeoIPOptions) Zero() {
+	if opts == nil {
+		return
+	}
+	if len(opts.PasswordBytes) > 0 {
+		auth.ZeroBytes(opts.PasswordBytes)
+		opts.PasswordBytes = nil
+	}
+	if len(opts.SSHPassphraseBytes) > 0 {
+		auth.ZeroBytes(opts.SSHPassphraseBytes)
+		opts.SSHPassphraseBytes = nil
+	}
+	opts.Password = ""
+	opts.SSHPassphrase = ""
 }
 
 // GeoIPResult captures the output, packages, and verification status of a GeoIP database update.
@@ -314,14 +334,17 @@ exit $SCRIPT_EXIT_CODE
 
 func applyGeoIPSSH(ctx context.Context, host, scriptB64 string, opts GeoIPOptions) (string, error) {
 	scpOpts := SCPOptions{
-		Host:       host,
-		Port:       opts.Port,
-		Username:   opts.Username,
-		Password:   opts.Password,
-		KeyPath:    opts.IdentityFile,
-		Passphrase: opts.SSHPassphrase,
-		Timeout:    opts.Timeout,
+		Host:            host,
+		Port:            opts.Port,
+		Username:        opts.Username,
+		Password:        opts.Password,
+		PasswordBytes:   opts.PasswordBytes,
+		KeyPath:         opts.IdentityFile,
+		Passphrase:      opts.SSHPassphrase,
+		PassphraseBytes: opts.SSHPassphraseBytes,
+		Timeout:         opts.Timeout,
 	}
+	defer scpOpts.Zero()
 
 	clientConfig, err := BuildSSHClientConfig(scpOpts)
 	if err != nil {
@@ -404,6 +427,7 @@ func applyGeoIPREST(ctx context.Context, host, scriptB64 string, opts GeoIPOptio
 		Port:           port,
 		Username:       user,
 		Password:       opts.Password,
+		PasswordBytes:  opts.PasswordBytes,
 		SkipTLSVerify:  true,
 		ClientCertPath: opts.ClientCertPath,
 		ClientKeyPath:  opts.ClientKeyPath,
@@ -412,6 +436,7 @@ func applyGeoIPREST(ctx context.Context, host, scriptB64 string, opts GeoIPOptio
 	if err != nil {
 		return "", fmt.Errorf("failed to initialize appliance REST client: %w", err)
 	}
+	defer client.Zero()
 
 	payload := map[string]string{
 		"command":     "run",

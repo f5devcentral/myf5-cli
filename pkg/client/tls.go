@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"time"
 )
 
@@ -80,6 +81,7 @@ func zeroBytes(b []byte) {
 	for i := range b {
 		b[i] = 0
 	}
+	runtime.KeepAlive(b)
 }
 
 // LoadClientCertificate loads a TLS client certificate and private key from file paths.

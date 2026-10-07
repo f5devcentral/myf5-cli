@@ -66,6 +66,15 @@ func (c *Client) GoString() string {
 	return c.String()
 }
 
+// Zero clears bearer tokens and API keys from memory.
+func (c *Client) Zero() {
+	if c == nil {
+		return
+	}
+	c.Token = ""
+	c.KParam = ""
+}
+
 // NewClient initializes a new MyF5 Support Case client using the built-in
 // API usage key, which was accepted by the Case endpoints when last verified
 // (2026-10-02 — see DefaultKParam). Prefer NewClientWithKey where the caller

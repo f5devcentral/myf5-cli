@@ -625,7 +625,8 @@ func handleDownloads(ctx context.Context, args []string) {
 			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
 			exitFunc(1)
 		}
-		token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
+		defer creds.Zero()
+		token, err := auth.AuthenticateWithSecretBytes(ctx, nil, "", "", creds.ClientID, creds.SecretBytes, "myf5_scope")
 		checkErr(ctx, err, "Authentication failed")
 		return downloads.NewClientWithKey(token, "", creds.APIKey)
 	}
@@ -633,6 +634,7 @@ func handleDownloads(ctx context.Context, args []string) {
 	switch action {
 	case "families", "products", "list-products", "list-families":
 		client := getDownloadsClient()
+		defer client.Zero()
 		meta, err := client.GetMetadata(ctx)
 		checkErr(ctx, err, "Failed to load product families")
 		fmt.Println("Available Product Families:")
@@ -651,6 +653,7 @@ func handleDownloads(ctx context.Context, args []string) {
 		}
 		targetFamily := remaining[0]
 		client := getDownloadsClient()
+		defer client.Zero()
 		meta, err := client.GetMetadata(ctx)
 		checkErr(ctx, err, "Failed to load product lines")
 		for _, fam := range meta.Data.ProductFamilies {
@@ -675,6 +678,7 @@ func handleDownloads(ctx context.Context, args []string) {
 			exitFunc(1)
 		}
 		client := getDownloadsClient()
+		defer client.Zero()
 		resp, err := client.GetProductVersions(ctx, remaining[0], remaining[1])
 		checkErr(ctx, err, "Failed to load versions")
 		versions := resp.GetVersions()
@@ -692,6 +696,7 @@ func handleDownloads(ctx context.Context, args []string) {
 			exitFunc(1)
 		}
 		client := getDownloadsClient()
+		defer client.Zero()
 		resp, err := client.GetProductVersions(ctx, remaining[0], remaining[1])
 		checkErr(ctx, err, "Failed to load containers")
 		targetVer := ""
@@ -723,6 +728,7 @@ func handleDownloads(ctx context.Context, args []string) {
 			exitFunc(1)
 		}
 		client := getDownloadsClient()
+		defer client.Zero()
 		resp, err := client.GetProductVersions(ctx, remaining[0], remaining[1])
 		checkErr(ctx, err, "Failed to load files")
 		targetVer := ""
@@ -776,6 +782,7 @@ func handleDownloads(ctx context.Context, args []string) {
 		}
 
 		client := getDownloadsClient()
+		defer client.Zero()
 		fmt.Printf("Fetching download links for %s...\n", fileName)
 		linksResp, err := client.GetFileLinks(ctx, family, line, ver, cont, fileName, "english")
 		checkErr(ctx, err, "Failed to retrieve download link")
@@ -824,7 +831,9 @@ func handleDownloads(ctx context.Context, args []string) {
 		}
 
 	case "browse":
-		runInteractiveBrowser(ctx, getDownloadsClient())
+		client := getDownloadsClient()
+		defer client.Zero()
+		runInteractiveBrowser(ctx, client)
 
 	default:
 		printDownloadsUsage()
@@ -1348,10 +1357,11 @@ func handleCases(ctx context.Context, args []string) {
 	if action == "wizard" || action == "new" || (action == "create" && len(args) == 1) {
 		creds, err := auth.ResolveCredentials("default")
 		if err == nil {
-			token, aErr := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
+			token, aErr := auth.AuthenticateWithSecretBytes(ctx, nil, "", "", creds.ClientID, creds.SecretBytes, "myf5_scope")
 			if aErr == nil {
 				client = cases.NewClientWithKey(token, "", creds.APIKey)
 			}
+			creds.Zero()
 		}
 	} else {
 		creds, err := auth.ResolveCredentials("default")
@@ -1359,9 +1369,13 @@ func handleCases(ctx context.Context, args []string) {
 			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
 			exitFunc(1)
 		}
-		token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "myf5_scope")
+		defer creds.Zero()
+		token, err := auth.AuthenticateWithSecretBytes(ctx, nil, "", "", creds.ClientID, creds.SecretBytes, "myf5_scope")
 		checkErr(ctx, err, "Authentication failed")
 		client = cases.NewClientWithKey(token, "", creds.APIKey)
+	}
+	if client != nil {
+		defer client.Zero()
 	}
 
 	switch action {
@@ -1737,9 +1751,11 @@ func handleIHealth(ctx context.Context, args []string) {
 		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
 		exitFunc(1)
 	}
-	token, err := auth.Authenticate(ctx, "", "", creds.ClientID, creds.ClientSecret, "ihealth")
+	defer creds.Zero()
+	token, err := auth.AuthenticateWithSecretBytes(ctx, nil, "", "", creds.ClientID, creds.SecretBytes, "ihealth")
 	checkErr(ctx, err, "Authentication failed")
 	client := ihealth.NewClient(token, "")
+	defer client.Zero()
 
 	switch action {
 	case "list":
@@ -2240,16 +2256,22 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			exitFunc(1)
 		}
 
+		var pwBytes []byte
+		if pw != "" {
+			pwBytes = []byte(pw)
+		}
 		client, err := bigip.NewClientWithOptions(bigip.ClientOptions{
 			Host:           host,
 			Port:           port,
 			Username:       user,
 			Password:       pw,
+			PasswordBytes:  pwBytes,
 			SkipTLSVerify:  true,
 			ClientCertPath: certPath,
 			ClientKeyPath:  certKeyPath,
 		})
 		checkErr(ctx, err, "Failed to initialize appliance client")
+		defer client.Zero()
 		ready, err := client.CheckReady(ctx)
 		checkErr(ctx, err, "Ready check failed")
 		if ready {
@@ -2367,16 +2389,22 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 				spinner.Start()
 			}
 
+			var pwBytes []byte
+			if pw != "" {
+				pwBytes = []byte(pw)
+			}
 			geoOpts := bigip.GeoIPOptions{
 				Port:           port,
 				Username:       user,
 				Password:       pw,
+				PasswordBytes:  pwBytes,
 				IdentityFile:   keyPath,
 				ClientCertPath: certPath,
 				ClientKeyPath:  certKeyPath,
 				Method:         bigip.TransferMethod(method),
 				KeepExtracted:  keepExtracted,
 			}
+			defer geoOpts.Zero()
 
 			statusCb := func(status string) {
 				if spinner != nil {
@@ -2477,17 +2505,23 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			transferMethod = bigip.MethodAuto
 		}
 
+		var pwBytes []byte
+		if pw != "" {
+			pwBytes = []byte(pw)
+		}
 		qkOpts := bigip.TransferOptions{
 			TargetType:     targetKind,
 			Method:         transferMethod,
 			Username:       user,
 			Password:       pw,
+			PasswordBytes:  pwBytes,
 			Port:           port,
 			IdentityFile:   keyPath,
 			ClientCertPath: certPath,
 			ClientKeyPath:  certKeyPath,
 			Timeout:        30 * time.Second,
 		}
+		defer qkOpts.Zero()
 
 		spinner := progress.NewSpinner(fmt.Sprintf("Generating diagnostic QKView on %s", host))
 		spinner.Start()
@@ -2636,21 +2670,28 @@ func getSystemInfoTarget(ctx context.Context, target, targetKind, user string, p
 		}
 	}
 
-	info, err := resolveApplianceSystemInfo(ctx, host, port, user, pw, keyPath, method, targetKind, certPath, certKeyPath)
+	var pwBytes []byte
+	if pw != "" {
+		pwBytes = []byte(pw)
+	}
+
+	info, err := resolveApplianceSystemInfo(ctx, host, port, user, pw, pwBytes, keyPath, method, targetKind, certPath, certKeyPath)
 	checkErr(ctx, err, fmt.Sprintf("Failed to retrieve system info from %s", host))
 	return info
 }
 
-func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user, pw, keyPath, method, targetKind, certPath, certKeyPath string) (*bigip.SystemInfo, error) {
+func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user, pw string, pwBytes []byte, keyPath, method, targetKind, certPath, certKeyPath string) (*bigip.SystemInfo, error) {
 	if method == "scp" || method == "ssh" {
 		opts := bigip.SCPOptions{
-			Host:     host,
-			Port:     port,
-			Username: user,
-			Password: pw,
-			KeyPath:  keyPath,
-			Timeout:  30 * time.Second,
+			Host:          host,
+			Port:          port,
+			Username:      user,
+			Password:      pw,
+			PasswordBytes: pwBytes,
+			KeyPath:       keyPath,
+			Timeout:       30 * time.Second,
 		}
+		defer opts.Zero()
 		return bigip.GetSystemInfoSSH(ctx, opts)
 	}
 
@@ -2659,11 +2700,13 @@ func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user
 		Port:           port,
 		Username:       user,
 		Password:       pw,
+		PasswordBytes:  pwBytes,
 		SkipTLSVerify:  true,
 		ClientCertPath: certPath,
 		ClientKeyPath:  certKeyPath,
 	})
 	if err == nil {
+		defer client.Zero()
 		var info *bigip.SystemInfo
 		var restErr error
 		info, restErr = client.GetSystemInfo(ctx)
@@ -2684,13 +2727,15 @@ func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user
 			sshPort = port
 		}
 		opts := bigip.SCPOptions{
-			Host:     host,
-			Port:     sshPort,
-			Username: user,
-			Password: pw,
-			KeyPath:  keyPath,
-			Timeout:  30 * time.Second,
+			Host:          host,
+			Port:          sshPort,
+			Username:      user,
+			Password:      pw,
+			PasswordBytes: pwBytes,
+			KeyPath:       keyPath,
+			Timeout:       30 * time.Second,
 		}
+		defer opts.Zero()
 		sshInfo, sshErr := bigip.GetSystemInfoSSH(ctx, opts)
 		if sshErr == nil {
 			return sshInfo, nil
@@ -2807,11 +2852,17 @@ func executePushToAppliance(
 		}
 	}
 
+	var pwBytes []byte
+	if pw != "" {
+		pwBytes = []byte(pw)
+	}
+
 	opts := bigip.TransferOptions{
 		TargetType:     targetKind,
 		Method:         bigip.TransferMethod(method),
 		Username:       user,
 		Password:       pw,
+		PasswordBytes:  pwBytes,
 		Port:           port,
 		IdentityFile:   keyPath,
 		ClientCertPath: certPath,
@@ -2819,6 +2870,7 @@ func executePushToAppliance(
 		DestDir:        destPath,
 		Timeout:        30 * time.Second,
 	}
+	defer opts.Zero()
 
 	var bar *progress.Bar
 	var renderProgress func(transferred, total int64)
@@ -2900,16 +2952,22 @@ func executePushToAppliance(
 		spinner.Start()
 	}
 
+	var geoPwBytes []byte
+	if pw != "" {
+		geoPwBytes = []byte(pw)
+	}
 	geoOpts := bigip.GeoIPOptions{
 		Port:           port,
 		Username:       user,
 		Password:       pw,
+		PasswordBytes:  geoPwBytes,
 		IdentityFile:   keyPath,
 		ClientCertPath: certPath,
 		ClientKeyPath:  certKeyPath,
 		Method:         bigip.TransferMethod(method),
 		KeepExtracted:  keepExtracted,
 	}
+	defer geoOpts.Zero()
 
 	statusCb := func(status string) {
 		if spinner != nil {
@@ -3047,17 +3105,24 @@ func executeDownloadFromAppliance(
 		}
 	}
 
+	var pwBytes []byte
+	if pw != "" {
+		pwBytes = []byte(pw)
+	}
+
 	opts := bigip.TransferOptions{
 		TargetType:     targetKind,
 		Method:         bigip.TransferMethod(method),
 		Username:       user,
 		Password:       pw,
+		PasswordBytes:  pwBytes,
 		Port:           port,
 		IdentityFile:   keyPath,
 		ClientCertPath: certPath,
 		ClientKeyPath:  certKeyPath,
 		Timeout:        30 * time.Second,
 	}
+	defer opts.Zero()
 
 	fmt.Printf("Downloading %s from %s (%s) via %s...\n", remotePath, targetKind, host, strings.ToUpper(method))
 
@@ -3129,6 +3194,7 @@ func handleDoctor(ctx context.Context, args []string) {
 		fmt.Printf("   [FAIL] Credentials: %v\n", err)
 		hasError = true
 	} else {
+		defer creds.Zero()
 		fmt.Printf("   [PASS] Found Client ID:     %s\n", creds.ClientID)
 		fmt.Println("   [PASS] Found Client Secret: [REDACTED] (Zero CLI Exposure)")
 	}
