@@ -535,6 +535,10 @@ func SCPDownload(ctx context.Context, remotePath, localDest string, opts SCPOpti
 		}
 	}
 
+	if err := outFile.Close(); err != nil {
+		return "", fmt.Errorf("failed closing downloaded file: %w", err)
+	}
+
 	if err := os.Rename(partFile, cleanLocal); err != nil {
 		return "", fmt.Errorf("failed finalizing downloaded file: %w", err)
 	}
