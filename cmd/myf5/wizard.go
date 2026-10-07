@@ -604,9 +604,6 @@ func runStep1AutoDetection(ctx context.Context, reader *bufio.Reader, out io.Wri
 					if info.Lifecycle.Software.Recommendation != "" && info.Lifecycle.Software.Warning != "" {
 						fmt.Fprintf(out, "     - Software Rec: %s\n", info.Lifecycle.Software.Recommendation)
 					}
-					if info.Lifecycle.Hardware.Recommendation != "" && info.Lifecycle.Hardware.Warning != "" {
-						fmt.Fprintf(out, "     - Hardware Rec: %s\n", info.Lifecycle.Hardware.Recommendation)
-					}
 				}
 				fmt.Fprintln(out)
 			}
@@ -649,9 +646,6 @@ func runStep1AutoDetection(ctx context.Context, reader *bufio.Reader, out io.Wri
 					}
 					if info.Lifecycle.Software.Recommendation != "" && info.Lifecycle.Software.Warning != "" {
 						fmt.Fprintf(out, "     - Software Rec: %s\n", info.Lifecycle.Software.Recommendation)
-					}
-					if info.Lifecycle.Hardware.Recommendation != "" && info.Lifecycle.Hardware.Warning != "" {
-						fmt.Fprintf(out, "     - Hardware Rec: %s\n", info.Lifecycle.Hardware.Recommendation)
 					}
 				}
 				fmt.Fprintln(out)

@@ -366,12 +366,10 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 		switch rec.Category {
 		case CategoryVirtualEdition:
 			res.Status = StatusSupported
-			res.Recommendation = "Virtual appliance; lifecycle is governed by the TMOS software version (K5903)."
 			return res
 
 		case CategoryModern:
 			res.Status = StatusSupported
-			res.Recommendation = "Current generation architecture running F5OS."
 			return res
 
 		case CategoryISeriesMidrange:
@@ -386,14 +384,11 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 			if asOf.After(eossDate) {
 				res.Status = StatusExtendedSupport
 				res.Warning = fmt.Sprintf("Platform %s is in Extended Support phase (EoSS reached 2027-01-01; EoTS: 2031-01-01). No software maintenance or bug fixes are developed for this platform (K4309).", displayPlat)
-				res.Recommendation = "Migrate to F5 rSeries appliances."
 			} else if asOf.After(eonssDate) {
 				res.Status = StatusApproachingEOL
 				res.Warning = fmt.Sprintf("Platform %s reached End of New Software Support (EoNSS: 2026-01-01) and reaches End of Software Support on 2027-01-01 (K4309).", displayPlat)
-				res.Recommendation = "Plan migration to F5 rSeries appliances before EoSS."
 			} else {
 				res.Status = StatusSupported
-				res.Recommendation = "Platform in Regular Support until 2027-01-01."
 			}
 			return res
 
@@ -409,7 +404,6 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 				res.Warning = fmt.Sprintf("Platform %s reached End of Sale on 2027-01-01 (K4309).", displayPlat)
 			} else {
 				res.Status = StatusSupported
-				res.Recommendation = "Regular support active until 2029-01-01."
 			}
 			return res
 
@@ -423,11 +417,9 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 			if asOf.After(eossDate) {
 				res.Status = StatusExtendedSupport
 				res.Warning = fmt.Sprintf("VIPRION platform %s is in Extended Support phase (EoSS reached 2026-04-01; EoTS: 2030-04-01). No software maintenance or bug fixes are developed for this platform (K4309).", displayPlat)
-				res.Recommendation = "Migrate chassis workloads to F5 VELOS or rSeries systems."
 			} else {
 				res.Status = StatusApproachingEOL
 				res.Warning = fmt.Sprintf("VIPRION platform %s approaches End of Software Support on 2026-04-01 (K4309).", displayPlat)
-				res.Recommendation = "Plan migration to F5 VELOS."
 			}
 			return res
 
@@ -443,14 +435,11 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 			if asOf.After(eossDate) {
 				res.Status = StatusExtendedSupport
 				res.Warning = fmt.Sprintf("VIPRION platform %s reached EoSS on 2029-01-01 (K4309).", displayPlat)
-				res.Recommendation = "Migrate to F5 VELOS."
 			} else if asOf.After(eosDate) {
 				res.Status = StatusSupported
 				res.Warning = fmt.Sprintf("VIPRION platform %s reached End of Sale on 2026-01-01 (K4309). Regular software support active until 2029-01-01.", displayPlat)
-				res.Recommendation = "Supported until 2029-01-01; evaluate migration to F5 VELOS."
 			} else {
 				res.Status = StatusSupported
-				res.Recommendation = "Regular support active until 2029-01-01."
 			}
 			return res
 
@@ -458,14 +447,12 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 			res.Status = StatusEOL
 			res.IsEOL = true
 			res.Warning = fmt.Sprintf("VIPRION platform %s reached End of Life (past End of Technical Support, K4309).", displayPlat)
-			res.Recommendation = "Replace blade/chassis with supported hardware."
 			return res
 
 		case CategoryLegacyAppliance:
 			res.Status = StatusEOL
 			res.IsEOL = true
 			res.Warning = fmt.Sprintf("Hardware platform %s reached End of Life (past End of Technical Support, K4309). No RMA or TAC support is available.", displayPlat)
-			res.Recommendation = "Upgrade to active F5 rSeries appliances."
 			return res
 		}
 	}
@@ -477,7 +464,6 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 		res.Family = "Virtual Edition"
 		res.IsVirtual = true
 		res.Status = StatusSupported
-		res.Recommendation = "Virtual appliance; lifecycle is governed by the TMOS software version (K5903)."
 		return res
 	}
 
@@ -489,7 +475,6 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 			res.Family = "F5 rSeries"
 		}
 		res.Status = StatusSupported
-		res.Recommendation = "Current generation architecture running F5OS."
 		return res
 	}
 
@@ -507,14 +492,11 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 		if asOf.After(eossDate) {
 			res.Status = StatusExtendedSupport
 			res.Warning = fmt.Sprintf("Platform %s is in Extended Support phase (EoSS reached 2027-01-01; EoTS: 2031-01-01). No software maintenance or bug fixes are developed for this platform (K4309).", cleanPlat)
-			res.Recommendation = "Migrate to F5 rSeries appliances."
 		} else if asOf.After(eonssDate) {
 			res.Status = StatusApproachingEOL
 			res.Warning = fmt.Sprintf("Platform %s reached End of New Software Support (EoNSS: 2026-01-01) and reaches End of Software Support on 2027-01-01 (K4309).", cleanPlat)
-			res.Recommendation = "Plan migration to F5 rSeries appliances before EoSS."
 		} else {
 			res.Status = StatusSupported
-			res.Recommendation = "Platform in Regular Support until 2027-01-01."
 		}
 		return res
 	}
@@ -533,7 +515,6 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 			res.Warning = fmt.Sprintf("Platform %s reached End of Sale on 2027-01-01 (K4309).", cleanPlat)
 		} else {
 			res.Status = StatusSupported
-			res.Recommendation = "Regular support active until 2029-01-01."
 		}
 		return res
 	}
@@ -550,11 +531,9 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 		if asOf.After(eossDate) {
 			res.Status = StatusExtendedSupport
 			res.Warning = fmt.Sprintf("VIPRION platform %s is in Extended Support phase (EoSS reached 2026-04-01; EoTS: 2030-04-01). No software maintenance or bug fixes are developed for this platform (K4309).", cleanPlat)
-			res.Recommendation = "Migrate chassis workloads to F5 VELOS or rSeries systems."
 		} else {
 			res.Status = StatusApproachingEOL
 			res.Warning = fmt.Sprintf("VIPRION platform %s approaches End of Software Support on 2026-04-01 (K4309).", cleanPlat)
-			res.Recommendation = "Plan migration to F5 VELOS."
 		}
 		return res
 	}
@@ -573,14 +552,11 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 		if asOf.After(eossDate) {
 			res.Status = StatusExtendedSupport
 			res.Warning = fmt.Sprintf("VIPRION platform %s reached EoSS on 2029-01-01 (K4309).", cleanPlat)
-			res.Recommendation = "Migrate to F5 VELOS."
 		} else if asOf.After(eosDate) {
 			res.Status = StatusSupported
 			res.Warning = fmt.Sprintf("VIPRION platform %s reached End of Sale on 2026-01-01 (K4309). Regular software support active until 2029-01-01.", cleanPlat)
-			res.Recommendation = "Supported until 2029-01-01; evaluate migration to F5 VELOS."
 		} else {
 			res.Status = StatusSupported
-			res.Recommendation = "Regular support active until 2029-01-01."
 		}
 		return res
 	}
@@ -591,7 +567,6 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 		res.Status = StatusEOL
 		res.IsEOL = true
 		res.Warning = fmt.Sprintf("VIPRION blade %s reached End of Life (past End of Technical Support, K4309).", cleanPlat)
-		res.Recommendation = "Replace blade with supported hardware."
 		return res
 	}
 
@@ -601,7 +576,6 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 		res.Status = StatusEOL
 		res.IsEOL = true
 		res.Warning = fmt.Sprintf("Hardware platform %s reached End of Life (past End of Technical Support, K4309). No RMA or TAC support is available.", cleanPlat)
-		res.Recommendation = "Upgrade to active F5 rSeries appliances."
 		return res
 	}
 

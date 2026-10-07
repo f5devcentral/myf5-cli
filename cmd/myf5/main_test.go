@@ -251,7 +251,7 @@ func TestCaseCreate_LifecycleWarnings(t *testing.T) {
 	if !strings.Contains(errOutput, "Software Rec:") {
 		t.Errorf("expected Software Rec in stderr, got: %q", errOutput)
 	}
-	if !strings.Contains(errOutput, "Hardware Rec:") {
-		t.Errorf("expected Hardware Rec in stderr, got: %q", errOutput)
+	if strings.Contains(errOutput, "Hardware Rec:") {
+		t.Errorf("expected no Hardware Rec in stderr, got: %q", errOutput)
 	}
 }

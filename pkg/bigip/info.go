@@ -189,9 +189,6 @@ func (s *SystemInfo) Summary() string {
 			if s.Lifecycle.Software.Recommendation != "" && s.Lifecycle.Software.Warning != "" {
 				b.WriteString(fmt.Sprintf("     Software Rec:      %s\n", s.Lifecycle.Software.Recommendation))
 			}
-			if s.Lifecycle.Hardware.Recommendation != "" && s.Lifecycle.Hardware.Warning != "" {
-				b.WriteString(fmt.Sprintf("     Hardware Rec:      %s\n", s.Lifecycle.Hardware.Recommendation))
-			}
 		} else {
 			b.WriteString("\nLifecycle & Support Status:\n")
 			if s.Lifecycle.Software.Status != StatusUnknown && s.Lifecycle.Software.Status != "" {
@@ -202,7 +199,7 @@ func (s *SystemInfo) Summary() string {
 				if fam == "" {
 					fam = s.Lifecycle.Hardware.Platform
 				}
-				b.WriteString(fmt.Sprintf("  Hardware (%-9s): %s (%s)\n", fam, s.Lifecycle.Hardware.Status, s.Lifecycle.Hardware.Recommendation))
+				b.WriteString(fmt.Sprintf("  Hardware (%-9s): %s\n", fam, s.Lifecycle.Hardware.Status))
 			}
 		}
 	}

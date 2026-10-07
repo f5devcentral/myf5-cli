@@ -1660,9 +1660,6 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 		if lc.Software.Recommendation != "" && lc.Software.Warning != "" {
 			fmt.Fprintf(os.Stderr, "          Software Rec: %s\n", lc.Software.Recommendation)
 		}
-		if lc.Hardware.Recommendation != "" && lc.Hardware.Warning != "" {
-			fmt.Fprintf(os.Stderr, "          Hardware Rec: %s\n", lc.Hardware.Recommendation)
-		}
 	}
 
 	if dryRun {

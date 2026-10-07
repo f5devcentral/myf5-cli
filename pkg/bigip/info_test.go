@@ -467,8 +467,8 @@ func TestSystemInfo_SummaryLifecycle(t *testing.T) {
 	if !strings.Contains(summary, "Software Rec:") {
 		t.Errorf("expected Software Rec in summary, got:\n%s", summary)
 	}
-	if !strings.Contains(summary, "Hardware Rec:") {
-		t.Errorf("expected Hardware Rec in summary, got:\n%s", summary)
+	if strings.Contains(summary, "Hardware Rec:") {
+		t.Errorf("expected no Hardware Rec in summary, got:\n%s", summary)
 	}
 
 	// Case 2: Supported Software and Virtual Edition Hardware
