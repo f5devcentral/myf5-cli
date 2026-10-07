@@ -355,3 +355,47 @@ func TestRunCaseWizard_StepBackNavigation(t *testing.T) {
 		t.Errorf("found discarded initial subject in dry run payload")
 	}
 }
+
+func TestRunCaseWizard_LifecycleWarnings(t *testing.T) {
+	inputLines := []string{
+		"3",                          // Step 1: skip auto-detect
+		"BIG-IP",                     // Step 2: Product family
+		"BIG-IP 2000s",               // Product (legacy hardware EOL)
+		"15.1.8",                     // Version (TMOS 15.1.x EOL)
+		"test-serial-eol",            // Serial number
+		"4",                          // Step 3: Priority 4
+		"1",                          // Reason 1
+		"Testing EOL warnings",       // Subject
+		"Verification of EOL banner", // Description
+		"testuser@example.com",       // Step 4: Email
+		"",                           // Contact Method (default)
+		"",                           // Timezone (default)
+		"",                           // Hostname
+		"",                           // Ticket Ref
+		"d",                          // Step 5: Dry Run
+		"n",                          // Submit now? No
+	}
+
+	input := strings.Join(inputLines, "\n") + "\n"
+	in := strings.NewReader(input)
+	var out bytes.Buffer
+
+	err := RunCaseWizard(context.Background(), in, &out, nil)
+	if err != nil {
+		t.Fatalf("wizard returned unexpected error: %v", err)
+	}
+
+	outStr := out.String()
+	if !strings.Contains(outStr, "TMOS version 15.1.8 reached End of Life") {
+		t.Errorf("expected TMOS EOL warning in wizard output, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "Hardware platform BIG-IP 2000s reached End of Life") {
+		t.Errorf("expected hardware EOL warning in wizard output, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "⚠️  LIFECYCLE WARNING:") {
+		t.Errorf("expected LIFECYCLE WARNING header in review confirmation, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "F5 Support may provide limited assistance for EOL releases") {
+		t.Errorf("expected EOL limited assistance notice in review confirmation, got:\n%s", outStr)
+	}
+}

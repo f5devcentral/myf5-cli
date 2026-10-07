@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -36,6 +37,7 @@ type SystemInfo struct {
 	ProvisionedModules  map[string]string `json:"provisionedModules,omitempty"`
 	CaseAttributes      map[string]string `json:"caseAttributes,omitempty"`
 	Source              string            `json:"source,omitempty"`
+	Lifecycle           *LifecycleInfo    `json:"lifecycle,omitempty"`
 }
 
 func isInternalModule(mod string) bool {
@@ -155,6 +157,35 @@ func (s *SystemInfo) Summary() string {
 		sort.Strings(keys)
 		for _, k := range keys {
 			b.WriteString(fmt.Sprintf("  %-18s: %s\n", k, s.CaseAttributes[k]))
+		}
+	}
+	if s.Lifecycle == nil && (s.Version != "" || s.Platform != "") {
+		s.EvaluateLifecycle(time.Now())
+	}
+	if s.Lifecycle != nil {
+		if len(s.Lifecycle.Warnings) > 0 {
+			b.WriteString("\nLifecycle & Support Warnings:\n")
+			for _, w := range s.Lifecycle.Warnings {
+				b.WriteString(fmt.Sprintf("  ⚠️  [WARNING] %s\n", w))
+			}
+			if s.Lifecycle.Software.Recommendation != "" && s.Lifecycle.Software.Warning != "" {
+				b.WriteString(fmt.Sprintf("     Software Rec:      %s\n", s.Lifecycle.Software.Recommendation))
+			}
+			if s.Lifecycle.Hardware.Recommendation != "" && s.Lifecycle.Hardware.Warning != "" {
+				b.WriteString(fmt.Sprintf("     Hardware Rec:      %s\n", s.Lifecycle.Hardware.Recommendation))
+			}
+		} else {
+			b.WriteString("\nLifecycle & Support Status:\n")
+			if s.Lifecycle.Software.Status != StatusUnknown && s.Lifecycle.Software.Status != "" {
+				b.WriteString(fmt.Sprintf("  Software (%-9s): %s (%s)\n", s.Lifecycle.Software.Version, s.Lifecycle.Software.Status, s.Lifecycle.Software.Recommendation))
+			}
+			if s.Lifecycle.Hardware.Status != StatusUnknown && s.Lifecycle.Hardware.Status != "" {
+				fam := s.Lifecycle.Hardware.Family
+				if fam == "" {
+					fam = s.Lifecycle.Hardware.Platform
+				}
+				b.WriteString(fmt.Sprintf("  Hardware (%-9s): %s (%s)\n", fam, s.Lifecycle.Hardware.Status, s.Lifecycle.Hardware.Recommendation))
+			}
 		}
 	}
 	return b.String()
@@ -388,6 +419,7 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 	}
 
 	info.PopulateCaseAttributes()
+	info.EvaluateLifecycle(time.Now())
 	return info, nil
 }
 
@@ -464,6 +496,7 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	}
 
 	info.PopulateCaseAttributes()
+	info.EvaluateLifecycle(time.Now())
 	return info, nil
 }
 
@@ -549,6 +582,7 @@ func GetSystemInfoSSH(ctx context.Context, opts SCPOptions) (*SystemInfo, error)
 	info := parseTmshOutput(outStr)
 	info.Source = fmt.Sprintf("appliance: %s (SSH)", host)
 	info.PopulateCaseAttributes()
+	info.EvaluateLifecycle(time.Now())
 	return info, nil
 }
 

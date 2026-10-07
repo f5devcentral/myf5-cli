@@ -446,3 +446,48 @@ func TestGetSystemInfo_RestMock(t *testing.T) {
 		t.Errorf("CaseAttributes[serialNumber] = %q; want chs-rest-test-1", info.CaseAttributes["serialNumber"])
 	}
 }
+
+func TestSystemInfo_SummaryLifecycle(t *testing.T) {
+	// Case 1: EOL Software and EOL Hardware
+	eolInfo := &SystemInfo{
+		Product:  "BIG-IP",
+		Version:  "15.1.8",
+		Platform: "2000s",
+	}
+	summary := eolInfo.Summary()
+	if !strings.Contains(summary, "Lifecycle & Support Warnings:") {
+		t.Errorf("expected Lifecycle & Support Warnings in summary, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "TMOS version 15.1.8 reached End of Life") {
+		t.Errorf("expected TMOS EOL warning in summary, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Hardware platform 2000s reached End of Life") {
+		t.Errorf("expected hardware EOL warning in summary, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Software Rec:") {
+		t.Errorf("expected Software Rec in summary, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Hardware Rec:") {
+		t.Errorf("expected Hardware Rec in summary, got:\n%s", summary)
+	}
+
+	// Case 2: Supported Software and Virtual Edition Hardware
+	suppInfo := &SystemInfo{
+		Product:  "BIG-IP",
+		Version:  "17.5.1",
+		Platform: "Z100",
+	}
+	suppSummary := suppInfo.Summary()
+	if !strings.Contains(suppSummary, "Lifecycle & Support Status:") {
+		t.Errorf("expected Lifecycle & Support Status in summary, got:\n%s", suppSummary)
+	}
+	if !strings.Contains(suppSummary, "Software (17.5.1") || !strings.Contains(suppSummary, "Supported") {
+		t.Errorf("expected Software Supported in summary, got:\n%s", suppSummary)
+	}
+	if !strings.Contains(suppSummary, "Hardware (Virtual Edition): Supported") {
+		t.Errorf("expected Hardware Supported in summary, got:\n%s", suppSummary)
+	}
+	if strings.Contains(suppSummary, "[WARNING]") {
+		t.Errorf("did not expect warnings in supported summary, got:\n%s", suppSummary)
+	}
+}
