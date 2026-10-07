@@ -503,34 +503,50 @@ func GetSystemInfoSSH(ctx context.Context, opts SCPOptions) (*SystemInfo, error)
 	sshClient := ssh.NewClient(sshConn, chans, reqs)
 	defer sshClient.Close()
 
-	session, err := sshClient.NewSession()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create SSH session: %w", err)
-	}
-	defer session.Close()
-
-	var stdout, stderr bytes.Buffer
-	session.Stdout = &stdout
-	session.Stderr = &stderr
-
-	cmd := `tmsh -q -c "show sys hardware; show sys version; show sys license; list sys global-settings hostname; list sys provision"`
-	runDone := make(chan error, 1)
-	go func() {
-		runDone <- session.Run(cmd)
-	}()
-
-	select {
-	case <-ctx.Done():
-		_ = session.Signal(ssh.SIGINT)
-		_ = session.Close()
-		return nil, ctx.Err()
-	case err := <-runDone:
+	runSSHCmd := func(commandStr string) (string, string, error) {
+		session, err := sshClient.NewSession()
 		if err != nil {
-			return nil, fmt.Errorf("tmsh commands failed over SSH: %w (stderr: %s)", err, stderr.String())
+			return "", "", fmt.Errorf("failed to create SSH session: %w", err)
+		}
+		defer session.Close()
+
+		var stdout, stderr bytes.Buffer
+		session.Stdout = &stdout
+		session.Stderr = &stderr
+
+		runDone := make(chan error, 1)
+		go func() {
+			runDone <- session.Run(commandStr)
+		}()
+
+		select {
+		case <-ctx.Done():
+			_ = session.Signal(ssh.SIGINT)
+			_ = session.Close()
+			return "", "", ctx.Err()
+		case err := <-runDone:
+			return stdout.String(), stderr.String(), err
 		}
 	}
 
-	info := parseTmshOutput(stdout.String())
+	cmd := `tmsh -q -c "show sys hardware; show sys version; show sys license; list sys global-settings hostname; list sys provision"`
+	outStr, errStr, err := runSSHCmd(cmd)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		// If the user's login shell is tmsh (e.g. admin user), running "tmsh -q -c ..." returns
+		// 'Syntax Error: unexpected argument "tmsh"'. Fall back to direct tmsh command execution.
+		if strings.Contains(errStr, "unexpected argument \"tmsh\"") || strings.Contains(err.Error(), "unexpected argument \"tmsh\"") {
+			directCmd := `show sys hardware; show sys version; show sys license; list sys global-settings hostname; list sys provision`
+			outStr, errStr, err = runSSHCmd(directCmd)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("tmsh commands failed over SSH: %w (stderr: %s)", err, strings.TrimSpace(errStr))
+		}
+	}
+
+	info := parseTmshOutput(outStr)
 	info.Source = fmt.Sprintf("appliance: %s (SSH)", host)
 	info.PopulateCaseAttributes()
 	return info, nil

@@ -12,7 +12,7 @@ Enterprise jump boxes, CI/CD runners, and edge orchestrators running `myf5` requ
 | :--- | :--- | :--- |
 | `idp.identity.f5.com` | F5 Identity / OAuth2 | Primary Auth0 token issuer (`POST /oauth/token`) |
 | `identity.account.f5.com` | F5 Identity / Okta CIAM | Dedicated CIAM authorization server (`POST /oauth2/ausp95yxb4ShxMGvW357/v1/token`, audience `api://ciam-api-myf5`, scope `myf5_scope`) |
-| `api.software.downloads.f5.com` | MyF5 Downloads API | Listed in K15202 as "F5 software downloads" (`159.60.134.92`). **Currently returns 404 on every path** — see §2A |
+| `api.software.downloads.f5.com` | MyF5 Downloads API | Listed in K15202 as "F5 software downloads" (`159.60.134.92`). Targets gateway prefix `/v1/downloads-management/v1/...` without `k` parameter (operational). |
 | `support.apis.f5.com` | MyF5 Support Case API | Support case management (`/case-management/v1/cases`) |
 | `ihealth2-api.f5.com` | F5 iHealth API | QKView upload & analysis (`/qkview-analyzer/api/qkviews`, `Accept: application/vnd.f5.ihealth.api`). The host used in K000130498's worked example and the client default |
 | `ihealth-api.f5.com` | F5 iHealth API (alternate) | Same service; K15202 lists both at `185.56.152.6` |
@@ -80,3 +80,60 @@ api.software.downloads.f5.com  → 159.60.134.92   (ves-io-...ac.vh.ves.io)
 All three resolve onto F5 Distributed Cloud (`ves.io`). K15202 lists `api.software.downloads.f5.com` at `159.60.134.92` as a published service for F5 software downloads.
 
 F5's guidance is to prefer hostname-based firewall rules; where fixed-IP rules are required, validate them against K15202 periodically, since F5 notes hosted services are not bound to a single address.
+
+---
+
+## 3. Outbound Proxy Architecture (HTTP, HTTPS, SOCKS5)
+
+In air-gapped data centers, DMZs, or secured corporate networks, direct Internet egress to F5 Cloud endpoints may be blocked. `myf5-cli` provides first-class support for routing all outbound traffic through forward proxies.
+
+### Supported Protocols & Schemes
+
+| Scheme | Description | Authentication | Remote DNS |
+| :--- | :--- | :--- | :--- |
+| `http://` | HTTP CONNECT forward proxy (e.g. Squid, NGINX) | Basic (`user:pass@host:port`) | Resolver-dependent |
+| `https://` | Secure TLS forward proxy | Basic (`user:pass@host:port`) | Resolver-dependent |
+| `socks5://` | SOCKS5 proxy (RFC 1928) | RFC 1929 username/password | Local DNS resolution |
+| `socks5h://` | SOCKS5 proxy with remote DNS | RFC 1929 username/password | Remote proxy DNS resolution |
+
+### Proxy Configuration Methods
+
+`myf5` resolves proxy configuration using the following precedence hierarchy:
+
+1. **CLI Flag (`--proxy <url>`)**: Highest priority; sets proxy for a single command invocation.
+   ```bash
+   myf5 --proxy socks5://10.99.1.50:1080 doctor
+   myf5 --proxy http://proxy.corp.internal:8080 downloads families
+   ```
+
+2. **Persistent Configuration (`myf5 proxy set`)**: Writes default proxy to `~/.f5api_credentials` or config.
+   ```bash
+   myf5 proxy set socks5://127.0.0.1:1080
+   myf5 proxy show
+   myf5 proxy clear
+   ```
+
+3. **Environment Variables**:
+   - `MYF5_PROXY` / `F5_PROXY`: Tool-specific proxy overrides.
+   - `ALL_PROXY`: Standard universal proxy specification (commonly used for SOCKS5).
+   - `HTTPS_PROXY` / `HTTP_PROXY`: Standard protocol-specific environment variables.
+
+### Proxy Bypass (`NO_PROXY`)
+
+Traffic targeting local or internal appliances can bypass the configured proxy by setting `NO_PROXY` (or `no_proxy`):
+```bash
+export NO_PROXY="localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16,.corp.internal"
+```
+The bypass matcher supports:
+- Exact IP addresses and IPv6 addresses (with automatic zone identifier stripping).
+- CIDR network blocks (e.g. `10.0.0.0/8`, `172.16.0.0/12`).
+- Domain suffixes (e.g. `.internal`, `f5.com`).
+- Wildcards (`*`).
+
+### Automated Lab Testing (`testenv/`)
+
+An isolated OpenTofu/Terraform testing environment is available in the gitignored `testenv/` directory to stand up:
+- An **NGINX HTTP forward proxy** (port `8080`) and **Dante SOCKS5 proxy** (port `1080`).
+- A tiny **BIG-IP VE 17.5.x BYOL** appliance for end-to-end proxy and appliance push/pull verification.
+- Enforces strict security: locked strictly to caller IP (`/32`), never opens `0.0.0.0/0`, and includes dual 4-hour automatic power-off watchdogs (in-guest cron and AWS CloudWatch alarms).
+

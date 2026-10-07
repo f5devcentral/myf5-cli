@@ -2650,21 +2650,28 @@ func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user
 		ClientKeyPath:  certKeyPath,
 	})
 	if err == nil {
-		info, err := client.GetSystemInfo(ctx)
-		if err == nil {
+		var info *bigip.SystemInfo
+		var restErr error
+		info, restErr = client.GetSystemInfo(ctx)
+		if restErr == nil {
 			return info, nil
 		}
 		if method != "auto" {
-			return nil, err
+			return nil, restErr
 		}
+		err = restErr
 	} else if method != "auto" {
 		return nil, err
 	}
 
 	if method == "auto" {
+		sshPort := 22
+		if port > 0 && port != 443 && port != 8443 {
+			sshPort = port
+		}
 		opts := bigip.SCPOptions{
 			Host:     host,
-			Port:     port,
+			Port:     sshPort,
 			Username: user,
 			Password: pw,
 			KeyPath:  keyPath,
