@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"myf5-cli/pkg/cases"
@@ -206,5 +208,50 @@ func TestCaseCreate_NoArgsNonTTY(t *testing.T) {
 	})
 	if !exited || code != 1 {
 		t.Errorf("expected exit code 1 for case create without args, got code=%d exited=%v", code, exited)
+	}
+}
+
+func TestCaseCreate_LifecycleWarnings(t *testing.T) {
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create pipe: %v", err)
+	}
+	os.Stderr = w
+
+	args := []string{
+		"--dry-run",
+		"--family", "BIG-IP",
+		"--product", "BIG-IP 2000s",
+		"--version", "15.1.8",
+		"--serial", "test-serial-12345",
+		"--priority", "4",
+		"--reason", "General Problem",
+		"--subject", "Testing EOL",
+		"--description", "EOL description",
+		"--email", "user@example.com",
+		"--timezone", "(GMT -05:00) EST",
+	}
+
+	handleCaseCreate(context.Background(), nil, args)
+
+	w.Close()
+	os.Stderr = origStderr
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	errOutput := buf.String()
+
+	if !strings.Contains(errOutput, "[WARNING] TMOS version 15.1.8 reached End of Life") {
+		t.Errorf("expected TMOS EOL warning in stderr, got: %q", errOutput)
+	}
+	if !strings.Contains(errOutput, "[WARNING] Hardware platform BIG-IP 2000s reached End of Life") {
+		t.Errorf("expected Hardware EOL warning in stderr, got: %q", errOutput)
+	}
+	if !strings.Contains(errOutput, "Software Rec:") {
+		t.Errorf("expected Software Rec in stderr, got: %q", errOutput)
+	}
+	if strings.Contains(errOutput, "Hardware Rec:") {
+		t.Errorf("expected no Hardware Rec in stderr, got: %q", errOutput)
 	}
 }

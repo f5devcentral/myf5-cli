@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -36,6 +37,7 @@ type SystemInfo struct {
 	ProvisionedModules  map[string]string `json:"provisionedModules,omitempty"`
 	CaseAttributes      map[string]string `json:"caseAttributes,omitempty"`
 	Source              string            `json:"source,omitempty"`
+	Lifecycle           *LifecycleInfo    `json:"lifecycle,omitempty"`
 }
 
 func isInternalModule(mod string) bool {
@@ -85,12 +87,24 @@ func (s *SystemInfo) PopulateCaseAttributes() {
 	}
 	attrs["product"] = product
 
-	if strings.Contains(s.Hostname, ".ec2.internal") || strings.Contains(s.Hostname, ".compute.internal") || s.Platform == "Z100" {
-		attrs["cloudProvider"] = "AWS"
-	} else if strings.Contains(s.Hostname, "azure") || strings.Contains(s.Hostname, "trafficmanager.net") {
-		attrs["cloudProvider"] = "Azure"
-	} else if strings.Contains(s.Hostname, "google") || strings.Contains(s.Hostname, "gce") {
-		attrs["cloudProvider"] = "Google"
+	cloud := ""
+	if rec, ok := LookupPlatform(s.Platform); ok {
+		switch rec.Code {
+		case "Z100", "Z100A":
+			cloud = "AWS"
+		}
+	}
+	if cloud == "" {
+		if strings.Contains(s.Hostname, ".ec2.internal") || strings.Contains(s.Hostname, ".compute.internal") || s.Platform == "Z100" {
+			cloud = "AWS"
+		} else if strings.Contains(s.Hostname, "azure") || strings.Contains(s.Hostname, "trafficmanager.net") {
+			cloud = "Azure"
+		} else if strings.Contains(s.Hostname, "google") || strings.Contains(s.Hostname, "gce") {
+			cloud = "Google"
+		}
+	}
+	if cloud != "" {
+		attrs["cloudProvider"] = cloud
 	}
 
 	s.CaseAttributes = attrs
@@ -117,7 +131,13 @@ func (s *SystemInfo) Summary() string {
 		b.WriteString(fmt.Sprintf("  Version:            %s\n", ver))
 	}
 	if s.Platform != "" {
-		b.WriteString(fmt.Sprintf("  Platform:           %s\n", s.Platform))
+		platDisplay := s.Platform
+		if rec, ok := LookupPlatform(s.Platform); ok && rec.Model != "" {
+			if !strings.Contains(s.Platform, rec.Model) && s.Platform != rec.Model {
+				platDisplay = fmt.Sprintf("%s (%s)", s.Platform, rec.Model)
+			}
+		}
+		b.WriteString(fmt.Sprintf("  Platform:           %s\n", platDisplay))
 	}
 	if s.ChassisSerialNumber != "" {
 		b.WriteString(fmt.Sprintf("  Chassis Serial:     %s\n", s.ChassisSerialNumber))
@@ -155,6 +175,32 @@ func (s *SystemInfo) Summary() string {
 		sort.Strings(keys)
 		for _, k := range keys {
 			b.WriteString(fmt.Sprintf("  %-18s: %s\n", k, s.CaseAttributes[k]))
+		}
+	}
+	if s.Lifecycle == nil && (s.Version != "" || s.Platform != "") {
+		s.EvaluateLifecycle(time.Now())
+	}
+	if s.Lifecycle != nil {
+		if len(s.Lifecycle.Warnings) > 0 {
+			b.WriteString("\nLifecycle & Support Warnings:\n")
+			for _, w := range s.Lifecycle.Warnings {
+				b.WriteString(fmt.Sprintf("  ⚠️  [WARNING] %s\n", w))
+			}
+			if s.Lifecycle.Software.Recommendation != "" && s.Lifecycle.Software.Warning != "" {
+				b.WriteString(fmt.Sprintf("     Software Rec:      %s\n", s.Lifecycle.Software.Recommendation))
+			}
+		} else {
+			b.WriteString("\nLifecycle & Support Status:\n")
+			if s.Lifecycle.Software.Status != StatusUnknown && s.Lifecycle.Software.Status != "" {
+				b.WriteString(fmt.Sprintf("  Software (%-9s): %s (%s)\n", s.Lifecycle.Software.Version, s.Lifecycle.Software.Status, s.Lifecycle.Software.Recommendation))
+			}
+			if s.Lifecycle.Hardware.Status != StatusUnknown && s.Lifecycle.Hardware.Status != "" {
+				fam := s.Lifecycle.Hardware.Family
+				if fam == "" {
+					fam = s.Lifecycle.Hardware.Platform
+				}
+				b.WriteString(fmt.Sprintf("  Hardware (%-9s): %s\n", fam, s.Lifecycle.Hardware.Status))
+			}
 		}
 	}
 	return b.String()
@@ -388,6 +434,7 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 	}
 
 	info.PopulateCaseAttributes()
+	info.EvaluateLifecycle(time.Now())
 	return info, nil
 }
 
@@ -464,6 +511,7 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	}
 
 	info.PopulateCaseAttributes()
+	info.EvaluateLifecycle(time.Now())
 	return info, nil
 }
 
@@ -549,6 +597,7 @@ func GetSystemInfoSSH(ctx context.Context, opts SCPOptions) (*SystemInfo, error)
 	info := parseTmshOutput(outStr)
 	info.Source = fmt.Sprintf("appliance: %s (SSH)", host)
 	info.PopulateCaseAttributes()
+	info.EvaluateLifecycle(time.Now())
 	return info, nil
 }
 
@@ -669,7 +718,8 @@ func parseTmshOutput(output string) *SystemInfo {
 
 	chassisRe := regexp.MustCompile(`(?i)(?:Chassis Serial|Serial Number)\s+([^\s]+)`)
 	regKeyRe := regexp.MustCompile(`(?i)Registration Key\s+([A-Z0-9-]+)`)
-	platformRe := regexp.MustCompile(`(?i)(?:Platform\s+Name|Platform)\s+([^\s]+)`)
+	platformRe := regexp.MustCompile(`(?i)(?:Platform\s+Name|Platform)\s+([^\r\n]+)`)
+	hardwareTypeRe := regexp.MustCompile(`(?i)^\s*Type\s+([A-Z0-9]+)`)
 	macRe := regexp.MustCompile(`(?i)Base MAC\s+([0-9a-fA-F:]+)`)
 	versionRe := regexp.MustCompile(`(?i)Version\s+([0-9.]+)`)
 	buildRe := regexp.MustCompile(`(?i)Build\s+([0-9.]+)`)
@@ -714,6 +764,12 @@ func parseTmshOutput(output string) *SystemInfo {
 			val := strings.TrimSpace(m[1])
 			if !strings.EqualFold(val, "information") && !strings.EqualFold(val, "status") {
 				info.Platform = val
+			}
+		}
+		if m := hardwareTypeRe.FindStringSubmatch(line); len(m) > 1 {
+			typeCode := strings.ToUpper(strings.TrimSpace(m[1]))
+			if _, ok := LookupPlatformByID(typeCode); ok {
+				info.Platform = typeCode
 			}
 		}
 		if m := versionRe.FindStringSubmatch(line); len(m) > 1 && info.Version == "" {

@@ -1648,6 +1648,20 @@ func handleCaseCreate(ctx context.Context, client *cases.Client, args []string) 
 		payload["preferredContactMethod"] = "Email"
 	}
 
+	// Warn if BIG-IP TMOS or hardware platform is EOL or approaching EOL
+	family, _ := payload["productFamily"].(string)
+	ver, _ := payload["version"].(string)
+	prod, _ := payload["product"].(string)
+	if strings.EqualFold(family, "BIG-IP") || strings.Contains(strings.ToUpper(prod), "BIG-IP") {
+		lc := bigip.EvaluateLifecycle(ver, prod, time.Now())
+		for _, w := range lc.Warnings {
+			fmt.Fprintf(os.Stderr, "[WARNING] %s\n", w)
+		}
+		if lc.Software.Recommendation != "" && lc.Software.Warning != "" {
+			fmt.Fprintf(os.Stderr, "          Software Rec: %s\n", lc.Software.Recommendation)
+		}
+	}
+
 	if dryRun {
 		out, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {

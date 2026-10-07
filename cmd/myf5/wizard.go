@@ -367,6 +367,19 @@ func editWizardField(reader *bufio.Reader, out io.Writer, fieldNum int, opts *Ca
 		opts.Product, err = promptRequiredNavField(reader, out, "Product Name (e.g. BIG-IP LTM, BIG-IP DNS)", opts.Product)
 	case 3:
 		opts.Version, err = promptRequiredNavField(reader, out, "Product Version (e.g. 17.5.1)", opts.Version)
+		if err == nil && (strings.EqualFold(opts.ProductFamily, "BIG-IP") || strings.Contains(strings.ToUpper(opts.Product), "BIG-IP")) {
+			lc := bigip.EvaluateLifecycle(opts.Version, opts.Product, time.Now())
+			if len(lc.Warnings) > 0 {
+				fmt.Fprintln(out)
+				for _, w := range lc.Warnings {
+					fmt.Fprintf(out, "  ⚠️  [WARNING] %s\n", w)
+				}
+				if lc.Software.IsEOL && lc.Software.Recommendation != "" {
+					fmt.Fprintf(out, "     Recommendation: %s\n", lc.Software.Recommendation)
+				}
+				fmt.Fprintln(out)
+			}
+		}
 	case 4:
 		isSub := strings.EqualFold(opts.ProductFamily, "NGINX") || strings.EqualFold(opts.ProductFamily, "Aspen Mesh")
 		if isSub {
@@ -580,6 +593,18 @@ func runStep1AutoDetection(ctx context.Context, reader *bufio.Reader, out io.Wri
 				if opts.Hostname != "" {
 					fmt.Fprintf(out, "  Hostname       : %s\n", opts.Hostname)
 				}
+				if info.Lifecycle == nil {
+					info.EvaluateLifecycle(time.Now())
+				}
+				if info.Lifecycle != nil && len(info.Lifecycle.Warnings) > 0 {
+					fmt.Fprintln(out, "\n  ⚠️  Lifecycle & Support Warnings:")
+					for _, w := range info.Lifecycle.Warnings {
+						fmt.Fprintf(out, "     - %s\n", w)
+					}
+					if info.Lifecycle.Software.Recommendation != "" && info.Lifecycle.Software.Warning != "" {
+						fmt.Fprintf(out, "     - Software Rec: %s\n", info.Lifecycle.Software.Recommendation)
+					}
+				}
 				fmt.Fprintln(out)
 			}
 		}
@@ -610,6 +635,18 @@ func runStep1AutoDetection(ctx context.Context, reader *bufio.Reader, out io.Wri
 				fmt.Fprintf(out, "  Serial Number  : %s\n", opts.SerialNumber)
 				if opts.Hostname != "" {
 					fmt.Fprintf(out, "  Hostname       : %s\n", opts.Hostname)
+				}
+				if info.Lifecycle == nil {
+					info.EvaluateLifecycle(time.Now())
+				}
+				if info.Lifecycle != nil && len(info.Lifecycle.Warnings) > 0 {
+					fmt.Fprintln(out, "\n  ⚠️  Lifecycle & Support Warnings:")
+					for _, w := range info.Lifecycle.Warnings {
+						fmt.Fprintf(out, "     - %s\n", w)
+					}
+					if info.Lifecycle.Software.Recommendation != "" && info.Lifecycle.Software.Warning != "" {
+						fmt.Fprintf(out, "     - Software Rec: %s\n", info.Lifecycle.Software.Recommendation)
+					}
 				}
 				fmt.Fprintln(out)
 			}
@@ -657,6 +694,19 @@ func runStep2Entitlement(reader *bufio.Reader, out io.Writer, opts *CaseWizardOp
 			}
 			if err != nil {
 				return 0, 0, err
+			}
+			if strings.EqualFold(opts.ProductFamily, "BIG-IP") || strings.Contains(strings.ToUpper(opts.Product), "BIG-IP") {
+				lc := bigip.EvaluateLifecycle(opts.Version, opts.Product, time.Now())
+				if len(lc.Warnings) > 0 {
+					fmt.Fprintln(out)
+					for _, w := range lc.Warnings {
+						fmt.Fprintf(out, "  ⚠️  [WARNING] %s\n", w)
+					}
+					if lc.Software.IsEOL && lc.Software.Recommendation != "" {
+						fmt.Fprintf(out, "     Recommendation: %s\n", lc.Software.Recommendation)
+					}
+					fmt.Fprintln(out)
+				}
 			}
 			field = 4
 		case 4:
@@ -952,6 +1002,20 @@ func runStep5Review(ctx context.Context, reader *bufio.Reader, out io.Writer, cl
 			fmt.Fprintf(out, "  [13] Ticket Ref      : (none)\n")
 		}
 		fmt.Fprintln(out, "========================================================================")
+		if strings.EqualFold(opts.ProductFamily, "BIG-IP") || strings.Contains(strings.ToUpper(opts.Product), "BIG-IP") {
+			lc := bigip.EvaluateLifecycle(opts.Version, opts.Product, time.Now())
+			if len(lc.Warnings) > 0 {
+				fmt.Fprintln(out, "⚠️  LIFECYCLE WARNING:")
+				for _, w := range lc.Warnings {
+					fmt.Fprintf(out, "  - %s\n", w)
+				}
+				if lc.Software.IsEOL && lc.Software.Recommendation != "" {
+					fmt.Fprintf(out, "  - Recommendation: %s\n", lc.Software.Recommendation)
+				}
+				fmt.Fprintln(out, "  Note: F5 Support may provide limited assistance for EOL releases.")
+				fmt.Fprintln(out, "========================================================================")
+			}
+		}
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "SAFETY NOTICE:")
 		fmt.Fprintln(out, "  Submitting this case will immediately create a real, visible support")

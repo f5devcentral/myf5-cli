@@ -446,3 +446,109 @@ func TestGetSystemInfo_RestMock(t *testing.T) {
 		t.Errorf("CaseAttributes[serialNumber] = %q; want chs-rest-test-1", info.CaseAttributes["serialNumber"])
 	}
 }
+
+func TestSystemInfo_SummaryLifecycle(t *testing.T) {
+	// Case 1: EOL Software and EOL Hardware
+	eolInfo := &SystemInfo{
+		Product:  "BIG-IP",
+		Version:  "15.1.8",
+		Platform: "2000s",
+	}
+	summary := eolInfo.Summary()
+	if !strings.Contains(summary, "Lifecycle & Support Warnings:") {
+		t.Errorf("expected Lifecycle & Support Warnings in summary, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "TMOS version 15.1.8 reached End of Life") {
+		t.Errorf("expected TMOS EOL warning in summary, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Hardware platform 2000s reached End of Life") {
+		t.Errorf("expected hardware EOL warning in summary, got:\n%s", summary)
+	}
+	if !strings.Contains(summary, "Software Rec:") {
+		t.Errorf("expected Software Rec in summary, got:\n%s", summary)
+	}
+	if strings.Contains(summary, "Hardware Rec:") {
+		t.Errorf("expected no Hardware Rec in summary, got:\n%s", summary)
+	}
+
+	// Case 2: Supported Software and Virtual Edition Hardware
+	suppInfo := &SystemInfo{
+		Product:  "BIG-IP",
+		Version:  "17.5.1",
+		Platform: "Z100",
+	}
+	suppSummary := suppInfo.Summary()
+	if !strings.Contains(suppSummary, "Lifecycle & Support Status:") {
+		t.Errorf("expected Lifecycle & Support Status in summary, got:\n%s", suppSummary)
+	}
+	if !strings.Contains(suppSummary, "Software (17.5.1") || !strings.Contains(suppSummary, "Supported") {
+		t.Errorf("expected Software Supported in summary, got:\n%s", suppSummary)
+	}
+	if !strings.Contains(suppSummary, "Hardware (Virtual Edition): Supported") {
+		t.Errorf("expected Hardware Supported in summary, got:\n%s", suppSummary)
+	}
+	if strings.Contains(suppSummary, "[WARNING]") {
+		t.Errorf("did not expect warnings in supported summary, got:\n%s", suppSummary)
+	}
+}
+
+func TestParseTmshOutput_WithHardwareType(t *testing.T) {
+	output := `
+Sys::Hardware
+Chassis Information
+  Chassis Serial        chs-i5800-999
+Platform Information
+  Platform Name         BIG-IP i5800
+  Base MAC              00:01:d7:aa:bb:cc
+System Information
+  Type                  C119
+  Appliance Series      i5000
+
+Sys::Version
+Main Package
+  Product               BIG-IP
+  Version               17.1.1
+  Build                 0.0.4
+  Edition               Final
+
+Sys::License
+Active License
+  Registration Key      REG-TMSH-KEY-999
+`
+	info := parseTmshOutput(output)
+	info.PopulateCaseAttributes()
+
+	if info.Platform != "C119" {
+		t.Errorf("Platform = %q; want C119", info.Platform)
+	}
+	if info.ChassisSerialNumber != "chs-i5800-999" {
+		t.Errorf("ChassisSerialNumber = %q; want chs-i5800-999", info.ChassisSerialNumber)
+	}
+	summary := info.Summary()
+	if !strings.Contains(summary, "Platform:           C119 (BIG-IP i5600 / i5800)") {
+		t.Errorf("Summary() did not contain enriched platform:\n%s", summary)
+	}
+}
+
+func TestSystemInfo_SummaryPlatformEnrichment(t *testing.T) {
+	// Case 1: Raw platform code C119
+	info1 := &SystemInfo{Platform: "C119"}
+	sum1 := info1.Summary()
+	if !strings.Contains(sum1, "Platform:           C119 (BIG-IP i5600 / i5800)") {
+		t.Errorf("Summary() did not enrich C119:\n%s", sum1)
+	}
+
+	// Case 2: Raw platform code Z100
+	info2 := &SystemInfo{Platform: "Z100"}
+	sum2 := info2.Summary()
+	if !strings.Contains(sum2, "Platform:           Z100 (BIG-IP Virtual Edition)") {
+		t.Errorf("Summary() did not enrich Z100:\n%s", sum2)
+	}
+
+	// Case 3: Already fully named platform
+	info3 := &SystemInfo{Platform: "BIG-IP Virtual Edition"}
+	sum3 := info3.Summary()
+	if !strings.Contains(sum3, "Platform:           BIG-IP Virtual Edition") || strings.Contains(sum3, "BIG-IP Virtual Edition (BIG-IP Virtual Edition)") {
+		t.Errorf("Summary() duplicate enrichment for BIG-IP Virtual Edition:\n%s", sum3)
+	}
+}
