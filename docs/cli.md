@@ -144,23 +144,14 @@ myf5 cases list --all
 ```
 
 #### `metadata`
-Retrieves the authoritative schema metadata and valid values for case creation.
+Retrieves the authoritative schema metadata and valid taxonomy values for case creation from the live MyF5 API.
 ```bash
 myf5 cases metadata
 ```
 
-> **Known outage (re-verified 2026-10-06):** this endpoint returns
-> `500 "Malformed JSON: Expected '{' at the beginning of object"` for every
-> request, including a plain `GET` with no body. The fault is server-side at
-> F5 and there is no client-side workaround. It is the documented source of
-> valid `productFamily`, `priority`, `timezone` and `reasonForContact` values,
-> so those values currently cannot be enumerated from the API.
->
-> Until it recovers, copy the values from an existing case with
-> `myf5 cases get <case-number>`, use `myf5 cases wizard` (which incorporates
-> known-valid schemas offline), or use `--dry-run` on `cases create`, which
-> validates your field values and reports what the API would reject without
-> opening a case.
+Returns the full taxonomy schema containing 10 categories: `prodFamilies` (with nested `products` and supported `versions`), `priorities`, `reasonsForContact`, `preferredContactMethods`, `timeZones`, `accounts`, `cloudProviders`, `linuxDistributions`, `nginxPlusVersions`, and `status`.
+
+> **Status:** Operational. A server-side 500 deserialization outage observed from 2026-10-05 was resolved by F5 Engineering on 2026-10-08.
 
 #### `comment <case-number> [note]`
 Appends a status comment or investigation update to an open support case. If `[note]` is omitted, launches an interactive multiline text buffer with editing, undo/redo (`Ctrl+Z`), and word wrapping.
@@ -185,15 +176,11 @@ myf5 wizard
 ```
 
 #### `get <case-number>`
-Shows one case in full: status, priority, product, account, contacts, the
-description, and a list of the messages on the email thread.
+Shows one case in full: status, priority, product, version, opened timestamp (`dateOpened`),
+account, contacts, the description, and a list of the messages on the email thread.
 ```bash
 myf5 cases get 01287164
 ```
-
-> `dateOpened` is deliberately not shown. The detail endpoint returns the
-> priority string in that field (a server-side defect); `cases list` reports
-> the real timestamp.
 
 #### `create [flags]`
 Opens a support case. Run with no flags for the full list.

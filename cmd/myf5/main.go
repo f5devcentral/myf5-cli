@@ -1522,8 +1522,9 @@ func printCaseDetail(d *cases.CaseDetail) {
 	if n := d.AlternateContact.DisplayName(); n != "" {
 		fmt.Printf("  Alternate  : %s <%s>\n", n, d.AlternateContact.Email)
 	}
-	// dateOpened is deliberately not printed: the detail endpoint returns the
-	// priority string in that field. See CaseDetail.
+	if d.DateOpened != "" {
+		fmt.Printf("  Opened     : %s\n", d.DateOpened)
+	}
 	for _, l := range d.Links {
 		if l.Rel == "case-detail" {
 			fmt.Printf("  Web        : %s\n", l.Href)
