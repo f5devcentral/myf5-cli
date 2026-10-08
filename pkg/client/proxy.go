@@ -320,7 +320,12 @@ func dialHTTPConnect(ctx context.Context, proxyURL *url.URL, targetAddr string) 
 	if proxyURL.User != nil {
 		user := proxyURL.User.Username()
 		pass, _ := proxyURL.User.Password()
-		auth := base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))
+		rawAuth := make([]byte, len(user)+1+len(pass))
+		copy(rawAuth, user)
+		rawAuth[len(user)] = ':'
+		copy(rawAuth[len(user)+1:], pass)
+		auth := base64.StdEncoding.EncodeToString(rawAuth)
+		zeroBytes(rawAuth)
 		connectReq += fmt.Sprintf("Proxy-Authorization: Basic %s\r\n", auth)
 	}
 	connectReq += "\r\n"

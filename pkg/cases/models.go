@@ -102,11 +102,10 @@ type CaseEmailActivity struct {
 
 // CaseDetail is a single case from GET /case-management/v1/cases/{caseNumber}.
 //
-// WARNING: `dateOpened` is unreliable on this endpoint. The live API returns
-// the PRIORITY string in that field on case detail (observed 2026-10-05:
-// "4 - General Assistance" where the list endpoint correctly returns
-// "09/29/2026 17:59:42" for the same case). The fault is server-side. Prefer
-// the list endpoint's value when a real timestamp is needed.
+// NOTE: `dateOpened` previously returned the priority string due to an
+// Apigee transform defect (observed 2026-10-05). F5 resolved this on
+// 2026-10-08; it now reliably returns the case creation timestamp (e.g.,
+// "10/05/2026 22:03:28") matching the list endpoint.
 type CaseDetail struct {
 	CaseNumber       string `json:"caseNumber"`
 	Subject          string `json:"subject"`

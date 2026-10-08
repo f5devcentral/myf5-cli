@@ -59,6 +59,13 @@ func Authenticate(ctx context.Context, authFQDN, appID, clientID, clientSecret, 
 
 // AuthenticateWithClient allows passing a custom HTTP client (useful for tests or custom proxy).
 func AuthenticateWithClient(ctx context.Context, httpClient *http.Client, authFQDN, appID, clientID, clientSecret, scope string) (string, error) {
+	secBytes := []byte(clientSecret)
+	defer ZeroBytes(secBytes)
+	return AuthenticateWithSecretBytes(ctx, httpClient, authFQDN, appID, clientID, secBytes, scope)
+}
+
+// AuthenticateWithSecretBytes authenticates using a mutable clientSecret byte slice that is scrubbed from memory.
+func AuthenticateWithSecretBytes(ctx context.Context, httpClient *http.Client, authFQDN, appID, clientID string, clientSecret []byte, scope string) (string, error) {
 	if authFQDN == "" {
 		authFQDN = DefaultAuthFQDN
 	}
@@ -122,8 +129,11 @@ func AuthenticateWithClient(ctx context.Context, httpClient *http.Client, authFQ
 		return "", fmt.Errorf("failed to create auth request: %w", err)
 	}
 
-	// Basic Auth credentials
-	rawCreds := []byte(clientID + ":" + clientSecret)
+	// Basic Auth credentials constructed in a mutable byte buffer
+	rawCreds := make([]byte, len(clientID)+1+len(clientSecret))
+	copy(rawCreds, clientID)
+	rawCreds[len(clientID)] = ':'
+	copy(rawCreds[len(clientID)+1:], clientSecret)
 	authHeader := base64.StdEncoding.EncodeToString(rawCreds)
 	// Zero plaintext credential byte buffer immediately after base64 encoding
 	ZeroBytes(rawCreds)

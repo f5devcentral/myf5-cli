@@ -25,13 +25,32 @@ import (
 
 // SCPOptions specifies the SSH connection and authentication configuration for SCP file transfers.
 type SCPOptions struct {
-	Host       string
-	Port       int
-	Username   string
-	Password   string
-	KeyPath    string
-	Passphrase string
-	Timeout    time.Duration
+	Host            string
+	Port            int
+	Username        string
+	Password        string
+	PasswordBytes   []byte
+	KeyPath         string
+	Passphrase      string
+	PassphraseBytes []byte
+	Timeout         time.Duration
+}
+
+// Zero securely scrubs password and passphrase bytes from RAM and clears secret string fields.
+func (opts *SCPOptions) Zero() {
+	if opts == nil {
+		return
+	}
+	if len(opts.PasswordBytes) > 0 {
+		auth.ZeroBytes(opts.PasswordBytes)
+		opts.PasswordBytes = nil
+	}
+	if len(opts.PassphraseBytes) > 0 {
+		auth.ZeroBytes(opts.PassphraseBytes)
+		opts.PassphraseBytes = nil
+	}
+	opts.Password = ""
+	opts.Passphrase = ""
 }
 
 // DefaultSCPTimeout is the default connection timeout for SSH dial operations.
@@ -76,14 +95,18 @@ func BuildSSHClientConfig(opts SCPOptions) (*ssh.ClientConfig, error) {
 	var authMethods []ssh.AuthMethod
 
 	// 1. Password authentication if provided
-	if opts.Password != "" {
-		authMethods = append(authMethods, ssh.Password(opts.Password))
+	pw := opts.Password
+	if pw == "" && len(opts.PasswordBytes) > 0 {
+		pw = string(opts.PasswordBytes)
+	}
+	if pw != "" {
+		authMethods = append(authMethods, ssh.Password(pw))
 		// Also support keyboard-interactive (PAM / TACACS+ / RADIUS)
 		authMethods = append(authMethods, ssh.KeyboardInteractive(
 			func(user, instruction string, questions []string, echos []bool) ([]string, error) {
 				answers := make([]string, len(questions))
 				for i := range answers {
-					answers[i] = opts.Password
+					answers[i] = pw
 				}
 				return answers, nil
 			},
@@ -97,8 +120,17 @@ func BuildSSHClientConfig(opts SCPOptions) (*ssh.ClientConfig, error) {
 			return nil, fmt.Errorf("failed to read private key at %s: %w", opts.KeyPath, err)
 		}
 		var signer ssh.Signer
-		if opts.Passphrase != "" {
-			signer, err = ssh.ParsePrivateKeyWithPassphrase(keyBytes, []byte(opts.Passphrase))
+		var passBytes []byte
+		if len(opts.PassphraseBytes) > 0 {
+			passBytes = make([]byte, len(opts.PassphraseBytes))
+			copy(passBytes, opts.PassphraseBytes)
+		} else if opts.Passphrase != "" {
+			passBytes = []byte(opts.Passphrase)
+		}
+
+		if len(passBytes) > 0 {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(keyBytes, passBytes)
+			auth.ZeroBytes(passBytes)
 		} else {
 			signer, err = ssh.ParsePrivateKey(keyBytes)
 		}
@@ -111,7 +143,7 @@ func BuildSSHClientConfig(opts SCPOptions) (*ssh.ClientConfig, error) {
 	}
 
 	// 3. Fallback to default SSH keys / agent only if no explicit password or key was given
-	if opts.Password == "" && opts.KeyPath == "" {
+	if pw == "" && opts.KeyPath == "" {
 		if sock := os.Getenv("SSH_AUTH_SOCK"); sock != "" {
 			if agentConn, err := net.Dial("unix", sock); err == nil {
 				ag := agent.NewClient(agentConn)

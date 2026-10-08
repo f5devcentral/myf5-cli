@@ -428,3 +428,126 @@ func TestGetEndpointExample(t *testing.T) {
 		t.Errorf("expected error on empty endpoint, got nil")
 	}
 }
+
+func TestClientZero(t *testing.T) {
+	t.Run("scrubs PasswordBytes and clears Password", func(t *testing.T) {
+		pw := []byte("super-secret-password-xyz")
+		client, err := NewClientWithOptions(ClientOptions{
+			Host:          "192.0.2.1",
+			Port:          443,
+			Username:      "admin",
+			Password:      string(pw),
+			PasswordBytes: pw,
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		client.Zero()
+
+		if client.Password != "" {
+			t.Errorf("Password was not cleared: %q", client.Password)
+		}
+		if client.PasswordBytes != nil {
+			t.Errorf("PasswordBytes was not cleared to nil")
+		}
+		for i, v := range pw {
+			if v != 0 {
+				t.Errorf("byte %d was not zeroed: %d", i, v)
+			}
+		}
+	})
+
+	t.Run("handles nil safely", func(t *testing.T) {
+		var nilClient *Client
+		nilClient.Zero() // Must not panic
+	})
+}
+
+func TestSCPOptionsZero(t *testing.T) {
+	pw := []byte("ssh-pass-123")
+	passphrase := []byte("passphrase-456")
+
+	opts := &SCPOptions{
+		Host:            "192.0.2.1",
+		Port:            22,
+		Username:        "admin",
+		Password:        string(pw),
+		PasswordBytes:   pw,
+		Passphrase:      string(passphrase),
+		PassphraseBytes: passphrase,
+	}
+
+	opts.Zero()
+
+	if opts.Password != "" {
+		t.Errorf("Password not cleared: %q", opts.Password)
+	}
+	if opts.Passphrase != "" {
+		t.Errorf("Passphrase not cleared: %q", opts.Passphrase)
+	}
+	if opts.PasswordBytes != nil {
+		t.Errorf("PasswordBytes not nil")
+	}
+	if opts.PassphraseBytes != nil {
+		t.Errorf("PassphraseBytes not nil")
+	}
+
+	for i, v := range pw {
+		if v != 0 {
+			t.Errorf("pw byte %d not zeroed: %d", i, v)
+		}
+	}
+	for i, v := range passphrase {
+		if v != 0 {
+			t.Errorf("passphrase byte %d not zeroed: %d", i, v)
+		}
+	}
+
+	var nilOpts *SCPOptions
+	nilOpts.Zero() // Must not panic
+}
+
+func TestTransferOptionsZero(t *testing.T) {
+	pw := []byte("secret_pw_transfer")
+	passphrase := []byte("secret_pass_transfer")
+
+	opts := &TransferOptions{
+		TargetType:         "bigip",
+		Method:             MethodAuto,
+		Username:           "admin",
+		Password:           string(pw),
+		PasswordBytes:      pw,
+		SSHPassphrase:      string(passphrase),
+		SSHPassphraseBytes: passphrase,
+	}
+
+	opts.Zero()
+
+	if opts.Password != "" {
+		t.Errorf("Password not cleared: %q", opts.Password)
+	}
+	if opts.SSHPassphrase != "" {
+		t.Errorf("SSHPassphrase not cleared: %q", opts.SSHPassphrase)
+	}
+	if opts.PasswordBytes != nil {
+		t.Errorf("PasswordBytes not nil")
+	}
+	if opts.SSHPassphraseBytes != nil {
+		t.Errorf("SSHPassphraseBytes not nil")
+	}
+
+	for i, v := range pw {
+		if v != 0 {
+			t.Errorf("pw byte %d not zeroed: %d", i, v)
+		}
+	}
+	for i, v := range passphrase {
+		if v != 0 {
+			t.Errorf("passphrase byte %d not zeroed: %d", i, v)
+		}
+	}
+
+	var nilOpts *TransferOptions
+	nilOpts.Zero() // Must not panic
+}

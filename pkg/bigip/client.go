@@ -19,17 +19,31 @@ import (
 	"strings"
 	"time"
 
+	"myf5-cli/pkg/auth"
 	"myf5-cli/pkg/client"
 )
 
 // Client interacts with BIG-IP iControl REST APIs.
 type Client struct {
-	Scheme     string
-	Host       string
-	Port       int
-	Username   string
-	Password   string
-	HTTPClient *http.Client
+	Scheme        string
+	Host          string
+	Port          int
+	Username      string
+	Password      string
+	PasswordBytes []byte
+	HTTPClient    *http.Client
+}
+
+// Zero securely scrubs appliance password bytes from RAM and clears password string fields.
+func (c *Client) Zero() {
+	if c == nil {
+		return
+	}
+	if len(c.PasswordBytes) > 0 {
+		auth.ZeroBytes(c.PasswordBytes)
+		c.PasswordBytes = nil
+	}
+	c.Password = ""
 }
 
 // String implements fmt.Stringer to ensure appliance credentials are never leaked in logs.
@@ -38,7 +52,7 @@ func (c *Client) String() string {
 		return "<nil>"
 	}
 	pw := "[REDACTED]"
-	if c.Password == "" {
+	if c.Password == "" && len(c.PasswordBytes) == 0 {
 		pw = "[EMPTY]"
 	}
 	return fmt.Sprintf("bigip.Client{Host: %q, Port: %d, Scheme: %q, Username: %q, Password: %s}", c.Host, c.Port, c.Scheme, c.Username, pw)
@@ -189,6 +203,7 @@ type ClientOptions struct {
 	Port           int
 	Username       string
 	Password       string
+	PasswordBytes  []byte
 	SkipTLSVerify  bool
 	ClientCertPath string
 	ClientKeyPath  string
@@ -226,13 +241,19 @@ func NewClientWithOptions(opts ClientOptions) (*Client, error) {
 		}
 	}
 
+	pwBytes := opts.PasswordBytes
+	if len(pwBytes) == 0 && opts.Password != "" {
+		pwBytes = []byte(opts.Password)
+	}
+
 	return &Client{
-		Scheme:     scheme,
-		Host:       cleanHost,
-		Port:       port,
-		Username:   opts.Username,
-		Password:   opts.Password,
-		HTTPClient: httpClient,
+		Scheme:        scheme,
+		Host:          cleanHost,
+		Port:          port,
+		Username:      opts.Username,
+		Password:      opts.Password,
+		PasswordBytes: pwBytes,
+		HTTPClient:    httpClient,
 	}, nil
 }
 
@@ -823,7 +844,17 @@ func (c *Client) GetEndpointExample(ctx context.Context, endpoint string) ([]byt
 }
 
 func (c *Client) setAuth(req *http.Request) {
-	auth := base64.StdEncoding.EncodeToString([]byte(c.Username + ":" + c.Password))
-	req.Header.Set("Authorization", "Basic "+auth)
+	pwBytes := c.PasswordBytes
+	if len(pwBytes) == 0 && c.Password != "" {
+		pwBytes = []byte(c.Password)
+	}
+	buf := make([]byte, len(c.Username)+1+len(pwBytes))
+	copy(buf, c.Username)
+	buf[len(c.Username)] = ':'
+	copy(buf[len(c.Username)+1:], pwBytes)
+	authHeader := base64.StdEncoding.EncodeToString(buf)
+	auth.ZeroBytes(buf)
+
+	req.Header.Set("Authorization", "Basic "+authHeader)
 	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
 }
