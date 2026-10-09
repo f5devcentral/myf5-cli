@@ -388,12 +388,24 @@ func editWizardField(reader *bufio.Reader, out io.Writer, fieldNum int, opts *Ca
 			opts.SerialNumber, err = promptRequiredNavField(reader, out, "Serial Number or RegKey (last 7 chars)", opts.SerialNumber)
 		}
 	case 5:
-		fmt.Fprintln(out, "Select Case Priority:")
-		fmt.Fprintln(out, "  1) 1 - Site Down            (Critical: production network down)")
-		fmt.Fprintln(out, "  2) 2 - Site At Risk         (High: redundant pair failed)")
-		fmt.Fprintln(out, "  3) 3 - Performance Degraded (Medium: degraded throughput)")
-		fmt.Fprintln(out, "  4) 4 - General Assistance   (Low: non-urgent questions/config)")
-		prioChoice, pErr := promptNavField(reader, out, "Select Priority [1-4]", "4")
+		prioItems := []SelectItem{
+			{ID: "1", Title: "1 - Site Down", Description: "Critical: production network down / business halt"},
+			{ID: "2", Title: "2 - Site At Risk", Description: "High: redundant pair failed / imminent outage"},
+			{ID: "3", Title: "3 - Performance Degraded", Description: "Medium: degraded throughput / viable workaround"},
+			{ID: "4", Title: "4 - General Assistance", Description: "Low: questions / non-urgent config help"},
+		}
+		defPrio := "4"
+		switch opts.Priority {
+		case cases.PrioritySiteDown:
+			defPrio = "1"
+		case cases.PrioritySiteAtRisk:
+			defPrio = "2"
+		case cases.PriorityPerformanceDegraded:
+			defPrio = "3"
+		case cases.PriorityGeneralAssistance:
+			defPrio = "4"
+		}
+		prioChoice, pErr := selectNavField(reader, nil, out, "Select Case Priority:", "Select Priority [1-4]", prioItems, defPrio)
 		if pErr != nil {
 			if errors.Is(pErr, ErrWizardBack) {
 				return nil
@@ -415,13 +427,27 @@ func editWizardField(reader *bufio.Reader, out io.Writer, fieldNum int, opts *Ca
 			}
 		}
 	case 6:
-		fmt.Fprintln(out, "Select Reason for Contact:")
-		fmt.Fprintln(out, "  1) General Problem")
-		fmt.Fprintln(out, "  2) Configuration Assistance")
-		fmt.Fprintln(out, "  3) Software Bug")
-		fmt.Fprintln(out, "  4) Hardware Issue")
-		fmt.Fprintln(out, "  5) Upgrade Assistance")
-		reasonChoice, rErr := promptNavField(reader, out, "Select Reason [1-5]", "1")
+		reasonItems := []SelectItem{
+			{ID: "1", Title: "General Problem"},
+			{ID: "2", Title: "Configuration Assistance"},
+			{ID: "3", Title: "Software Bug / Issue"},
+			{ID: "4", Title: "Hardware Issue"},
+			{ID: "5", Title: "Upgrade Assistance"},
+		}
+		defReason := "1"
+		switch opts.ReasonForContact {
+		case "General Problem":
+			defReason = "1"
+		case "Configuration Assistance":
+			defReason = "2"
+		case "Software Bug":
+			defReason = "3"
+		case "Hardware Issue":
+			defReason = "4"
+		case "Upgrade Assistance":
+			defReason = "5"
+		}
+		reasonChoice, rErr := selectNavField(reader, nil, out, "Select Reason for Contact:", "Select Reason [1-5]", reasonItems, defReason)
 		if rErr != nil {
 			if errors.Is(rErr, ErrWizardBack) {
 				return nil
@@ -552,12 +578,12 @@ func runStep1AutoDetection(ctx context.Context, reader *bufio.Reader, out io.Wri
 	fmt.Fprintln(out, "  - Serial Number or License Registration Key")
 	fmt.Fprintln(out, "  - Hostname and provisioned modules")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "How would you like to proceed?")
-	fmt.Fprintln(out, "  1) Connect to a live BIG-IP / BIG-IQ host (via REST/SSH)")
-	fmt.Fprintln(out, "  2) Inspect a local QKView archive (.qkview file)")
-	fmt.Fprintln(out, "  3) Skip auto-detection (enter details manually)")
-
-	detectChoice, err := promptNavField(reader, out, "Select option [1-3]", "3")
+	detectItems := []SelectItem{
+		{ID: "1", Title: "Connect to a live BIG-IP / BIG-IQ host (via REST/SSH)"},
+		{ID: "2", Title: "Inspect a local QKView archive (.qkview file)"},
+		{ID: "3", Title: "Skip auto-detection (enter details manually)"},
+	}
+	detectChoice, err := selectNavField(reader, nil, out, "How would you like to proceed?", "Select option [1-3]", detectItems, "3")
 	if err != nil {
 		if errors.Is(err, ErrWizardBack) {
 			return 1, nil
@@ -742,11 +768,12 @@ func runStep3Details(reader *bufio.Reader, out io.Writer, opts *CaseWizardOption
 	for field <= 4 {
 		switch field {
 		case 1:
-			fmt.Fprintln(out, "Select Case Priority:")
-			fmt.Fprintln(out, "  1) 1 - Site Down            (Critical: production network down / business halt)")
-			fmt.Fprintln(out, "  2) 2 - Site At Risk         (High: redundant pair failed / imminent outage)")
-			fmt.Fprintln(out, "  3) 3 - Performance Degraded (Medium: degraded throughput / viable workaround)")
-			fmt.Fprintln(out, "  4) 4 - General Assistance   (Low: questions / non-urgent config help)")
+			prioItems := []SelectItem{
+				{ID: "1", Title: "1 - Site Down", Description: "Critical: production network down / business halt"},
+				{ID: "2", Title: "2 - Site At Risk", Description: "High: redundant pair failed / imminent outage"},
+				{ID: "3", Title: "3 - Performance Degraded", Description: "Medium: degraded throughput / viable workaround"},
+				{ID: "4", Title: "4 - General Assistance", Description: "Low: questions / non-urgent config help"},
+			}
 
 			defPrio := "4"
 			switch opts.Priority {
@@ -760,7 +787,7 @@ func runStep3Details(reader *bufio.Reader, out io.Writer, opts *CaseWizardOption
 				defPrio = "4"
 			}
 
-			prioChoice, err := promptNavField(reader, out, "Select Priority [1-4]", defPrio)
+			prioChoice, err := selectNavField(reader, nil, out, "Select Case Priority:", "Select Priority [1-4]", prioItems, defPrio)
 			if errors.Is(err, ErrWizardBack) {
 				return 2, 4, nil // go back to Step 2, field 4 (Entitlement)
 			}
@@ -783,12 +810,13 @@ func runStep3Details(reader *bufio.Reader, out io.Writer, opts *CaseWizardOption
 			}
 			field = 2
 		case 2:
-			fmt.Fprintln(out, "\nSelect Reason for Contact:")
-			fmt.Fprintln(out, "  1) General Problem")
-			fmt.Fprintln(out, "  2) Configuration Assistance")
-			fmt.Fprintln(out, "  3) Software Bug / Issue")
-			fmt.Fprintln(out, "  4) Hardware Issue")
-			fmt.Fprintln(out, "  5) Upgrade Assistance")
+			reasonItems := []SelectItem{
+				{ID: "1", Title: "General Problem"},
+				{ID: "2", Title: "Configuration Assistance"},
+				{ID: "3", Title: "Software Bug / Issue"},
+				{ID: "4", Title: "Hardware Issue"},
+				{ID: "5", Title: "Upgrade Assistance"},
+			}
 
 			defReason := "1"
 			switch opts.ReasonForContact {
@@ -804,7 +832,7 @@ func runStep3Details(reader *bufio.Reader, out io.Writer, opts *CaseWizardOption
 				defReason = "5"
 			}
 
-			reasonChoice, err := promptNavField(reader, out, "Select Reason [1-5]", defReason)
+			reasonChoice, err := selectNavField(reader, nil, out, "Select Reason for Contact:", "Select Reason [1-5]", reasonItems, defReason)
 			if errors.Is(err, ErrWizardBack) {
 				field = 1 // go back to Priority
 				continue
