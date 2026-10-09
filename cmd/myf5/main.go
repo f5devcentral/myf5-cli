@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
@@ -878,62 +879,73 @@ func runInteractiveBrowser(ctx context.Context, client *downloads.Client) {
 
 familyLoop:
 	for {
-		fmt.Println("\nSelect a Product Family:")
+		famItems := make([]SelectItem, len(meta.Data.ProductFamilies))
 		for i, f := range meta.Data.ProductFamilies {
-			fmt.Printf("  %2d) %s\n", i+1, f.GetTitle())
+			famItems[i] = SelectItem{
+				ID:    f.Name,
+				Title: f.GetTitle(),
+				Value: f,
+			}
 		}
-		fmt.Print("\nEnter number (or 'q' to quit): ")
-		input, err := reader.ReadString('\n')
+		selIdx, _, err := SelectMenu(SelectConfig{
+			Title:       "Select a Product Family:",
+			Items:       famItems,
+			AllowFilter: true,
+			AllowBack:   false,
+			Prompt:      "Select Family (or 'q' to quit)",
+			In:          os.Stdin,
+			Out:         os.Stdout,
+			Reader:      reader,
+		})
 		if err != nil {
+			if errors.Is(err, ErrSelectQuit) || errors.Is(err, io.EOF) {
+				return
+			}
 			if ctx.Err() != nil {
 				fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
 				exitFunc(130)
 			}
 			return
 		}
-		input = strings.TrimSpace(input)
-		if input == "q" || input == "exit" {
-			return
-		}
-		idx, err := strconv.Atoi(input)
-		if err != nil || idx < 1 || idx > len(meta.Data.ProductFamilies) {
-			fmt.Println("Invalid selection.")
-			continue
-		}
-		selectedFamily := meta.Data.ProductFamilies[idx-1]
+		selectedFamily := meta.Data.ProductFamilies[selIdx]
 
 	lineLoop:
 		for {
-			// Select Line
-			fmt.Printf("\nSelect a Product Line in %s:\n", selectedFamily.GetTitle())
+			lineItems := make([]SelectItem, len(selectedFamily.ProductLines))
 			for i, l := range selectedFamily.ProductLines {
-				fmt.Printf("  %2d) %s\n", i+1, l.GetTitle())
+				lineItems[i] = SelectItem{
+					ID:    l.Name,
+					Title: l.GetTitle(),
+					Value: l,
+				}
 			}
-			fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
-			input, err = reader.ReadString('\n')
+			selIdx, _, err := SelectMenu(SelectConfig{
+				Title:       fmt.Sprintf("Select a Product Line in %s:", selectedFamily.GetTitle()),
+				Items:       lineItems,
+				AllowFilter: true,
+				AllowBack:   true,
+				Prompt:      "Select Product Line (or 'b' for back, 'q' to quit)",
+				In:          os.Stdin,
+				Out:         os.Stdout,
+				Reader:      reader,
+			})
 			if err != nil {
+				if errors.Is(err, ErrSelectBack) {
+					continue familyLoop
+				}
+				if errors.Is(err, ErrSelectQuit) || errors.Is(err, io.EOF) {
+					return
+				}
 				if ctx.Err() != nil {
 					fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
 					exitFunc(130)
 				}
 				return
 			}
-			input = strings.TrimSpace(input)
-			if input == "q" || input == "exit" {
-				return
-			}
-			if input == "b" {
-				continue familyLoop
-			}
-			idx, err = strconv.Atoi(input)
-			if err != nil || idx < 1 || idx > len(selectedFamily.ProductLines) {
-				fmt.Println("Invalid selection.")
-				continue
-			}
-			selectedLine := selectedFamily.ProductLines[idx-1]
+			selectedLine := selectedFamily.ProductLines[selIdx]
 
 			// Fetch versions
-			fmt.Printf("Fetching versions for %s...\n", selectedLine.Name)
+			fmt.Printf("\nFetching versions for %s...\n", selectedLine.Name)
 			vResp, err := client.GetProductVersions(ctx, selectedFamily.Name, selectedLine.Name)
 			if err != nil {
 				if errors.Is(err, context.Canceled) || ctx.Err() != nil {
@@ -941,43 +953,50 @@ familyLoop:
 					exitFunc(130)
 				}
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				continue
+				continue lineLoop
 			}
 			versions := vResp.GetVersions()
 			if len(versions) == 0 {
 				fmt.Println("No versions found.")
-				continue
+				continue lineLoop
 			}
 
 		versionLoop:
 			for {
-				// Select Version
-				fmt.Printf("\nSelect Release Version in %s:\n", selectedLine.GetTitle())
+				verItems := make([]SelectItem, len(versions))
 				for i, v := range versions {
-					fmt.Printf("  %2d) %-12s (Released: %s, %d containers)\n", i+1, v.Name, v.ReleaseDate, len(v.Containers))
+					desc := fmt.Sprintf("Released: %s, %d containers", v.ReleaseDate, len(v.Containers))
+					verItems[i] = SelectItem{
+						ID:          v.Name,
+						Title:       v.Name,
+						Description: desc,
+						Value:       v,
+					}
 				}
-				fmt.Print("\nEnter number (or 'b' to go back, 'q' to quit): ")
-				input, err = reader.ReadString('\n')
+				selIdx, _, err := SelectMenu(SelectConfig{
+					Title:       fmt.Sprintf("Select Release Version in %s:", selectedLine.GetTitle()),
+					Items:       verItems,
+					AllowFilter: true,
+					AllowBack:   true,
+					Prompt:      "Select Version (or 'b' for back, 'q' to quit)",
+					In:          os.Stdin,
+					Out:         os.Stdout,
+					Reader:      reader,
+				})
 				if err != nil {
+					if errors.Is(err, ErrSelectBack) {
+						continue lineLoop
+					}
+					if errors.Is(err, ErrSelectQuit) || errors.Is(err, io.EOF) {
+						return
+					}
 					if ctx.Err() != nil {
 						fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
 						exitFunc(130)
 					}
 					return
 				}
-				input = strings.TrimSpace(input)
-				if input == "q" || input == "exit" {
-					return
-				}
-				if input == "b" {
-					continue lineLoop
-				}
-				idx, err = strconv.Atoi(input)
-				if err != nil || idx < 1 || idx > len(versions) {
-					fmt.Println("Invalid selection.")
-					continue
-				}
-				selectedVersion := versions[idx-1]
+				selectedVersion := versions[selIdx]
 
 			categoryLoop:
 				for {
@@ -1052,47 +1071,60 @@ familyLoop:
 						totalVersionFiles += len(c.Files)
 					}
 
-					fmt.Printf("\n=== %s / %s (Version %s) ===\n", selectedFamily.Name, selectedLine.GetTitle(), selectedVersion.Name)
-					fmt.Printf("Select a Category:\n")
-					for i, cat := range activeCats {
+					var catItems []SelectItem
+					for _, cat := range activeCats {
 						containerPlural := "containers"
 						if len(cat.containers) == 1 {
 							containerPlural = "container"
 						}
-						fmt.Printf("  %2d) %-38s (%d %s, %d files)\n",
-							i+1, cat.name, len(cat.containers), containerPlural, cat.totalFiles)
+						catItems = append(catItems, SelectItem{
+							ID:          cat.name,
+							Title:       cat.name,
+							Description: fmt.Sprintf("%d %s, %d files", len(cat.containers), containerPlural, cat.totalFiles),
+							Value:       cat,
+						})
 					}
-					fmt.Printf("\n  [Tip: Type 'all' to browse all %d files]\n", totalVersionFiles)
-					fmt.Print("Enter category number (or 'b' to go back, 'q' to quit): ")
-					input, err = reader.ReadString('\n')
+					if len(activeCats) > 1 {
+						catItems = append(catItems, SelectItem{
+							ID:          "all",
+							Title:       "All Containers",
+							Description: fmt.Sprintf("%d total files across all categories", totalVersionFiles),
+							Value:       nil,
+						})
+					}
+
+					_, chosenItem, err := SelectMenu(SelectConfig{
+						Title:       fmt.Sprintf("=== %s / %s (Version %s) ===\nSelect a Category:", selectedFamily.Name, selectedLine.GetTitle(), selectedVersion.Name),
+						Items:       catItems,
+						AllowFilter: true,
+						AllowBack:   true,
+						Prompt:      "Select Category (or 'b' for back, 'q' to quit)",
+						In:          os.Stdin,
+						Out:         os.Stdout,
+						Reader:      reader,
+					})
 					if err != nil {
+						if errors.Is(err, ErrSelectBack) {
+							continue versionLoop
+						}
+						if errors.Is(err, ErrSelectQuit) || errors.Is(err, io.EOF) {
+							return
+						}
 						if ctx.Err() != nil {
 							fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
 							exitFunc(130)
 						}
 						return
 					}
-					input = strings.TrimSpace(input)
-					if input == "q" || input == "exit" {
-						return
-					}
-					if input == "b" {
-						continue versionLoop
-					}
 
 					var targetContainers []downloads.Container
 					var categoryTitle string
 
-					if strings.EqualFold(input, "all") {
+					if chosenItem.ID == "all" {
 						targetContainers = selectedVersion.Containers
 						categoryTitle = fmt.Sprintf("All Containers (%d files)", totalVersionFiles)
 					} else {
-						catIdx, err := strconv.Atoi(input)
-						if err != nil || catIdx < 1 || catIdx > len(activeCats) {
-							fmt.Println("Invalid category selection.")
-							continue
-						}
-						chosenCat := activeCats[catIdx-1]
+						chosenCat := chosenItem.Value.(catGroup)
 						targetContainers = make([]downloads.Container, len(chosenCat.containers))
 						copy(targetContainers, chosenCat.containers)
 						categoryTitle = chosenCat.name
@@ -1130,7 +1162,7 @@ familyLoop:
 								activeFiles = append(activeFiles, fileRef{containerName: chosen.Name, file: f})
 							}
 							containerHeader = fmt.Sprintf("%s (%d files)", chosen.Name, len(chosen.Files))
-						} else if strings.EqualFold(input, "all") {
+						} else if chosenItem.ID == "all" {
 							for _, c := range targetContainers {
 								for _, f := range c.Files {
 									activeFiles = append(activeFiles, fileRef{containerName: c.Name, file: f})
@@ -1138,38 +1170,55 @@ familyLoop:
 							}
 							containerHeader = categoryTitle
 						} else {
-							fmt.Printf("\n=== %s / %s ===\n", selectedVersion.Name, categoryTitle)
-							fmt.Printf("Select a Container:\n")
-							for i, c := range targetContainers {
+							var contItems []SelectItem
+							for _, c := range targetContainers {
 								typeTag := ""
 								if c.Type != "" {
 									typeTag = fmt.Sprintf("[%s] ", c.Type)
 								}
-								desc := ""
+								desc := fmt.Sprintf("%s(%d files)", typeTag, len(c.Files))
 								if c.Description != "" && c.Description != c.Name {
-									desc = fmt.Sprintf(" - %s", c.Description)
+									desc += fmt.Sprintf(" - %s", c.Description)
 								}
-								fmt.Printf("  %2d) %-35s %s(%d files)%s\n", i+1, c.Name, typeTag, len(c.Files), desc)
+								contItems = append(contItems, SelectItem{
+									ID:          c.Name,
+									Title:       c.Name,
+									Description: desc,
+									Value:       c,
+								})
 							}
-							fmt.Printf("\n  [Tip: Type 'all' to show all files in this category]\n")
-							fmt.Print("Enter container number (or 'b' to go back, 'q' to quit): ")
-							contInput, err := reader.ReadString('\n')
+							contItems = append(contItems, SelectItem{
+								ID:          "all",
+								Title:       "All Containers in Category",
+								Description: fmt.Sprintf("View all files in %s", categoryTitle),
+								Value:       nil,
+							})
+
+							cIdx, cItem, err := SelectMenu(SelectConfig{
+								Title:       fmt.Sprintf("=== %s / %s ===\nSelect a Container:", selectedVersion.Name, categoryTitle),
+								Items:       contItems,
+								AllowFilter: true,
+								AllowBack:   true,
+								Prompt:      "Select Container (or 'b' for back, 'q' to quit)",
+								In:          os.Stdin,
+								Out:         os.Stdout,
+								Reader:      reader,
+							})
 							if err != nil {
+								if errors.Is(err, ErrSelectBack) {
+									continue categoryLoop
+								}
+								if errors.Is(err, ErrSelectQuit) || errors.Is(err, io.EOF) {
+									return
+								}
 								if ctx.Err() != nil {
 									fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
 									exitFunc(130)
 								}
 								return
 							}
-							contInput = strings.TrimSpace(contInput)
-							if contInput == "q" || contInput == "exit" {
-								return
-							}
-							if contInput == "b" {
-								continue categoryLoop
-							}
 
-							if strings.EqualFold(contInput, "all") {
+							if cItem.ID == "all" {
 								for _, c := range targetContainers {
 									for _, f := range c.Files {
 										activeFiles = append(activeFiles, fileRef{containerName: c.Name, file: f})
@@ -1177,12 +1226,7 @@ familyLoop:
 								}
 								containerHeader = fmt.Sprintf("%s - All (%d files)", categoryTitle, len(activeFiles))
 							} else {
-								cIdx, err := strconv.Atoi(contInput)
-								if err != nil || cIdx < 1 || cIdx > len(targetContainers) {
-									fmt.Println("Invalid container selection.")
-									continue
-								}
-								chosen := targetContainers[cIdx-1]
+								chosen := targetContainers[cIdx]
 								for _, f := range chosen.Files {
 									activeFiles = append(activeFiles, fileRef{containerName: chosen.Name, file: f})
 								}
@@ -1195,84 +1239,57 @@ familyLoop:
 							if len(targetContainers) == 1 {
 								continue categoryLoop
 							}
-							continue
+							continue containerLoop
 						}
 
-						searchTerm := ""
+						fileItems := make([]SelectItem, len(activeFiles))
+						for i, item := range activeFiles {
+							desc := downloads.FormatBytes(item.file.FileSize)
+							if item.file.Description != "" {
+								desc += fmt.Sprintf(" - %s", item.file.Description)
+							}
+							title := item.file.Name
+							if len(targetContainers) > 1 && strings.Contains(containerHeader, "All") {
+								title = fmt.Sprintf("[%s] %s", item.containerName, item.file.Name)
+							}
+							fileItems[i] = SelectItem{
+								ID:          item.file.Name,
+								Title:       title,
+								Description: desc,
+								Value:       item,
+							}
+						}
+
+					fileLoop:
 						for {
-							var displayFiles []fileRef
-							if searchTerm != "" {
-								for _, item := range activeFiles {
-									if strings.Contains(strings.ToLower(item.file.Name), strings.ToLower(searchTerm)) ||
-										strings.Contains(strings.ToLower(item.file.Description), strings.ToLower(searchTerm)) {
-										displayFiles = append(displayFiles, item)
-									}
-								}
-							} else {
-								displayFiles = activeFiles
-							}
-
-							fmt.Printf("\n=== %s ===\n", containerHeader)
-							if searchTerm != "" {
-								fmt.Printf("[Filter: '%s' - %d matching files (type '/clear' to view all)]\n", searchTerm, len(displayFiles))
-							}
-							fmt.Printf("Select a File to Download:\n")
-							for i, item := range displayFiles {
-								desc := ""
-								if item.file.Description != "" {
-									desc = fmt.Sprintf(" - %s", item.file.Description)
-								}
-								contLabel := ""
-								if len(targetContainers) > 1 && strings.Contains(containerHeader, "All") {
-									contLabel = fmt.Sprintf("[%s] ", item.containerName)
-								}
-								fmt.Printf("  %2d) %s%-52s (%s)%s\n",
-									i+1, contLabel, item.file.Name, downloads.FormatBytes(item.file.FileSize), desc)
-							}
-
-							fmt.Print("\nEnter file number, or '/<keyword>' to filter (or 'b' to go back, 'q' to quit): ")
-							fileInput, err := reader.ReadString('\n')
+							fIdx, _, err := SelectMenu(SelectConfig{
+								Title:       fmt.Sprintf("=== %s ===\nSelect a File to Download:", containerHeader),
+								Items:       fileItems,
+								AllowFilter: true,
+								AllowBack:   true,
+								Prompt:      "Select File (or 'b' for back, 'q' to quit)",
+								In:          os.Stdin,
+								Out:         os.Stdout,
+								Reader:      reader,
+							})
 							if err != nil {
+								if errors.Is(err, ErrSelectBack) {
+									if len(targetContainers) == 1 {
+										continue categoryLoop
+									}
+									continue containerLoop
+								}
+								if errors.Is(err, ErrSelectQuit) || errors.Is(err, io.EOF) {
+									return
+								}
 								if ctx.Err() != nil {
 									fmt.Fprintln(os.Stderr, "\n[CANCELLED] Operation aborted by user.")
 									exitFunc(130)
 								}
 								return
 							}
-							fileInput = strings.TrimSpace(fileInput)
-							if fileInput == "q" || fileInput == "exit" {
-								return
-							}
-							if fileInput == "b" {
-								if searchTerm != "" {
-									searchTerm = ""
-									continue
-								}
-								if len(targetContainers) == 1 {
-									continue categoryLoop
-								}
-								continue containerLoop
-							}
-							if fileInput == "/clear" || fileInput == "/all" {
-								searchTerm = ""
-								continue
-							}
-							if strings.HasPrefix(fileInput, "/") {
-								searchTerm = strings.TrimPrefix(fileInput, "/")
-								continue
-							}
 
-							fIdx, err := strconv.Atoi(fileInput)
-							if err != nil || fIdx < 1 || fIdx > len(displayFiles) {
-								if !strings.ContainsAny(fileInput, "0123456789") && len(fileInput) >= 2 {
-									searchTerm = fileInput
-									continue
-								}
-								fmt.Println("Invalid file selection.")
-								continue
-							}
-
-							selectedTarget := displayFiles[fIdx-1]
+							selectedTarget := activeFiles[fIdx]
 
 							// Fetch download links
 							fmt.Printf("\nFetching signed CDN link for %s...\n", selectedTarget.file.Name)
@@ -1283,12 +1300,12 @@ familyLoop:
 									exitFunc(130)
 								}
 								fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-								continue
+								continue fileLoop
 							}
 							links := linkResp.GetLinks()
 							if len(links) == 0 {
 								fmt.Println("No download link available.")
-								continue
+								continue fileLoop
 							}
 
 							link := links[0]
