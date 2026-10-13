@@ -1,0 +1,35 @@
+================================================================================
+F5 PROPRIETARY AND CONFIDENTIAL INTERNAL ENTERPRISE SOURCE LICENSE
+Copyright (c) 2026 F5, Inc. / Service Provider Sales Americas
+Author & Maintainer: Greg Robinson (g.robinson@f5.com)
+================================================================================
+
+PERMANENT INTERNAL USE RESTRICTION:
+This software, associated source code, design specifications, and related
+documentation ("Software") are the exclusive proprietary property of F5, Inc.
+and are maintained solely for internal engineering and automation operations
+within F5 Service Provider Sales Americas.
+
+THIS REPOSITORY AND ITS DERIVATIVES CAN NEVER BE MADE PUBLIC.
+
+1. RESTRICTIONS ON USE AND REDISTRIBUTION:
+   - This Software is strictly for authorized internal use by F5 personnel.
+   - External redistribution, publication, public repository hosting, public
+     forking, disclosure, or transmission in any form, in whole or in part,
+     to any external entity or individual outside F5, Inc. is strictly prohibited.
+   - Reverse engineering, decompilation, or unauthorized export of this Software
+     outside secure internal F5 network boundaries is strictly prohibited.
+
+2. SOLE AUTHORSHIP & GOVERNANCE:
+   This repository is solely authored and maintained by Greg Robinson
+   (g.robinson@f5.com). All code changes, issue triage, and security reviews
+   require explicit approval from the author.
+
+3. DISCLAIMER OF WARRANTY & LIMITATION OF LIABILITY:
+   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS "AS IS" AND ANY EXPRESS
+   OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+   OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN
+   NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+   INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES ARISING
+   IN ANY WAY OUT OF THE USE OF THIS SOFTWARE.
+================================================================================

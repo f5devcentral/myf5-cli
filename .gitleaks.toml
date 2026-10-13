@@ -1,0 +1,65 @@
+title = "F5 MyF5 API Security & Secret Detection Rules"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist for test fixtures, public endpoints, and non-sensitive API defaults"
+paths = [
+  '''(?i)tests/.*''',
+  '''(?i).*_test\.go$''',
+  '''(?i).*\.md$''',
+  '''(?i)openapi\.json$''',
+]
+regexes = [
+  '''UKKD3Vxv7NHrM3QmYk8Fk2mZnLtljAKX''',
+  '''ihealth2-api\.f5\.com''',
+  '''ihealth-api\.f5\.com''',
+  '''identity\.account\.f5\.com''',
+  '''idp\.identity\.f5\.com''',
+  '''support\.apis\.f5\.com''',
+  '''api\.software\.downloads\.f5\.com''',
+  '''aus19gt5bu0jGw9Fi358''',
+  '''ausp95yxb4ShxMGvW357''',
+  '''YourAppliancePassword''',
+  '''YourPassword''',
+  '''YourF5SupportAPIClientID''',
+  '''YourF5SupportAPIClientSecret''',
+]
+
+# Guard against F5 / Auth0 / Okta Client Secrets
+[[rules]]
+id = "f5-auth0-client-secret"
+description = "F5 Identity / Auth0 / Okta Client Secret"
+regex = '''(?i)(?:myf5|ihealth|auth0|f5)[-_]?(?:client)?[-_]?secret\s*[=:]\s*["']?([a-zA-Z0-9_\-]{32,64})'''
+secretGroup = 1
+keywords = ["client-secret", "client_secret", "auth0", "myf5", "ihealth"]
+
+# Guard against BIG-IP admin passwords
+[[rules]]
+id = "bigip-admin-password"
+description = "F5 BIG-IP Appliance Password"
+regex = '''(?i)(?:bigip|f5|tmos)[-_]?(?:admin)?[-_]?pass(?:word)?\s*[=:]\s*["']?([^\s'"#]{6,64})'''
+secretGroup = 1
+keywords = ["bigip", "password", "tmos"]
+
+# Guard against iControl REST session tokens
+[[rules]]
+id = "f5-icontrol-token"
+description = "F5 iControl REST Auth Token"
+regex = '''(?i)(?:X-F5-Auth-Token|icontrol_token)[\s=:'"]+([A-Z0-9]{20,64})'''
+secretGroup = 1
+keywords = ["x-f5-auth-token", "icontrol"]
+
+# Guard against accidental commitment of QKView bundles
+[[rules]]
+id = "f5-qkview-bundle-inclusion"
+description = "Accidental commit of F5 QKView diagnostic bundle"
+path = '''(?i)\.qkview$'''
+
+# Guard against API input JSON payloads with embedded credentials
+[[rules]]
+id = "f5-case-inputs-credentials"
+description = "F5 Case input JSON containing sensitive authentication tokens"
+path = '''(?i)case_inputs.*\.json$'''
+regex = '''(?i)"(?:password|client_secret|token)"\s*:\s*"[^"]+"'''

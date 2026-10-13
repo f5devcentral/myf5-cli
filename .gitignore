@@ -1,0 +1,123 @@
+# Binaries, build outputs, SBOMs, and git bundles
+bin/
+dist/
+release-binaries/
+/myf5
+/myf5.exe
+*.bundle
+sbom.json
+*.sbom.json
+*.spdx.json
+*.cdx.json
+checksums.txt
+
+# F5 Diagnostics & Downloaded Images
+*.qkview
+*.ucs
+*.scf
+*.iso
+*.img
+*.ova
+*.ovf
+*.qcow2
+*.qcow2.gz
+*.vhd
+*.vhdx
+*.vmdk
+*.tgz
+*.tar.gz
+*.tar
+*.tar.*
+*.zip
+*.rpm
+*.part
+*.tmp
+
+# Test and coverage artifacts
+*.out
+*.test
+coverage.out
+coverage.txt
+coverage.html
+
+# Credentials and secrets
+.env
+.env*
+.myf5
+.myf5*
+*.key
+*.pem
+id_ed25519*
+id_rsa*
+id_ecdsa*
+.f5api_credentials
+*.f5api_credentials*
+*f5api_credentials*
+.ihealth_credentials
+*ihealth_credentials*
+*credentials*.ini
+*credentials*.json
+
+# OS and IDE files
+.DS_Store
+.idea/
+.vscode/
+scratch/
+
+# Internal F5 communications & OAS scratch files.
+#
+# Internal announcements, maintenance notices, programme emails and
+# leadership decks are not public and are not needed to build or run the
+# binary. Keep them locally if they are useful as working context, but do not
+# publish them here — this repository is INTERNAL, not private, and
+# unannounced platform migrations, programme names and staff contact details
+# should not be redistributed through it.
+#
+# EVERYTHING under internal_docs/ is ignored, whatever it is called. Put
+# internal material there and the question of whether it is safe to commit
+# does not arise. The filename patterns below are kept as a backstop for
+# material dropped into docs/ by mistake, but they only work if the file
+# happens to be named correctly — the directory is the real boundary.
+internal_docs/
+openapi*.json
+
+# Backstop patterns for internal material misfiled into docs/.
+docs/*INTERNAL*
+docs/*_NOTICES_*.txt
+docs/*.eml
+docs/*.msg
+docs/*.pptx
+#
+# Public F5 knowledge base articles (docs/K*.txt) are deliberately NOT
+# ignored: they are already published, and archiving them makes the
+# citations in this repository checkable.
+
+# AI assistant workspaces, handoff context, and tool configuration.
+# Never commit AI tooling or generated context to this repository.
+agents/
+.claude/
+.claude*
+.cursor/
+.cursor*
+.windsurf/
+.windsurf*
+.aider*
+.antigravity/
+.antigravity*
+.gemini/
+.gemini*
+.github/copilot-instructions.md
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+AGENT.md
+.mcp.json
+
+# Local test & Terraform environments
+testenv/
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json

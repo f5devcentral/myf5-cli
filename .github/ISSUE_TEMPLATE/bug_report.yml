@@ -1,0 +1,70 @@
+name: "Bug Report"
+description: "Report a bug or unexpected behavior in myf5-cli"
+title: "[BUG]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### 🛡️ Security & Zero-Secret Reminder
+        **DO NOT paste real API client secrets, passwords, bearer tokens, or sensitive customer case details.**
+        Sanitize all output before submitting. For security vulnerabilities, review [SECURITY.md](../SECURITY.md).
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the problem...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps To Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Run './bin/myf5 downloads ...'
+        2. Set environment variable ...
+        3. See error ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Command Output & Sanitized Logs
+      description: Paste terminal output. Redact any sensitive information!
+      render: shell
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - macOS (Apple Silicon arm64)
+        - macOS (Intel amd64)
+        - Linux (x86_64 amd64)
+        - Linux (ARM64)
+        - Windows (x86_64)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: myf5 Version / Commit
+      description: Output of `myf5 version` or git commit SHA.
+      placeholder: "v1.0.0 (Go 1.27.1)"
+    validations:
+      required: true
