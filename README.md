@@ -3,9 +3,9 @@
 A high-performance, memory-safe, zero-dependency Go CLI and client library for **MyF5 Cloud APIs**, **Software Downloads**, **iHealth Diagnostics**, **BIG-IP TMOS Appliances**, and **BIG-IQ Centralized Management**.
 
 > [!IMPORTANT]
-> **DISCLAIMER:** This project is **NOT** an officially supported F5 product or service.
-> It is an internal automation tool solely authored and maintained by **Greg Robinson** ([`g.robinson@f5.com`](mailto:g.robinson@f5.com)) for F5 Service Provider Sales Americas.
-> **PERMANENT CLASSIFICATION:** This repository is strictly proprietary and confidential. It can **NEVER** be made public.
+> **DISCLAIMER:** This project is a community-maintained tool authored and maintained by **Greg Robinson** ([`g.robinson@f5.com`](mailto:g.robinson@f5.com)) and is **NOT** covered by an official F5 Technical Support SLA.
+>
+> **API ENTITLEMENT PREREQUISITE:** While this CLI source code is open source, **the MyF5 API itself is not publicly open**. Using MyF5 Cloud API commands (`downloads`, `cases`) requires F5 to enable API support on your customer account and issue account-specific OAuth2 credentials (`F5_CLIENT_ID` and `F5_CLIENT_SECRET`). Direct appliance commands (`bigip`, `bigiq`, `push`, `pull`, `geoip`) and `ihealth` operate independently with your appliance or iHealth credentials.
 
 ---
 
@@ -67,7 +67,7 @@ myf5-cli/
 ├── SECURITY.md                 # Security & vulnerability reporting policy
 ├── CONTRIBUTING.md             # Developer workflow & coding standards
 ├── CONTRIBUTING_AI.md          # Rules for AI assistants — this tool writes to live F5 Support
-├── LICENSE                     # F5 Proprietary & Confidential Internal License
+├── LICENSE                     # Apache License 2.0
 ├── go.mod
 └── README.md
 ```
@@ -230,7 +230,7 @@ Works with local management IPs, lab appliances, or cloud/UDF external access pr
 ./bin/myf5 bigip ready 10.1.1.4
 
 # Check TMOS readiness (via UDF or Cloud Access Proxy)
-./bin/myf5 bigip ready https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com/
+./bin/myf5 bigip ready https://00000000-0000-0000-0000-000000000000.access.udf.f5.com/
 
 # Inspect appliance version, edition, and build details
 ./bin/myf5 bigip info 10.1.1.4 --user admin

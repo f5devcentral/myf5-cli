@@ -14,10 +14,9 @@ import (
 	"time"
 )
 
-// The list endpoint returns ONLY ids, and the vendor media type needs its
-// +json suffix or the API answers 200 with XML. Both were discovered live on
-// 2026-10-02 and neither is inferable from the Go code, so they are pinned
-// here against a server that behaves like the real one.
+// TestListQKViewsFetchesDetailPerID verifies that ListQKViews negotiates JSON
+// via the +json vendor media type and populates summary metadata by fetching
+// each QKView detail resource.
 func TestListQKViewsFetchesDetailPerID(t *testing.T) {
 	var sawAccept string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -87,10 +86,7 @@ func TestUploadQKView(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
-		// No "v1" segment: the live API 404s on /api/v1/qkviews. This test
-		// previously pinned that broken path, so it passed while the command
-		// could not work at all. Assert the documented contract (K000130498)
-		// rather than whatever the code happened to send.
+		// Verify the unversioned collection path per K000130498.
 		if r.URL.Path != QKViewsPath {
 			t.Errorf("path = %s, want %s", r.URL.Path, QKViewsPath)
 		}
@@ -266,7 +262,7 @@ func TestGetQKViewHTTP202Accepted(t *testing.T) {
 		if r.URL.Path != QKViewsPath+"/26991271" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		// HTTP 202 Accepted returned while processing is RUNNING (observed live 2026-10-05)
+		// HTTP 202 Accepted returned while QKView processing status is RUNNING.
 		w.Header().Set("Content-Type", "application/vnd.f5.ihealth.api+json")
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte(`{

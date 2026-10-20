@@ -232,7 +232,7 @@ Verifies management plane availability against `/mgmt/tm/sys/ready` (with fallba
 myf5 bigip ready 10.1.1.4
 
 # Via UDF or Cloud External Access Proxy
-myf5 bigip ready https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com/
+myf5 bigip ready https://00000000-0000-0000-0000-000000000000.access.udf.f5.com/
 ```
 
 #### `info <host | file.qkview> [--json]`

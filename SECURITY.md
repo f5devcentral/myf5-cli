@@ -1,19 +1,18 @@
 # Security & Vulnerability Policy
 
-**Repository Classification:** F5 Proprietary & Confidential Internal Enterprise Tool  
-**Author & Maintainer:** Greg Robinson (`g.robinson@f5.com`)  
-**Permanent Policy:** This repository can **NEVER** be made public.
+**Maintainer:** Greg Robinson (`g.robinson@f5.com`)  
+**License:** Apache License 2.0
 
 ---
 
-## 1. Internal Vulnerability Reporting & Disclosure
+## 1. Vulnerability Reporting & Responsible Disclosure
 
-Because this repository is strictly internal and private to F5 Service Provider Sales Americas:
+To protect users of `myf5-cli`, please report security vulnerabilities privately rather than opening public GitHub issues:
 
-1. **DO NOT file public GitHub issues or public pull requests.**
-2. Report any security vulnerabilities, memory safety concerns, or credential exposure vectors directly and confidentially to:
+1. **Do NOT disclose unpatched security vulnerabilities in public GitHub issues or pull requests.**
+2. Report security vulnerabilities, memory safety concerns, or credential exposure vectors in `myf5-cli` confidentially via GitHub Security Advisories or directly to:
    - **Greg Robinson:** [g.robinson@f5.com](mailto:g.robinson@f5.com)
-3. For enterprise-wide F5 infrastructure or public service vulnerabilities affecting upstream services, report to F5 PSIRT:
+3. For F5 product or upstream cloud service vulnerabilities, report directly to the F5 Product Security Incident Response Team (F5 SIRT):
    - **Email:** [f5sirt@f5.com](mailto:f5sirt@f5.com) or [security@f5.com](mailto:security@f5.com)
    - **Security Portal:** [https://www.f5.com/company/policies/security-vulnerability-response-policy](https://www.f5.com/company/policies/security-vulnerability-response-policy)
 

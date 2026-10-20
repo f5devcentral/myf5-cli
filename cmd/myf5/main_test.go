@@ -82,15 +82,9 @@ func TestCaseCreateRequiredFields(t *testing.T) {
 	}
 }
 
-// Each product family is verified by a different entitlement identifier.
-// Both rules below were observed live on 2026-10-05:
-//
-//	BIG-IP without serialNumber   -> 400 "Serial Number,Product Family and
-//	                                      Product are required to create Case."
-//	NGINX  without subscriptionId -> 403 "Unable to verify Subscription..."
-//
-// Getting this wrong means demanding a serial number from an NGINX user who
-// does not have one, so it is pinned.
+// TestEntitlementFieldPerFamily verifies that each product family maps to the
+// entitlement identifier required by the MyF5 Support Case API (`serialNumber`
+// for BIG-IP/F5OS and `subscriptionId` for NGINX/Aspen Mesh).
 func TestEntitlementFieldPerFamily(t *testing.T) {
 	cases_ := map[string]string{
 		"BIG-IP":     "serialNumber",

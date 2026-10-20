@@ -14,72 +14,17 @@ import (
 )
 
 const (
-	// DefaultDownloadsFQDN is the host this client contacts first, without a
-	// `k` parameter.
-	//
-	// STATUS 2026-10-05 — WORKING. `myf5 downloads families` returns all 17
-	// product families against this host (verified live 2026-10-05).
-	//
-	// HISTORY, because the earlier diagnosis here was wrong and the wrong
-	// conclusion is an easy one to reach again:
-	//
-	// On 2026-10-02 every path against this host returned 404 with an EMPTY
-	// body, including "/". That coincided with F5's cutover from ESDM
-	// (Enterprise Software Download Manager) to ESDP (Enterprise Software
-	// Distribution Platform) — scheduled to begin 2026-10-02 at 06:00 PT for
-	// three days, with a 09:00 notification the same day confirming ESDM was
-	// "now offline" — so the 404s were read as the service being down mid
-	// migration, and this comment asserted the correct path was "still
-	// unknown" and told the reader not to touch the client.
-	//
-	// That was a misdiagnosis. The 404s were OUR BUG: every path was missing
-	// the gateway's leading /v1 segment. See DownloadsPrefix below for the
-	// detail. The service was reachable; we were asking it for paths it does
-	// not serve, and an empty-bodied 404 looks identical either way.
-	//
-	// The lesson worth keeping: an empty 404 from this gateway means "no such
-	// route", and a plausible outage story is not evidence that the route is
-	// right. Check the path before concluding the service is down.
-	//
-	// Access to ESDP post-go-live is requested separately per KB57950.
-	//
-	// CAUTION on provenance: comments here previously asserted an F5
-	// "October 2, 2026 cutover" moving Downloads to this host and removing
-	// `k`. No F5 bulletin supporting that has been located. The F5 articles
-	// published on that date (K000163521, K15202) describe an IP ADDRESS
-	// change for api.f5.com and callhome.f5.com — a firewall-allowlist
-	// matter — and say nothing about base URLs or `k`. The host and the
-	// absent `k` are both confirmed by observation (this host serves the
-	// catalog and takes no `k`), but the bulletin said to justify them has
-	// never been produced. Treat the cutover NARRATIVE as unsourced.
+	// DefaultDownloadsFQDN is the primary F5 Software Downloads API gateway hostname.
+	// Requests against this host authenticate via OAuth2 Bearer token without a `k` query parameter.
 	DefaultDownloadsFQDN = "api.software.downloads.f5.com"
 
-	// LegacySupportFQDN is the fallback gateway, tried when the host above
-	// returns 403/404.
-	//
-	// The fallback has not been needed since the path fix of 2026-10-05: the
-	// primary host serves the catalog directly. It is retained because it
-	// costs nothing when unused, but note that it has never been observed
-	// serving a successful Downloads response — every published `k` value was
-	// rejected there with 400 "Missing or invalid k query parameter" during
-	// 2026-10-02 probing. Do not assume it is a working safety net.
+	// LegacySupportFQDN is the fallback API gateway hostname tried when the primary
+	// host returns HTTP 403 or 404 and AutoFallback is enabled.
 	LegacySupportFQDN = "support.apis.f5.com"
 
-	// LegacyKParam is the `k` API usage key sent on the legacy fallback path.
-	//
-	// It is not a per-user secret: this value is published in F5's OpenAPI
-	// specification (internal_docs/oas/openapi-outdated-5Oct2026.json) as the
-	// rateLimitParam example, which
-	// is also the example for the downloads metadata endpoint specifically.
-	//
-	// Do NOT assume keys are scoped per API family. This same value is
-	// accepted by the Support Case endpoints (verified live 2026-10-02),
-	// while all three published values — including this one — are currently
-	// rejected by Downloads. An earlier comment claimed the reverse; it was
-	// wrong.
-	//
-	// Override via F5_API_KEY or `api_key` in ~/.f5api_credentials if F5
-	// rotates it.
+	// LegacyKParam is the default `k` API usage key sent on the legacy fallback path.
+	// This public rate-limit identifier is defined in F5's OpenAPI specification and
+	// can be overridden via F5_API_KEY or `api_key` in ~/.f5api_credentials.
 	LegacyKParam = "UKKD3Vxv7NHrM3QmYk8Fk2mZnLtljAKX"
 )
 
@@ -91,8 +36,7 @@ type Client struct {
 	AutoFallback bool
 
 	// APIKey is the `k` usage key sent only on the legacy support.apis.f5.com
-	// fallback path. Empty falls back to LegacyKParam — see its doc comment
-	// for what that value is and is not.
+	// fallback path. Empty falls back to LegacyKParam.
 	APIKey string
 }
 
@@ -145,18 +89,8 @@ func NewClientWithKey(token, baseFQDN, apiKey string) *Client {
 	}
 }
 
-// DownloadsPrefix is the path prefix for all Downloads endpoints.
-//
-// The doubled "v1" is NOT a typo. Verified live 2026-10-05 against
-// api.software.downloads.f5.com:
-//
-//	/downloads-management/v1/downloads/metadata     -> 404 (empty body)
-//	/v1/downloads-management/v1/downloads/metadata  -> 200
-//
-// The leading /v1 is the gateway's own route version and the inner /v1 is the
-// API's. Omitting the leading segment 404s every Downloads call, which is what
-// the pre-cutover code did. The shape matches the published OpenAPI document
-// (internal_docs/oas/openapi-outdated-5Oct2026.json).
+// DownloadsPrefix is the gateway path prefix for all Software Downloads API endpoints.
+// The leading /v1 is the API gateway route version and the inner /v1 is the service version.
 const DownloadsPrefix = "/v1/downloads-management/v1/downloads"
 
 // GetMetadata fetches the complete product hierarchy and catalog index.

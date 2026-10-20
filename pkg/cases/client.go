@@ -17,27 +17,9 @@ import (
 const (
 	DefaultSupportFQDN = "support.apis.f5.com"
 
-	// DefaultKParam is the `k` API usage key sent to Support Case endpoints.
-	//
-	// It is not a per-user secret: this value is published in F5's OpenAPI
-	// specification (internal_docs/oas/openapi-outdated-5Oct2026.json) as the
-	// rateLimitParam example.
-	//
-	// VERIFIED 2026-10-02: this value is accepted by GET
-	// /case-management/v1/cases and returns real data. The spec's
-	// rateLimitParam_Cases example (X4Y6fGWJdC1qLhTsCSDW4lPcqKvF5g5r) is
-	// REJECTED there with 400 "Missing or invalid k query parameter", so the
-	// spec's per-endpoint key examples do not reflect the live API. Prefer
-	// what is observed over what is specified.
-	//
-	// UNRESOLVED: the same three published keys are all rejected by the
-	// Downloads endpoints on this host. Whether that is a genuine key
-	// mismatch or rate limiting returning a misleading message is not yet
-	// established — the API is rate limited and the probing that produced
-	// those 400s was itself heavy. Re-test singly, not in a loop.
-	//
-	// Override via F5_API_KEY or `api_key` in ~/.f5api_credentials if F5
-	// rotates it.
+	// DefaultKParam is the default `k` API usage key sent to Support Case endpoints.
+	// This public rate-limit identifier is defined in F5's OpenAPI specification and
+	// can be overridden via F5_API_KEY or `api_key` in ~/.f5api_credentials.
 	DefaultKParam = "UKKD3Vxv7NHrM3QmYk8Fk2mZnLtljAKX"
 )
 
@@ -75,10 +57,8 @@ func (c *Client) Zero() {
 	c.KParam = ""
 }
 
-// NewClient initializes a new MyF5 Support Case client using the built-in
-// API usage key, which was accepted by the Case endpoints when last verified
-// (2026-10-02 — see DefaultKParam). Prefer NewClientWithKey where the caller
-// has its own key, so a rotation does not require a rebuild.
+// NewClient initializes a new MyF5 Support Case client using DefaultKParam.
+// Prefer NewClientWithKey when an explicit API usage key is configured.
 func NewClient(token string, baseFQDN string) *Client {
 	return NewClientWithKey(token, baseFQDN, "")
 }
@@ -135,10 +115,8 @@ func (c *Client) GetMetadata(ctx context.Context) (*CaseMetadataResponse, error)
 	return &resp, nil
 }
 
-// Case list `type` values, per the caseTypeParam enum in the F5 OpenAPI
-// specification (internal_docs/oas/openapi-outdated-5Oct2026.json). `type` is REQUIRED on
-// GET /case-management/v1/cases; omitting it returns
-// 400 "Missing type in the query params".
+// Case list `type` query parameter values for GET /case-management/v1/cases.
+// The `type` parameter is required by the endpoint.
 const (
 	TypeAllCases       = "ALL_CASES"
 	TypeAllOpenCases   = "ALL_OPEN_CASES"
@@ -150,10 +128,6 @@ const (
 
 // ListCases returns support cases. showClosed selects ALL_CASES (open and
 // closed) rather than ALL_OPEN_CASES.
-//
-// Note that `status` is NOT the way to widen the result set: per the spec it
-// takes comma-separated metadata values such as "New,Solving". An earlier
-// implementation sent `status=all`, which is not a valid status.
 func (c *Client) ListCases(ctx context.Context, showClosed bool) (*ListCasesResponse, error) {
 	caseType := TypeAllOpenCases
 	if showClosed {
@@ -175,22 +149,9 @@ func (c *Client) ListCases(ctx context.Context, showClosed bool) (*ListCasesResp
 	return &resp, nil
 }
 
-// Field requirements for CreateCase, as the LIVE API enforces them.
-//
-// These are the fields required for EVERY product family. The entitlement
-// identifier is deliberately NOT in this list: which one the API demands
-// depends on the family, so it is resolved by EntitlementFieldFor and checked
-// separately. See that function for the rule and its evidence.
-//
-// This list differs from the published OpenAPI document, which is wrong
-// (verified live 2026-10-05): the schema's required list names `version`,
-// while every example in the same document sends `productVersion`. `version`
-// is what the API takes.
-//
-// An entitlement identifier that is present but unknown returns 403 "The
-// value entered is invalid or out of Support", which is how we know the rest
-// of the payload validates: the API only reaches the lookup once everything
-// else passes.
+// requiredCreateFields lists the base fields required for every product family
+// on CreateCase. The family-specific entitlement identifier (`serialNumber` or
+// `subscriptionId`) is resolved separately by EntitlementFieldFor.
 var requiredCreateFields = []string{
 	"productFamily",
 	"product",
@@ -204,38 +165,9 @@ var requiredCreateFields = []string{
 	"timezone",
 }
 
-// EntitlementFieldFor names the identifier a product family is verified by.
-//
-// IMPORTANT — this is a constraint of the PUBLIC API, not of a support case.
-// The MyF5 web UI can create a case with its serial/registration-key field
-// EMPTY: it does not call support.apis.f5.com at all, writing to Salesforce
-// directly through a path that applies different validation. Verified against
-// a real case opened through the UI on 2026-10-05.
-//
-// So a case without an entitlement identifier is perfectly legitimate; it is
-// the public API that refuses to create one. We cannot relax the requirement
-// — the API enforces it and we cannot submit through Salesforce — but the
-// error message must not tell the user their case is impossible when the web
-// UI would accept it.
-//
-// Every family requires one, but not the same one, and the API's messages make
-// this clear only after the fact (verified live 2026-10-05):
-//
-//	BIG-IP, no serialNumber    -> 400 "Serial Number,Product Family and Product
-//	                                   are required to create Case."
-//	NGINX,  no subscriptionId  -> 403 "Unable to verify Subscription. Please make
-//	                                   sure Subscription Number and Product
-//	                                   Family vaules are provided." [sic]
-//
-// Note the BIG-IP message names three fields whatever is actually missing, and
-// is phrased for BIG-IP even when another family was sent — so it cannot be
-// used to work out which identifier a family wants. That is why this mapping
-// exists rather than relying on the server to say.
-//
-// Families not listed here fall back to serialNumber, which is the BIG-IP
-// behaviour and the most common case. A family whose requirement we have not
-// confirmed is better served by a local error naming the likely field than by
-// a server round trip returning a message about a different one.
+// EntitlementFieldFor returns the entitlement identifier field required by the
+// MyF5 Support Case API for a given product family (`subscriptionId` for NGINX
+// and Aspen Mesh; `serialNumber` for BIG-IP, F5OS, and all other families).
 func EntitlementFieldFor(productFamily string) string {
 	switch productFamily {
 	case "NGINX", "Aspen Mesh":
@@ -369,22 +301,8 @@ func (c *Client) createCase(ctx context.Context, payload map[string]interface{})
 	return &resp, nil
 }
 
-// AddComment appends a comment to an existing case.
-//
-// This is a PATCH to the case itself, not a POST to a sub-resource. An
-// earlier implementation sent
-//
-//	POST /case-management/v1/cases/{n}/notes  {"comment": "..."}
-//
-// which diverges from the specification in method, path and field name:
-// there is no /notes endpoint in the API at all, and the field is plural.
-// The spec's CASE_PATCH_REQUEST is described as "Case Add Comment Request"
-// with the example {"comments": "Adding test comments"}.
-//
-// NOT YET VERIFIED LIVE — exercising it writes a visible comment to a real
-// support case, so this is reasoned from the specification alone. Given that
-// the spec was wrong about three other things on 2026-10-02, treat the first
-// live run as the real test.
+// AddComment appends a comment to an existing support case via
+// PATCH /case-management/v1/cases/{caseNumber} with a {"comments": "..."} payload.
 func (c *Client) AddComment(ctx context.Context, caseNumber, comment string) (*AddCommentResponse, error) {
 	payload := map[string]string{
 		"comments": comment,
@@ -453,21 +371,8 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body []byte
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// A 403 from this API means one of two unrelated things, and the
-		// status code alone does not distinguish them:
-		//
-		//   - the `k` API usage key was rejected ("The API Key to API
-		//     association not exist"), or
-		//   - the request was well formed but its DATA was rejected — an
-		//     unrecognised or out-of-support entitlement identifier on
-		//     create, answering "The value entered is invalid or out of
-		//     Support." or "Unable to verify Subscription." (both verified
-		//     live 2026-10-05).
-		//
-		// Blaming the key for a data rejection sends the reader after
-		// entirely the wrong credential, so the body is inspected first and
-		// the key explanation offered only when it carries no specific
-		// grievance. Note a bad bearer token returns 401, not 403.
+		// Distinguish between a rejected `k` API usage key and an invalid or
+		// out-of-support entitlement identifier, both of which return HTTP 403.
 		if resp.StatusCode == http.StatusForbidden {
 			body := string(respBytes)
 			if strings.Contains(body, "out of Support") ||

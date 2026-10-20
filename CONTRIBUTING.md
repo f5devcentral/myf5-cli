@@ -1,9 +1,8 @@
 # Contributing to `myf5-cli`
 
-> [!IMPORTANT]
-> **INTERNAL ENTERPRISE TOOL:** `SalesAmerSP/myf5-cli` is an internal automation tool solely authored and maintained by **Greg Robinson** ([`g.robinson@f5.com`](mailto:g.robinson@f5.com)) for F5 Service Provider Sales Americas. This repository is strictly proprietary and confidential and can **NEVER** be made public. External contributions are not accepted.
+Thank you for your interest in contributing to `myf5-cli`! This document outlines development environment setup, coding standards, security requirements, testing procedures, and the pull request workflow.
 
-This document outlines environment setup, coding standards, testing requirements, and pull request procedures for internal F5 contributors.
+By submitting a contribution to this repository, you agree that your contribution is licensed under the [Apache License, Version 2.0](LICENSE).
 
 ---
 
