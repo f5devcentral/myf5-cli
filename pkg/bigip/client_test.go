@@ -47,8 +47,8 @@ func TestBaseURLAndURLNormalization(t *testing.T) {
 		wantBase  string
 	}{
 		{"10.1.1.4", 443, "https://10.1.1.4"},
-		{"https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com/", 443, "https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com"},
-		{"aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com", 443, "https://aa68f6ba-a751-4740-9382-85f7cd7940f2.access.udf.f5.com"},
+		{"https://00000000-0000-0000-0000-000000000000.access.udf.f5.com/", 443, "https://00000000-0000-0000-0000-000000000000.access.udf.f5.com"},
+		{"00000000-0000-0000-0000-000000000000.access.udf.f5.com", 443, "https://00000000-0000-0000-0000-000000000000.access.udf.f5.com"},
 		{"http://127.0.0.1:8080", 8080, "http://127.0.0.1:8080"},
 		{"10.1.1.4:8443", 0, "https://10.1.1.4:8443"},
 		{"https://bigip.lab.local:8443/", 0, "https://bigip.lab.local:8443"},

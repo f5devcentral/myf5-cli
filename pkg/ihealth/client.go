@@ -28,25 +28,12 @@ const (
 	// PrimaryIHealthFQDN represents the primary authoritative iHealth API gateway hostname.
 	PrimaryIHealthFQDN = "ihealth-api.f5.com"
 
-	// QKViewsPath is the QKView collection path.
-	//
-	// There is NO version segment. An earlier value of
-	// "/qkview-analyzer/api/v1/qkviews" returned
-	//   404 "The requested resource is not available"
-	// because the API versions by Accept header, not by URL path
-	// (K000130498).
+	// QKViewsPath is the QKView collection path. The iHealth API versions via
+	// the Accept header rather than a URL path segment (K000130498).
 	QKViewsPath = "/qkview-analyzer/api/qkviews"
 
-	// IHealthAccept is the vendor media type the iHealth API requires, with
-	// the +json suffix.
-	//
-	// The suffix is NOT optional. Verified live 2026-10-02: the bare
-	// "application/vnd.f5.ihealth.api" returns 200 with an XML body
-	//   <?xml version="1.0"...?><qkview_ids><id>26894783</id></qkview_ids>
-	// which fails to decode with
-	//   invalid character '<' looking for beginning of value
-	// The API selects its representation from this header, so the suffix is
-	// what asks for JSON.
+	// IHealthAccept is the vendor media type required by the iHealth API to
+	// negotiate a JSON response payload rather than XML.
 	IHealthAccept = "application/vnd.f5.ihealth.api+json"
 )
 

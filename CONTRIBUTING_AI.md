@@ -29,19 +29,11 @@ weaken that check to make a command easier to call.
 Never print, log or commit a credential value. Every client type redacts via
 `String()` / `GoString()` — keep it that way.
 
-## The published API spec is not reliable
+## API Endpoint Verification
 
-F5's published OpenAPI document disagrees with the running API in several
-places and is updated last in any migration. **Test against the service before
-changing code to match a document.** A live response beats a specification.
+When modifying or extending API client paths, always verify request routes and response schemas against the live API endpoints (`myf5 doctor`, `myf5 cases list`, `myf5 downloads families`). Note that an empty-bodied HTTP `404` from the API gateway typically indicates an unmatched route path (for example, omitting the leading `/v1` gateway prefix) rather than a service outage.
 
-The inverse also holds: a 404 is not proof that a service is down. An
-empty-bodied 404 from the F5 gateway means "no such route", which is
-indistinguishable from a dead host. Verify the path first.
+## Rate Limiting
 
-## Rate limit
-
-Roughly **10 requests per minute**. Exceeding it returns 429 with a
-gateway-shaped `{"errors":[...]}` body, which looks different from the
-application's own error envelope. Space out probing.
+MyF5 Cloud API endpoints enforce a rate limit of approximately **10 requests per minute**. Exceeding the threshold returns HTTP `429 Too Many Requests`. Space out automated diagnostic queries and rely on the built-in client backoff logic.
 

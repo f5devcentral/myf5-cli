@@ -39,13 +39,7 @@ var ValidPriorities = []string{
 	PriorityGeneralAssistance,
 }
 
-// CaseSummary represents a brief overview of an F5 support case.
-//
-// Field tags follow GetCaseApiResponse in the F5 OpenAPI specification
-// (internal_docs/oas/openapi-outdated-5Oct2026.json). Two earlier tags matched nothing in
-// the payload and so
-// always decoded as empty: `severity` (the API returns `priority`, e.g.
-// "2 - Site At Risk") and `createdDate` (the API returns `dateOpened`).
+// CaseSummary represents a brief overview of an F5 support case returned by the list endpoint.
 type CaseSummary struct {
 	CaseNumber string `json:"caseNumber"`
 	Subject    string `json:"subject"`
@@ -100,12 +94,7 @@ type CaseEmailActivity struct {
 	} `json:"activityContact"`
 }
 
-// CaseDetail is a single case from GET /case-management/v1/cases/{caseNumber}.
-//
-// NOTE: `dateOpened` previously returned the priority string due to an
-// Apigee transform defect (observed 2026-10-05). F5 resolved this on
-// 2026-10-08; it now reliably returns the case creation timestamp (e.g.,
-// "10/05/2026 22:03:28") matching the list endpoint.
+// CaseDetail represents a single support case returned by GET /case-management/v1/cases/{caseNumber}.
 type CaseDetail struct {
 	CaseNumber       string `json:"caseNumber"`
 	Subject          string `json:"subject"`

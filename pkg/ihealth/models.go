@@ -5,14 +5,8 @@ import (
 	"time"
 )
 
-// QKViewSummary represents a QKView record uploaded to iHealth.
-//
-// This is the CLI's own view, assembled from the API's detail resource; it is
-// not decoded directly from a response. The field names the API actually uses
-// are on qkviewDetail below — several differ from what this struct once
-// declared (`file_name` not `filename`, `gui_uri` not `gui_url`,
-// `f5_support_case` not `case_number`), and none of them appear on the
-// collection endpoint at all.
+// QKViewSummary represents a QKView record uploaded to iHealth, assembled from
+// the API's detail resource.
 type QKViewSummary struct {
 	ID          string `json:"id"`
 	FileName    string `json:"filename,omitempty"`
@@ -25,8 +19,7 @@ type QKViewSummary struct {
 	FileSize    int64  `json:"file_size,omitempty"`
 }
 
-// qkviewDetail mirrors GET /qkview-analyzer/api/qkviews/{id} as the live API
-// returns it (verified 2026-10-02).
+// qkviewDetail mirrors the JSON payload returned by GET /qkview-analyzer/api/qkviews/{id}.
 type qkviewDetail struct {
 	FileName          string `json:"file_name"`
 	Description       string `json:"description"`
