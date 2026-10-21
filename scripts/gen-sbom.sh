@@ -34,7 +34,6 @@ components=$(awk '
   $1=="dep" {
     path=$2; ver=$3; hash=(NF>=4 ? $4 : "")
     purl="pkg:golang/" path "@" ver
-    gsub(/\//,"%2F",purl_enc)
     printf "%s\t%s\t%s\t%s\n", path, ver, hash, purl
   }' <<<"$meta")
 
@@ -45,13 +44,14 @@ components=$(awk '
   printf '  "version": 1,\n'
   printf '  "metadata": {\n'
   printf '    "timestamp": "%s",\n' "$now"
-  printf '    "tools": [{"name": "gen-sbom.sh", "vendor": "myf5-cli", "version": "1.0.0"}],\n'
+  printf '    "tools": [{"name": "gen-sbom.sh", "vendor": "myf5-cli", "version": "1.1.0"}],\n'
   printf '    "component": {\n'
   printf '      "type": "application",\n'
   printf '      "bom-ref": "pkg:golang/%s@%s",\n' "$main_mod" "$main_ver"
   printf '      "name": "%s",\n' "$main_mod"
   printf '      "version": "%s",\n' "$main_ver"
   printf '      "purl": "pkg:golang/%s@%s",\n' "$main_mod" "$main_ver"
+  printf '      "licenses": [{"license": {"id": "Apache-2.0"}}],\n'
   printf '      "properties": [\n'
   printf '        {"name": "go:version", "value": "%s"},\n' "$goversion"
   printf '        {"name": "vcs:revision", "value": "%s"}\n' "$revision"
@@ -71,6 +71,9 @@ components=$(awk '
     printf '      "name": "%s",\n' "$path"
     printf '      "version": "%s",\n' "$ver"
     printf '      "purl": "%s",\n' "$purl"
+    if [[ "$path" == golang.org/x/* ]]; then
+      printf '      "licenses": [{"license": {"id": "BSD-3-Clause"}}],\n'
+    fi
     printf '      "scope": "required"'
     if [ -n "$hash" ]; then
       # Go's h1: hash is a base64 SHA-256 of the module's file tree, not a

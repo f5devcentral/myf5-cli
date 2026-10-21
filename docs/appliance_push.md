@@ -166,18 +166,13 @@ myf5 bigip push 192.0.2.10 /var/tmp/BIGIP-17.1.1-0.0.6.iso \
     --method scp
 ```
 
-#### TMOS Post-Push Software Installation
-Once the file transfer completes, access the appliance via TMSH or SSH to trigger the installation:
+#### Verifying the Staged Software Image
+Once the file transfer completes, you can verify that TMOS detected the staged ISO in `/shared/images`:
 ```bash
-# Verify the image is present in /shared/images
+# Verify the image is present and recognized in /shared/images
 tmsh list sys software image BIGIP-17.1.1-0.0.6.iso
-
-# Install to a new software volume (e.g., HD1.2)
-tmsh install sys software image BIGIP-17.1.1-0.0.6.iso volume HD1.2 create-volume
-
-# Monitor installation status
-tmsh show sys software status
 ```
+> **Scope Note:** `myf5` handles software downloads and staging/transfer to the appliance. Installing images onto boot volumes, activating boot locations, or triggering upgrade reboots is managed outside `myf5` via orchestration tooling (e.g., Ansible, Terraform) or standard TMOS administrative maintenance workflows.
 
 ---
 
@@ -192,10 +187,10 @@ myf5 bigip push 192.0.2.10 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso \
     --identity ~/.ssh/f5_deploy_ed25519
 ```
 
-#### TMOS Hotfix Installation Command
+#### Verifying the Staged Hotfix
 ```bash
-# Install hotfix on top of target volume
-tmsh install sys software hotfix Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso volume HD1.2
+# Verify the hotfix image is recognized by TMOS
+tmsh list sys software hotfix Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso
 ```
 
 ---

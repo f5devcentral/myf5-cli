@@ -40,15 +40,10 @@ func TestAuthenticate(t *testing.T) {
 	}
 }
 
-// The audience names the resource server a token is for, and a client is only
-// authorized for audiences it holds a grant on. Sending the MyF5 audience with
-// iHealth credentials fails with 403 "not authorized to access resource
-// server"; sending scope=ihealth fails with 403 "has not been granted scopes".
-// Per F5 article K000130498 an iHealth token request carries
-// audience=api://ciam-api-ihealth and NO scope.
-//
-// TestAuthenticate above never reads the request body, so neither mistake was
-// visible to it. These assert the form fields actually transmitted.
+// TestAuthenticateAudienceSelection verifies that the token request form payload
+// transmits the expected audience and scope for both MyF5 and iHealth clients.
+// Per F5 article K000130498, an iHealth token request carries
+// audience=api://ciam-api-ihealth and omits scope.
 func TestAuthenticateAudienceSelection(t *testing.T) {
 	cases := []struct {
 		name         string

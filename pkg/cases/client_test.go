@@ -22,10 +22,8 @@ func TestListCases(t *testing.T) {
 			t.Errorf("unexpected auth header: %s", r.Header.Get("Authorization"))
 		}
 
-		// `type` is REQUIRED by the spec. Omitting it returns
-		// 400 "Missing type in the query params" from the real API, but this
-		// test server answered 200 regardless, so the bug shipped. Assert the
-		// request the API actually demands, not merely that one was made.
+		// `type` is required by the Case Management API. Omitting it returns
+		// 400 "Missing type in the query params" from the service.
 		if got := r.URL.Query().Get("type"); got != TypeAllOpenCases {
 			t.Errorf("type = %q, want %q", got, TypeAllOpenCases)
 		}
@@ -130,14 +128,9 @@ func TestListCasesDecodesLiveFieldNames(t *testing.T) {
 	}
 }
 
-// A 2xx carrying isError:true is a FAILURE, not an empty result.
-//
-// The Case API reports failure in the body as well as by status code, and the
-// two do not always agree. Before the envelope was modelled on these types, a
-// body-reported failure decoded as a successful response with no data — so
-// `cases list` printed a cheerful empty list and `cases metadata` reported
-// "0 root keys" when the call had actually failed. Silent wrong answers are
-// worse than errors, so each read path is pinned here.
+// TestBodyReportedErrorsBecomeErrors verifies that a 2xx response carrying
+// isError:true in the JSON envelope is surfaced as an error rather than
+// decoded as an empty result.
 func TestBodyReportedErrorsBecomeErrors(t *testing.T) {
 	const payload = `{"status":"Error","message":"Something went wrong upstream","isError":true,"data":null}`
 

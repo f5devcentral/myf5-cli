@@ -166,10 +166,9 @@ func (c *Client) GetFileLinks(ctx context.Context, family, line, version, contai
 // If BaseFQDN returns 403 or 404, it automatically falls back to
 // support.apis.f5.com with 'k'.
 //
-// Note that a 404 from the primary host is far more likely to be a wrong path
-// than an unavailable service — that is what the missing leading /v1 produced
-// for three days. The fallback will not rescue a malformed path: it sends the
-// same path to a different host.
+// Note that a 404 from the primary host may indicate an invalid request path
+// rather than an unavailable service; the fallback sends the same path to the
+// legacy host.
 func (c *Client) doGetWithFallback(ctx context.Context, path string) ([]byte, error) {
 	scheme := "https"
 	fqdn := c.BaseFQDN
@@ -231,7 +230,7 @@ func (c *Client) doLegacyFallback(ctx context.Context, path string) ([]byte, err
 		}
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 		req.Header.Set("Accept", "application/json")
-		req.Header.Set("User-Agent", "myf5-cli-go/1.0.0 (Pre-Cutover Fallback)")
+		req.Header.Set("User-Agent", "myf5-cli-go/1.0.0 (Legacy Fallback)")
 
 		resp, err := c.HTTPClient.Do(req)
 		if err != nil {
