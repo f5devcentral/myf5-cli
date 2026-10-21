@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "Security Vulnerability Disclosure"
+    url: "https://github.com/SalesAmerSP/myf5-cli/blob/main/SECURITY.md"
+    about: "Report security vulnerabilities directly to F5 PSIRT and maintainers."
+  - name: "F5 Network & Firewall Architecture Guide"
+    url: "https://github.com/SalesAmerSP/myf5-cli/blob/main/docs/network_and_firewall.md"
+    about: "Review required firewall egress and DNS endpoints for MyF5 APIs."

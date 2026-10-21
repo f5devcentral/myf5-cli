@@ -1,0 +1,117 @@
+name: "Automated Cross-Compilation & Release"
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  cross-compile:
+    name: Compile for ${{ matrix.target_os }}/${{ matrix.target_arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target_os: linux
+            target_arch: amd64
+            binary_name: myf5-linux-amd64
+          - target_os: linux
+            target_arch: arm64
+            binary_name: myf5-linux-arm64
+          - target_os: darwin
+            target_arch: amd64
+            binary_name: myf5-darwin-amd64
+          - target_os: darwin
+            target_arch: arm64
+            binary_name: myf5-darwin-arm64
+          - target_os: windows
+            target_arch: amd64
+            binary_name: myf5-windows-amd64.exe
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "stable"
+          cache: true
+
+      - name: Build Static Binary
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.target_os }}
+          GOARCH: ${{ matrix.target_arch }}
+          VERSION_TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          go build -trimpath -ldflags="-s -w -X main.Version=${VERSION_TAG}" -o dist/${{ matrix.binary_name }} ./cmd/myf5
+
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.binary_name }}
+          path: dist/${{ matrix.binary_name }}
+
+  publish-release:
+    name: Generate Checksums & Publish GitHub Release
+    needs: cross-compile
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Download All Compiled Binaries
+        uses: actions/download-artifact@v8
+        with:
+          path: release-binaries
+          merge-multiple: true
+
+      - name: Calculate SHA-256 Checksums
+        working-directory: release-binaries
+        run: |
+          chmod +x myf5-* 2>/dev/null || true
+          sha256sum myf5-* > checksums.txt
+          cat checksums.txt
+
+      # The SBOM is read back out of the compiled binary rather than from
+      # go.mod: Go stamps the module graph, versions and h1: hashes into the
+      # binary, and only the modules actually linked appear there. go.mod
+      # lists golang.org/x/net and golang.org/x/text as transitive
+      # requirements that no reachable code imports, so a go.mod-derived SBOM
+      # would claim this release ships code it does not contain.
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: stable
+
+      - name: Generate SBOM
+        run: |
+          ./scripts/gen-sbom.sh release-binaries/myf5-linux-amd64 release-binaries/sbom.json
+          cat release-binaries/sbom.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: "myf5-cli ${{ github.ref_name }} — Release"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            release-binaries/myf5-darwin-arm64
+            release-binaries/myf5-darwin-amd64
+            release-binaries/myf5-linux-amd64
+            release-binaries/myf5-linux-arm64
+            release-binaries/myf5-windows-amd64.exe
+            release-binaries/checksums.txt
+            release-binaries/sbom.json
