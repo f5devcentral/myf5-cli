@@ -25,18 +25,17 @@ In accordance with enterprise DevSecOps standards, **passing credentials or toke
 | :--- | :--- |
 | [`downloads`](#1-myf5-downloads) | Browse the MyF5 software catalog and stream multi-GB images |
 | [`cases`](#2-myf5-cases) | Inspect, query, and comment on MyF5 support cases |
-| [`wizard`](#11-myf5-wizard) | Interactive guided support case creation wizard with live appliance auto-fill |
+| [`wizard`](#10-myf5-wizard) | Interactive guided support case creation wizard with live appliance auto-fill |
 | [`ihealth`](#3-myf5-ihealth) | Upload and audit QKView diagnostic bundles on F5 iHealth |
-| [`bigip`](#4-myf5-bigip) | Orchestrate BIG-IP TMOS appliances (readiness, QKView generation, push, GeoIP) |
-| [`bigiq`](#5-myf5-bigiq) | Orchestrate BIG-IQ Centralized Management appliances (readiness, push) |
+| [`bigip`](#4-myf5-bigip) | Orchestrate BIG-IP TMOS appliances (readiness, info, serial, QKView generation, push, GeoIP) |
+| [`bigiq`](#5-myf5-bigiq) | Orchestrate BIG-IQ Centralized Management appliances (readiness, info, serial, push, download) |
 | [`push`](#6-myf5-push) | Push downloads or files to BIG-IP / BIG-IQ via iControl REST or SCP |
 | [`pull`](#7-myf5-pull) | Pull files or diagnostics from BIG-IP / BIG-IQ via iControl REST or SCP |
-| [`geoip`](#12-myf5-geoip) | Apply GeoIP updates directly to BIG-IP appliances (alias: `bigip geoip`) |
-| [`proxy`](#13-myf5-proxy) | View or configure HTTP/HTTPS/SOCKS5 outbound egress proxy |
+| [`geoip`](#11-myf5-geoip) | Apply GeoIP updates directly to BIG-IP appliances (alias: `bigip geoip`) |
+| [`proxy`](#12-myf5-proxy) | View or configure HTTP/HTTPS/SOCKS5 outbound egress proxy |
 | [`doctor`](#8-myf5-doctor) | Run connectivity, DNS, egress, and credential diagnostics |
-| [`interactive`](#14-myf5-interactive) | Launch interactive REPL shell with tab completion (`shell`, `repl`) |
-| [`completion`](#9-myf5-completion) | Generate native shell autocompletion scripts (`bash`, `zsh`, `fish`) |
-| [`version`](#10-myf5-version) | Display application version and toolchain info |
+| [`interactive`](#13-myf5-interactive-alias-shell-repl) | Launch interactive REPL shell with tab completion (`shell`, `repl`, `i`) |
+| [`version`](#9-myf5-version) | Display application version and toolchain info |
 
 ---
 
@@ -309,6 +308,18 @@ Checks BIG-IQ management plane availability against `/mgmt/tm/sys/ready` or `/mg
 myf5 bigiq ready 192.0.2.50
 ```
 
+#### `info <host> [--user <user>] [--port <port>] [--json]`
+Inspects a live BIG-IQ appliance to extract system version, edition, build, platform model, and serial number.
+```bash
+myf5 bigiq info 192.0.2.50 --user admin
+```
+
+#### `serial <host> [--user <user>] [--port <port>] [--json]`
+Retrieves and prints the BIG-IQ system serial number.
+```bash
+myf5 bigiq serial 192.0.2.50 --user admin
+```
+
 #### `push <host> <file> [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>]`
 Uploads software images, hotfixes, or files to BIG-IQ central software repositories with automatic failover.
 ```bash
@@ -396,36 +407,7 @@ Output audits:
 
 ---
 
-## 9. `myf5 completion`
-
-Generates tab autocompletion scripts for the specified shell.
-
-```bash
-myf5 completion [bash | zsh | fish]
-```
-
-### Examples
-
-```bash
-# Zsh (current session)
-source <(myf5 completion zsh)
-
-# Zsh (persistent configuration)
-myf5 completion zsh > "${fpath[1]}/_myf5"
-
-# Bash (current session)
-source <(myf5 completion bash)
-
-# Bash (persistent on Linux)
-myf5 completion bash | sudo tee /etc/bash_completion.d/myf5 > /dev/null
-
-# Fish (persistent)
-myf5 completion fish > ~/.config/fish/completions/myf5.fish
-```
-
----
-
-## 10. `myf5 version`
+## 9. `myf5 version`
 
 Prints the compiled application version and target architecture.
 ```bash
@@ -434,7 +416,7 @@ myf5 version
 
 ---
 
-## 11. `myf5 wizard`
+## 10. `myf5 wizard`
 
 Top-level alias for `myf5 cases wizard`. Launches an interactive, multi-step terminal wizard to guide you through creating an F5 Support Case with zero memorization of product schema strings:
 
@@ -451,7 +433,7 @@ myf5 wizard
 
 ---
 
-## 12. `myf5 geoip`
+## 11. `myf5 geoip`
 
 Top-level alias for `myf5 bigip geoip`. Uploads, unpacks, installs, and reloads F5 GeoIP database packages directly on a BIG-IP appliance in a single automated command:
 
@@ -468,7 +450,7 @@ myf5 geoip <host> <zip-path> [--keep-extracted] [--method auto|icontrol|scp] [--
 
 ---
 
-## 13. `myf5 proxy`
+## 12. `myf5 proxy`
 
 Manage outbound HTTP, HTTPS, and SOCKS5 proxy settings for routing API traffic through corporate forward proxies, bastion hosts, or air-gapped jump boxes.
 
@@ -490,28 +472,35 @@ If no `--proxy` flag or persistent configuration is found, `myf5` respects `MYF5
 
 ---
 
-## 14. `myf5 interactive` (alias: `shell`, `repl`)
+## 13. `myf5 interactive` (alias: `shell`, `repl`, `i`)
 
-Launches an interactive Read-Eval-Print-Loop (REPL) shell environment with built-in tab autocompletion, command history, and session state:
+Launches an interactive Read-Eval-Print-Loop (REPL) shell environment with built-in `TAB` autocompletion, command history, and session state (also launched automatically when invoking `myf5` with no arguments in an interactive terminal TTY):
 
 ```bash
 myf5 interactive
 # Or shortcuts:
 myf5 shell
 myf5 repl
+myf5 i
 ```
+
+### Interactive Features:
+- **Built-In `TAB` Autocompletion**: Press `TAB` at the `myf5>` prompt to autocomplete primary commands (`downloads`, `cases`, `wizard`, `ihealth`, `bigip`, `bigiq`, `push`, `pull`, `geoip`, `proxy`, `doctor`, `interactive`, `version`, `help`, `clear`, `exit`, `quit`), subcommands, and command-specific flags.
+- **In-Process Command Isolation**: Failed commands or `Ctrl+C` interrupts cancel only the active command and return cleanly to the `myf5>` prompt without terminating your interactive session.
+- **Built-In Shell Commands**: Type `clear` / `cls` to clear the terminal screen, or `exit` / `quit` / `q` (or `Ctrl+D`) to exit.
 
 Within the interactive shell, execute commands directly without the `myf5` prefix:
 ```
 myf5> doctor
 myf5> downloads families
 myf5> cases list
+myf5> bigip info 10.1.1.4
 myf5> exit
 ```
 
 ---
 
-## 15. Signal Handling & Interruption Safety (CTRL+C)
+## 14. Signal Handling & Interruption Safety (CTRL+C)
 
 All long-running network connections, streaming file transfers, and appliance operations in `myf5-cli` implement robust interrupt and cancellation handling:
 - **Clean Signal Traps**: Intercepts `SIGINT` (Ctrl+C) and `SIGTERM` via isolated command contexts (`signal.NotifyContext`).
@@ -521,7 +510,7 @@ All long-running network connections, streaming file transfers, and appliance op
 
 ---
 
-## 16. Process Exit Codes
+## 15. Process Exit Codes
 
 `myf5` returns standard POSIX exit codes to support reliable shell script branching and CI/CD pipelines:
 

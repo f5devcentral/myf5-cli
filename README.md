@@ -45,12 +45,16 @@ myf5-cli/
 │   ├── ihealth/                # F5 iHealth QKView multipart upload and status client
 │   ├── bigip/                  # BIG-IP & BIG-IQ client (iControl REST chunking, bash promotion, native SCP, failover)
 │   │   ├── client.go           # Appliance HTTP client, readiness, QKView automation, REST download
+│   │   ├── info.go             # TMOS system, platform, and chassis serial inspection
 │   │   ├── upload.go           # iControl REST chunked file transfer & bash promotion
 │   │   ├── scp.go              # Native Go SCP streaming (upload & download) over SSH
 │   │   ├── geoip.go            # TMOS GeoIP extraction, RPM installation, and reload engine
 │   │   ├── lifecycle.go        # TMOS software (K5903) and hardware (K4309 / K13144) lifecycle evaluation
 │   │   └── failover.go         # Dual-protocol automatic failover engine
-│   └── completion/             # Zero-dependency shell tab completion generator (bash, zsh, fish)
+│   ├── logger/                 # Structured audit & debug logging with automatic secret scrubbing
+│   └── progress/               # Terminal progress bar and spinner rendering
+├── scripts/
+│   └── gen-sbom.sh             # CycloneDX 1.5 SBOM generator with SPDX license metadata
 ├── .github/
 │   ├── workflows/              # GitHub Actions CI, Release, and Security workflows
 │   ├── ISSUE_TEMPLATE/         # Structured Bug Report & Feature Request templates
@@ -61,7 +65,6 @@ myf5-cli/
 │   ├── appliance_push.md       # Appliance software deployment, hotfix, and GeoDB push guide
 │   ├── downloads.md            # Downloads catalog taxonomy, GeoDB automation & direct push
 │   ├── credentials.md          # Zero-Secret policy & credential management
-│   ├── shell_completion.md     # Shell tab autocompletion guide (zsh, bash, fish)
 │   └── network_and_firewall.md # Egress firewall rules, proxy routing, and cloud endpoint architecture
 ├── Makefile                    # Developer build, test, and release automation
 ├── SECURITY.md                 # Security & vulnerability reporting policy
@@ -261,6 +264,12 @@ Works with local management IPs, lab appliances, or cloud/UDF external access pr
 # Check BIG-IQ management plane readiness
 ./bin/myf5 bigiq ready 192.0.2.50
 
+# Inspect BIG-IQ system version, edition, and build details
+./bin/myf5 bigiq info 192.0.2.50 --user admin
+
+# Retrieve BIG-IQ chassis/system serial number
+./bin/myf5 bigiq serial 192.0.2.50 --user admin
+
 # Push software ISO to BIG-IQ central repository (auto failover)
 ./bin/myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --dest /shared/images
 
@@ -318,30 +327,20 @@ Launch a guided terminal interface that validates input at every step:
 - Multiline description text buffer supports live editing with undo (`Ctrl+Z`) and redo (`Ctrl+Y`).
 - Pre-submission dry-run safety review ensures you never open an accidental case against production.
 
-### 11. Interactive Console REPL
-Launch an interactive shell session for continuous operation without repeated binary invocations:
+### 11. Interactive Console REPL & Tab Completion
+Launch an interactive Read-Eval-Print-Loop (REPL) shell with built-in `TAB` autocompletion (for commands, subcommands, and flags), command history, and isolated per-command `Ctrl+C` handling:
 ```bash
 ./bin/myf5 interactive
+# Or aliases (or invoke `./bin/myf5` with no arguments in a terminal TTY):
+./bin/myf5 shell
+./bin/myf5 repl
 ```
-
-### 12. Shell Tab Autocompletion (`bash`, `zsh`, `fish`)
-Enable fast tab autocompletion for commands, subcommands, flags, and product families:
-
-```bash
-# Zsh (current session)
-source <(myf5 completion zsh)
-
-# Zsh (persistent setup)
-myf5 completion zsh > "${fpath[1]}/_myf5"
-
-# Bash (current session)
-source <(myf5 completion bash)
-
-# Bash (persistent setup on Linux)
-myf5 completion bash | sudo tee /etc/bash_completion.d/myf5 > /dev/null
-
-# Fish (persistent setup)
-myf5 completion fish > ~/.config/fish/completions/myf5.fish
+Within the interactive shell, run commands directly without the `myf5` prefix and press `TAB` at any prompt to autocomplete commands, subcommands, or flags:
+```text
+myf5> doctor
+myf5> downloads families
+myf5> bigip info 10.1.1.4
+myf5> exit
 ```
 
 ---
@@ -393,7 +392,6 @@ myf5 completion fish > ~/.config/fish/completions/myf5.fish
 | **[Appliance Push & Deployment Guide](docs/appliance_push.md)** | Direct streaming of ISOs, hotfixes, and GeoDB updates to BIG-IP and BIG-IQ via iControl REST and SCP. |
 | **[MyF5 Downloads & GeoDB Guide](docs/downloads.md)** | Catalog hierarchy, automated GeoDB updates, and end-to-end download & push workflows. |
 | **[Zero-Secret Security Architecture](docs/credentials.md)** | Process isolation, credentials file permissions, SSH keys, and environment setup. |
-| **[Shell Tab Autocompletion](docs/shell_completion.md)** | Setup instructions and completion features for Zsh, Bash, and Fish. |
 | **[Network, DNS & Firewall Architecture](docs/network_and_firewall.md)** | Egress firewall requirements (TCP 443), proxy routing, and F5 cloud service endpoints. |
 
 ### Reference F5 Knowledge Base Articles
