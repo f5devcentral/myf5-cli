@@ -34,7 +34,7 @@ In accordance with enterprise DevSecOps standards, **passing credentials or toke
 | [`geoip`](#11-myf5-geoip) | Apply GeoIP updates directly to BIG-IP appliances (alias: `bigip geoip`) |
 | [`proxy`](#12-myf5-proxy) | View or configure HTTP/HTTPS/SOCKS5 outbound egress proxy |
 | [`doctor`](#8-myf5-doctor) | Run connectivity, DNS, egress, and credential diagnostics |
-| [`interactive`](#13-myf5-interactive-alias-shell-repl) | Launch interactive REPL shell with tab completion (`shell`, `repl`, `i`) |
+| [`interactive`](#13-myf5-interactive-alias-shell-repl-i) | Launch interactive REPL shell with tab completion (`shell`, `repl`, `i`) |
 | [`version`](#9-myf5-version) | Display application version and toolchain info |
 
 ---

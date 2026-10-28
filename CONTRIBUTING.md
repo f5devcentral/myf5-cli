@@ -17,7 +17,7 @@ By submitting a contribution to this repository, you agree that your contributio
 
 ### Clone and Verify
 ```bash
-git clone https://github.com/SalesAmerSP/myf5-cli.git
+git clone https://github.com/f5devcentral/myf5-cli.git
 cd myf5-cli
 make all
 ```
@@ -80,6 +80,6 @@ ci(actions): add windows-latest to CI matrix
 ### Pull Request Checklist
 1. Create a feature branch from `main`.
 2. Ensure `make all` passes locally (format, vet, lint, test, build).
-3. Open a Pull Request against `SalesAmerSP/myf5-cli:main`.
+3. Open a Pull Request against `f5devcentral/myf5-cli:main`.
 4. Ensure all CI workflow checks pass.
 5. Obtain approval from repository code owners (`@grobf5`).

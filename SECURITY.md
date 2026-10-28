@@ -1,20 +1,22 @@
 # Security & Vulnerability Policy
 
-**Maintainer:** Greg Robinson (`g.robinson@f5.com`)  
+**Maintainer:** Greg Robinson  
 **License:** Apache License 2.0
 
 ---
 
 ## 1. Vulnerability Reporting & Responsible Disclosure
 
-To protect users of `myf5-cli`, please report security vulnerabilities privately rather than opening public GitHub issues:
+To protect users of `myf5-cli`, please report issues and vulnerabilities through the repository:
 
-1. **Do NOT disclose unpatched security vulnerabilities in public GitHub issues or pull requests.**
-2. Report security vulnerabilities, memory safety concerns, or credential exposure vectors in `myf5-cli` confidentially via GitHub Security Advisories or directly to:
-   - **Greg Robinson:** [g.robinson@f5.com](mailto:g.robinson@f5.com)
-3. For F5 product or upstream cloud service vulnerabilities, report directly to the F5 Product Security Incident Response Team (F5 SIRT):
-   - **Email:** [f5sirt@f5.com](mailto:f5sirt@f5.com) or [security@f5.com](mailto:security@f5.com)
-   - **Security Portal:** [https://www.f5.com/company/policies/security-vulnerability-response-policy](https://www.f5.com/company/policies/security-vulnerability-response-policy)
+1. **GitHub Issues:**
+   - For bugs, operational issues, or feature requests, please submit an issue at: [https://github.com/f5devcentral/myf5-cli/issues](https://github.com/f5devcentral/myf5-cli/issues)
+2. **Confidential Vulnerability Reporting:**
+   - Report security vulnerabilities, memory safety concerns, or credential exposure vectors in `myf5-cli` confidentially via GitHub Security Advisories ([Private Vulnerability Reporting](https://github.com/f5devcentral/myf5-cli/security/advisories/new)).
+3. **Upstream F5 Product Vulnerabilities:**
+   - For official F5 product or upstream cloud service vulnerabilities, report directly to the F5 Product Security Incident Response Team (F5 SIRT):
+     - **Email:** [f5sirt@f5.com](mailto:f5sirt@f5.com) or [security@f5.com](mailto:security@f5.com)
+     - **Security Portal:** [https://www.f5.com/company/policies/security-vulnerability-response-policy](https://www.f5.com/company/policies/security-vulnerability-response-policy)
 
 ---
 
