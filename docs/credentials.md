@@ -98,7 +98,7 @@ The environment variable takes precedence. An `api_key` at the top level of the 
 > A single override applies to whichever client is in use, so setting it will send that key to every family. It is intended for a rotation affecting the API you are calling, not as general configuration.
 
 > [!NOTE]
-> These credentials authenticate to the F5 **cloud** APIs — Downloads, Support Cases, and iHealth. They are unrelated to BIG-IP and BIG-IQ appliance credentials, which are covered in [§3](#3-big-ip--big-iq-appliance-credentials) below and are never issued through MyF5.
+> These credentials authenticate to the F5 **cloud** APIs — Downloads, Support Cases, and iHealth. They are unrelated to BIG-IP and BIG-IQ appliance credentials, which are covered in [§3](#3-big-ip-big-iq-appliance-credentials) below and are never issued through MyF5.
 
 Verify a new key end to end with:
 

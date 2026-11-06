@@ -407,8 +407,8 @@ func printUsage() {
 
 IMPORTANT NOTICE:
     This tool is NOT an officially supported F5 product or service.
-    For issues, bugs, or questions, please email Greg Robinson (g.robinson@f5.com)
-    or file an issue at https://github.com/SalesAmerSP/myf5-cli/issues.
+    For issues, bugs, or questions, please file an issue at:
+    https://github.com/f5devcentral/myf5-cli/issues
 
 USAGE:
     myf5 [options] <command> [subcommand] [arguments...]

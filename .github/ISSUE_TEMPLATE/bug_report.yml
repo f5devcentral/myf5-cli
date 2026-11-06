@@ -8,7 +8,7 @@ body:
       value: |
         ### 🛡️ Security & Zero-Secret Reminder
         **DO NOT paste real API client secrets, passwords, bearer tokens, or sensitive customer case details.**
-        Sanitize all output before submitting. For security vulnerabilities, review [SECURITY.md](../SECURITY.md).
+        Sanitize all output before submitting. For security vulnerabilities, review [SECURITY.md](https://github.com/f5devcentral/myf5-cli/blob/main/SECURITY.md).
 
   - type: textarea
     id: description

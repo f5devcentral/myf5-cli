@@ -3,7 +3,7 @@
 A high-performance, memory-safe, zero-dependency Go CLI and client library for **MyF5 Cloud APIs**, **Software Downloads**, **iHealth Diagnostics**, **BIG-IP TMOS Appliances**, and **BIG-IQ Centralized Management**.
 
 > [!IMPORTANT]
-> **DISCLAIMER:** This project is a community-maintained tool authored and maintained by **Greg Robinson** ([`g.robinson@f5.com`](mailto:g.robinson@f5.com)) and is **NOT** covered by an official F5 Technical Support SLA.
+> **DISCLAIMER:** This project is a community-maintained tool authored and maintained by **Greg Robinson** and is **NOT** covered by an official F5 Technical Support SLA.
 >
 > **API ENTITLEMENT PREREQUISITE:** While this CLI source code is open source, **the MyF5 API itself is not publicly open**. Using MyF5 Cloud API commands (`downloads`, `cases`) requires F5 to enable API support on your customer account and issue account-specific OAuth2 credentials (`F5_CLIENT_ID` and `F5_CLIENT_SECRET`). Direct appliance commands (`bigip`, `bigiq`, `push`, `pull`, `geoip`) and `ihealth` operate independently with your appliance or iHealth credentials.
 
@@ -80,12 +80,12 @@ myf5-cli/
 ## Installation & Building
 
 ### Pre-Compiled Binaries
-Download pre-built standalone binaries for Linux, macOS, and Windows from the [GitHub Releases page](https://github.com/SalesAmerSP/myf5-cli/releases).
+Download pre-built standalone binaries for Linux, macOS, and Windows from the [GitHub Releases page](https://github.com/f5devcentral/myf5-cli/releases).
 
 ### Developer Build with GNU Make
 ```bash
 # Clone the repository
-git clone https://github.com/SalesAmerSP/myf5-cli.git
+git clone https://github.com/f5devcentral/myf5-cli.git
 cd myf5-cli
 
 # Build for host OS & architecture
