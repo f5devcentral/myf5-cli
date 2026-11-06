@@ -62,6 +62,7 @@ id_ecdsa*
 .DS_Store
 .idea/
 .vscode/
+.devcontainer/
 scratch/
 
 # Local scratch documentation & OpenAPI specifications
