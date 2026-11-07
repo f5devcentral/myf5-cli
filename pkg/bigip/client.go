@@ -230,6 +230,15 @@ func NewClientWithOptions(opts ClientOptions) (*Client, error) {
 			return nil, err
 		}
 	}
+	if opts.Password != "" {
+		if err := ValidateAppliancePassword(opts.Password); err != nil {
+			return nil, err
+		}
+	} else if len(opts.PasswordBytes) > 0 {
+		if err := ValidateAppliancePassword(string(opts.PasswordBytes)); err != nil {
+			return nil, err
+		}
+	}
 	if opts.Port < 0 || opts.Port > 65535 {
 		return nil, fmt.Errorf("invalid port %d: must be between 1 and 65535", opts.Port)
 	}
@@ -955,6 +964,34 @@ func ValidateApplianceUsername(username string) error {
 	}
 	if !validUsernameRegex.MatchString(username) {
 		return fmt.Errorf("username contains invalid characters")
+	}
+	return nil
+}
+
+// K2873SpecialCharacters contains the 32 allowed special characters defined in F5 K2873.
+const K2873SpecialCharacters = "!@#$%^&*()`~-+=[]{};’:\"'./<>|\\?_"
+
+// ValidateAppliancePassword validates an appliance password against F5 K2873 policy.
+// It allows alphanumeric characters and the 32 special characters specified in K2873.
+// To prevent secret disclosure in logs or stderr, error messages never include the password or rejected character.
+func ValidateAppliancePassword(password string) error {
+	if password == "" {
+		return fmt.Errorf("appliance password cannot be empty")
+	}
+	if len(password) > 255 {
+		return fmt.Errorf("appliance password exceeds maximum length of 255 characters")
+	}
+	for i, r := range password {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || strings.ContainsRune(K2873SpecialCharacters, r) {
+			continue
+		}
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			return fmt.Errorf("invalid appliance password: whitespace is not permitted (refer to F5 K2873 for allowed password characters)")
+		}
+		if r < 32 || r == 127 {
+			return fmt.Errorf("invalid appliance password: control characters are not permitted (refer to F5 K2873)")
+		}
+		return fmt.Errorf("invalid appliance password: contains unsupported character at byte offset %d (refer to F5 K2873 for allowed special characters)", i)
 	}
 	return nil
 }

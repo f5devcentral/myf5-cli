@@ -108,6 +108,9 @@ func BuildSSHClientConfig(opts SCPOptions) (*ssh.ClientConfig, error) {
 		pw = string(opts.PasswordBytes)
 	}
 	if pw != "" {
+		if err := ValidateAppliancePassword(pw); err != nil {
+			return nil, err
+		}
 		authMethods = append(authMethods, ssh.Password(pw))
 		// Also support keyboard-interactive (PAM / TACACS+ / RADIUS)
 		authMethods = append(authMethods, ssh.KeyboardInteractive(

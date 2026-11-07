@@ -2,6 +2,7 @@ package bigip
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -722,5 +723,111 @@ func TestParseAndValidateApplianceHost_EmbeddedCreds(t *testing.T) {
 	_, _, _, _, err := ParseAndValidateApplianceHost("https://admin:secret@10.1.1.4", 443)
 	if err == nil {
 		t.Errorf("ParseAndValidateApplianceHost() expected error for embedded credentials")
+	}
+}
+
+func TestValidateAppliancePassword_K2873(t *testing.T) {
+	// 32 K2873 special characters:
+	// ! @ # $ % ^ & * ( ) ` ~ - + = [ ] { } ; ’ : " ' . / < > | \ ? _
+	allSpecialCharsPw := "Abc123!@#$%^&*()`~-+=[]{};’:\"'./<>|\\?_"
+
+	if err := ValidateAppliancePassword(allSpecialCharsPw); err != nil {
+		t.Fatalf("ValidateAppliancePassword failed on valid K2873 password: %v", err)
+	}
+
+	// Verify Basic Auth serialization & deserialization with all 32 K2873 characters
+	c := &Client{
+		Username: "admin",
+		Password: allSpecialCharsPw,
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://10.1.1.4/mgmt/tm/sys/ready", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest failed: %v", err)
+	}
+	c.setAuth(req)
+
+	authHdr := req.Header.Get("Authorization")
+	if !strings.HasPrefix(authHdr, "Basic ") {
+		t.Fatalf("expected Basic auth header, got %q", authHdr)
+	}
+	rawEncoded := strings.TrimPrefix(authHdr, "Basic ")
+	decodedBytes, err := base64.StdEncoding.DecodeString(rawEncoded)
+	if err != nil {
+		t.Fatalf("failed to decode base64 auth header: %v", err)
+	}
+	expectedAuth := "admin:" + allSpecialCharsPw
+	if string(decodedBytes) != expectedAuth {
+		t.Fatalf("decoded auth mismatch:\n got:  %q\n want: %q", string(decodedBytes), expectedAuth)
+	}
+
+	// Verify also with PasswordBytes
+	cBytes := &Client{
+		Username:      "admin",
+		PasswordBytes: []byte(allSpecialCharsPw),
+	}
+	req2, err := http.NewRequest(http.MethodGet, "https://10.1.1.4/mgmt/tm/sys/ready", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest failed: %v", err)
+	}
+	cBytes.setAuth(req2)
+	authHdr2 := req2.Header.Get("Authorization")
+	decodedBytes2, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(authHdr2, "Basic "))
+	if err != nil {
+		t.Fatalf("failed to decode base64 auth header with PasswordBytes: %v", err)
+	}
+	if string(decodedBytes2) != expectedAuth {
+		t.Fatalf("decoded auth with PasswordBytes mismatch:\n got:  %q\n want: %q", string(decodedBytes2), expectedAuth)
+	}
+
+	// Verify NewClientWithOptions enforces password validation
+	_, err = NewClientWithOptions(ClientOptions{
+		Host:     "10.1.1.4",
+		Username: "admin",
+		Password: "invalid,password",
+	})
+	if err == nil {
+		t.Fatalf("expected NewClientWithOptions to reject password with comma")
+	}
+
+	_, err = NewClientWithOptions(ClientOptions{
+		Host:          "10.1.1.4",
+		Username:      "admin",
+		PasswordBytes: []byte("invalid,password"),
+	})
+	if err == nil {
+		t.Fatalf("expected NewClientWithOptions to reject passwordBytes with comma")
+	}
+
+	// Verify rejected passwords and ensure no secret leakage in error messages
+	tooLongPw := strings.Repeat("a", 256)
+	invalidTestCases := []struct {
+		name string
+		pw   string
+	}{
+		{"empty", ""},
+		{"too long", tooLongPw},
+		{"space", "abc def"},
+		{"leading space", " abc"},
+		{"trailing space", "abc "},
+		{"tab", "abc\tdef"},
+		{"newline", "abc\ndef"},
+		{"carriage return", "abc\rdef"},
+		{"null control char", "abc\x00def"},
+		{"del control char", "abc\x7fdef"},
+		{"comma", "abc,def"},
+		{"unsupported unicode", "abc\u00a9def"},
+	}
+
+	for _, tc := range invalidTestCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateAppliancePassword(tc.pw)
+			if err == nil {
+				t.Fatalf("expected error for invalid password %q, got nil", tc.name)
+			}
+			// CRITICAL: verify password or substring "abc" is never leaked in error
+			if tc.pw != "" && strings.Contains(err.Error(), "abc") {
+				t.Errorf("secret leaked in error message for case %q: %v", tc.name, err)
+			}
+		})
 	}
 }

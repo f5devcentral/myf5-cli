@@ -2001,6 +2001,12 @@ func resolveApplianceCreds(host, targetKind, flagUser, flagCert, flagKey, flagId
 
 	// Password
 	creds.Password = getEnv("_PASSWORD")
+	if creds.Password != "" {
+		if err := bigip.ValidateAppliancePassword(creds.Password); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\nHint: When exporting passwords containing special characters (such as !, $, `, \\, or \") in your shell, wrap the value in single quotes: export BIGIP_PASSWORD='...'\n", err)
+			exitFunc(1)
+		}
+	}
 
 	// Cert
 	if flagCert != "" {
@@ -2454,9 +2460,15 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
 			if err == nil {
-				pw = strings.TrimSpace(string(bytePw))
+				pw = strings.TrimRight(string(bytePw), "\r\n")
 				// Zero raw password byte buffer immediately to scrub cleartext secret from memory
 				auth.ZeroBytes(bytePw)
+				if pw != "" {
+					if err := bigip.ValidateAppliancePassword(pw); err != nil {
+						fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+						exitFunc(1)
+					}
+				}
 			}
 		}
 		if pw == "" && creds.Cert == "" {
@@ -2599,8 +2611,14 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 					bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
 					fmt.Println()
 					if err == nil {
-						pw = strings.TrimSpace(string(bytePw))
+						pw = strings.TrimRight(string(bytePw), "\r\n")
 						auth.ZeroBytes(bytePw)
+						if pw != "" {
+							if err := bigip.ValidateAppliancePassword(pw); err != nil {
+								fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+								exitFunc(1)
+							}
+						}
 					}
 				}
 			}
@@ -2695,9 +2713,15 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 				bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
 				fmt.Println()
 				if err == nil {
-					pw = strings.TrimSpace(string(bytePw))
+					pw = strings.TrimRight(string(bytePw), "\r\n")
 					// Zero raw password byte buffer immediately to scrub cleartext secret from memory
 					auth.ZeroBytes(bytePw)
+					if pw != "" {
+						if err := bigip.ValidateAppliancePassword(pw); err != nil {
+							fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+							exitFunc(1)
+						}
+					}
 				}
 			}
 		}
@@ -2855,8 +2879,14 @@ func getSystemInfoTarget(ctx context.Context, target, targetKind, user string, p
 			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
 			if err == nil {
-				pw = strings.TrimSpace(string(bytePw))
+				pw = strings.TrimRight(string(bytePw), "\r\n")
 				auth.ZeroBytes(bytePw)
+				if pw != "" {
+					if err := bigip.ValidateAppliancePassword(pw); err != nil {
+						fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+						exitFunc(1)
+					}
+				}
 			}
 		}
 	}
@@ -2999,9 +3029,15 @@ func executePushToAppliance(
 			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
 			if err == nil {
-				pw = strings.TrimSpace(string(bytePw))
+				pw = strings.TrimRight(string(bytePw), "\r\n")
 				// Zero raw password byte buffer immediately to scrub cleartext secret from memory
 				auth.ZeroBytes(bytePw)
+				if pw != "" {
+					if err := bigip.ValidateAppliancePassword(pw); err != nil {
+						fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+						exitFunc(1)
+					}
+				}
 			}
 		}
 	}
@@ -3221,9 +3257,15 @@ func executeDownloadFromAppliance(
 			bytePw, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
 			if err == nil {
-				pw = strings.TrimSpace(string(bytePw))
+				pw = strings.TrimRight(string(bytePw), "\r\n")
 				// Zero raw password byte buffer immediately to scrub cleartext secret from memory
 				auth.ZeroBytes(bytePw)
+				if pw != "" {
+					if err := bigip.ValidateAppliancePassword(pw); err != nil {
+						fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+						exitFunc(1)
+					}
+				}
 			}
 		}
 	}

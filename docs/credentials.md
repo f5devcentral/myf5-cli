@@ -182,6 +182,11 @@ When managing BIG-IP TMOS or BIG-IQ Centralized Management appliances via `myf5 
     Enter BIG-IP password for admin@10.1.1.4: 
     ```
     In non-interactive environments (cron, headless CI/CD), if the password is not provided via environment variables or SSH keys, `myf5` halts execution with exit code `1` rather than hanging.
+  - **F5 K2873 Character Policy & Shell Quoting**:
+    Appliance passwords follow the **F5 K2873** specification: alphanumeric characters and all 32 allowed special characters (`!`, `@`, `#`, `$`, `%`, `^`, `&`, `*`, `(`, `)`, `` ` ``, `~`, `-`, `+`, `=`, `[`, `]`, `{`, `}`, `;`, `’`, `:`, `"`, `'`, `.`, `/`, `<`, `>`, `|`, `\`, `?`, `_`) are supported. Whitespace and control characters are prohibited. When exporting passwords containing shell-active special characters (such as `!`, `$`, `` ` ``, `\`, or `"`) in `bash` or `zsh`, wrap the value in **single quotes** to prevent shell expansion:
+    ```bash
+    export BIGIP_PASSWORD='MyP@ssw0rd!$`123'
+    ```
 
 - **SSH Key & Agent Authentication (SCP Method)**:
   When using native Go SCP transfers (`--method scp` or `--push-method scp`):
