@@ -275,6 +275,14 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 	licenseFileSerialRe := regexp.MustCompile(`(?i)Serial Number\s*:\s*([A-Za-z0-9-]+)`)
 	hostnameRe := regexp.MustCompile(`(?m)^\s*hostname\s+([^\s;]+)`)
 
+	const maxTarEntries = 50000
+	var tarEntries int
+	newLimitedScanner := func(r io.Reader) *bufio.Scanner {
+		s := bufio.NewScanner(io.LimitReader(r, 10*1024*1024))
+		s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		return s
+	}
+
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -283,11 +291,15 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 		if err != nil {
 			return nil, fmt.Errorf("tar read error: %w", err)
 		}
+		tarEntries++
+		if tarEntries > maxTarEntries {
+			return nil, fmt.Errorf("qkview archive exceeds maximum allowed tar entries (%d)", maxTarEntries)
+		}
 
 		name := strings.TrimPrefix(hdr.Name, "./")
 		switch {
 		case name == "VERSION.LTM" || name == "VERSION":
-			scanner := bufio.NewScanner(tr)
+			scanner := newLimitedScanner(tr)
 			for scanner.Scan() {
 				line := scanner.Text()
 				parts := strings.SplitN(line, ":", 2)
@@ -310,7 +322,7 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 			}
 
 		case name == "PLATFORM":
-			scanner := bufio.NewScanner(tr)
+			scanner := newLimitedScanner(tr)
 			for scanner.Scan() {
 				line := scanner.Text()
 				parts := strings.SplitN(line, "=", 2)
@@ -320,7 +332,7 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 			}
 
 		case name == "HWINFO":
-			scanner := bufio.NewScanner(tr)
+			scanner := newLimitedScanner(tr)
 			for scanner.Scan() {
 				line := scanner.Text()
 				parts := strings.SplitN(line, "=", 2)
@@ -330,7 +342,7 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 			}
 
 		case strings.HasSuffix(name, "config/bigip.license"):
-			scanner := bufio.NewScanner(tr)
+			scanner := newLimitedScanner(tr)
 			for scanner.Scan() {
 				line := scanner.Text()
 				if m := licenseFileRegKeyRe.FindStringSubmatch(line); len(m) > 1 && info.RegistrationKey == "" {
@@ -342,7 +354,7 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 			}
 
 		case strings.HasSuffix(name, "config/bigip_base.conf"):
-			scanner := bufio.NewScanner(tr)
+			scanner := newLimitedScanner(tr)
 			for scanner.Scan() {
 				line := scanner.Text()
 				if m := hostnameRe.FindStringSubmatch(line); len(m) > 1 && info.Hostname == "" {
@@ -351,7 +363,7 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 			}
 
 		case strings.HasSuffix(name, "var/prompt/hostname"):
-			scanner := bufio.NewScanner(tr)
+			scanner := newLimitedScanner(tr)
 			if scanner.Scan() {
 				val := strings.TrimSpace(scanner.Text())
 				if val != "" && info.Hostname == "" {
@@ -360,7 +372,7 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 			}
 
 		case strings.HasSuffix(name, "bigip_sys.conf"):
-			scanner := bufio.NewScanner(tr)
+			scanner := newLimitedScanner(tr)
 			curMod := ""
 			provisionRe := regexp.MustCompile(`(?i)(?:sys\s+)?provision\s+([a-zA-Z0-9_-]+)\s*\{`)
 			levelRe := regexp.MustCompile(`(?i)level\s+([a-zA-Z0-9_-]+)`)
@@ -384,7 +396,7 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 			}
 
 		case name == "mcp_module.xml":
-			scanner := bufio.NewScanner(tr)
+			scanner := newLimitedScanner(tr)
 			inSysInfo := false
 			isHostnameVar := false
 			curMod := ""

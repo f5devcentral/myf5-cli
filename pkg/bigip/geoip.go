@@ -250,6 +250,8 @@ func generateGeoIPScript(remoteZipPath string, force, keepExtracted bool) string
 		extractCmd = `tar -xzf "$ZIP_FILE" -C "$EXTRACT_DIR"`
 	}
 
+	safeZipPath := strings.ReplaceAll(remoteZipPath, "'", `'\''`)
+
 	return fmt.Sprintf(`(
 set -o pipefail
 
@@ -258,7 +260,7 @@ if grep -qi '^Product:[[:space:]]*BIG-IQ' /VERSION 2>/dev/null; then
   exit 8
 fi
 
-ZIP_FILE=%q
+ZIP_FILE='%s'
 
 if [ ! -f "$ZIP_FILE" ]; then
   echo "ERROR: GeoIP archive file not found: $ZIP_FILE" >&2
@@ -335,7 +337,7 @@ echo "--- GEOIP_COMPLETE ---"
 SCRIPT_EXIT_CODE=$?
 echo "--- SCRIPT_EXIT_CODE: $SCRIPT_EXIT_CODE ---"
 exit $SCRIPT_EXIT_CODE
-`, remoteZipPath, cleanupAction, extractCmd, forceFlag)
+`, safeZipPath, cleanupAction, extractCmd, forceFlag)
 }
 
 func applyGeoIPSSH(ctx context.Context, host, scriptB64 string, opts GeoIPOptions) (string, error) {

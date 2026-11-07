@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -135,6 +136,38 @@ Version: 16.1.4`,
 	}
 	if got := info.PreferredSerialNumber(); got != "f5-chassis-fallback-555" {
 		t.Errorf("PreferredSerialNumber = %q; want f5-chassis-fallback-555", got)
+	}
+}
+
+func TestInspectQKViewReader_TarBombEntryLimit(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+
+	for i := 0; i < 50005; i++ {
+		hdr := &tar.Header{
+			Name: fmt.Sprintf("dummy_%d.txt", i),
+			Mode: 0600,
+			Size: 0,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("WriteHeader failed: %v", err)
+		}
+	}
+
+	if err := tw.Close(); err != nil {
+		t.Fatalf("Close tar failed: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("Close gzip failed: %v", err)
+	}
+
+	_, err := InspectQKViewReader(bytes.NewReader(buf.Bytes()))
+	if err == nil {
+		t.Fatalf("expected error exceeding max tar entries, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum allowed tar entries") {
+		t.Errorf("expected error to mention 'exceeds maximum allowed tar entries', got: %v", err)
 	}
 }
 

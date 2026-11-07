@@ -495,7 +495,7 @@ func (c *Client) CreateQKViewTaskWithOptions(ctx context.Context, filename strin
 	}
 
 	var task QKViewTask
-	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024*1024)).Decode(&task); err != nil {
 		return nil, fmt.Errorf("failed to decode qkview task response: %w", err)
 	}
 	return &task, nil
@@ -522,7 +522,7 @@ func (c *Client) QueryQKViewTask(ctx context.Context, taskID string) (*QKViewTas
 	}
 
 	var task QKViewTask
-	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024*1024)).Decode(&task); err != nil {
 		return nil, fmt.Errorf("failed to decode qkview task query: %w", err)
 	}
 	return &task, nil
@@ -720,7 +720,7 @@ func (c *Client) DownloadFromURI(ctx context.Context, endpointURI, localPath str
 	}
 
 	partPath := localPath + ".part"
-	out, err := os.Create(partPath)
+	out, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create local file: %w", err)
 	}

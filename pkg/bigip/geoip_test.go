@@ -47,14 +47,20 @@ func TestApplyGeoIPPathValidation(t *testing.T) {
 
 func TestGenerateGeoIPScript(t *testing.T) {
 	script := generateGeoIPScript("/var/tmp/geoip.zip", true, false)
-	if !strings.Contains(script, `ZIP_FILE="/var/tmp/geoip.zip"`) {
-		t.Errorf("expected script to contain zip file path, got:\n%s", script)
+	if !strings.Contains(script, `ZIP_FILE='/var/tmp/geoip.zip'`) {
+		t.Errorf("expected script to contain single-quoted zip file path, got:\n%s", script)
 	}
 	if !strings.Contains(script, `rm -rf "$EXTRACT_DIR"`) {
 		t.Errorf("expected script to clean up extract dir when keepExtracted is false")
 	}
 	if !strings.Contains(script, "-f") {
 		t.Errorf("expected script to pass -f when force is true")
+	}
+
+	// Test single-quote escaping defense-in-depth
+	scriptEscaped := generateGeoIPScript("/var/tmp/inject'test$(whoami).zip", true, false)
+	if !strings.Contains(scriptEscaped, `ZIP_FILE='/var/tmp/inject'\''test$(whoami).zip'`) {
+		t.Errorf("expected script to properly escape single quotes, got:\n%s", scriptEscaped)
 	}
 
 	scriptKeep := generateGeoIPScript("/var/tmp/geoip.tgz", false, true)

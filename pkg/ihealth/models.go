@@ -2,6 +2,7 @@ package ihealth
 
 import (
 	"fmt"
+	"net/url"
 	"time"
 )
 
@@ -45,7 +46,7 @@ type qkviewDetail struct {
 func (d qkviewDetail) toSummary(id string) *QKViewSummary {
 	guiURL := d.GUIURI
 	if guiURL == "" && id != "" {
-		guiURL = fmt.Sprintf("https://ihealth.f5.com/qkview-analyzer/qv/%s", id)
+		guiURL = fmt.Sprintf("https://ihealth.f5.com/qkview-analyzer/qv/%s", url.PathEscape(id))
 	}
 	s := &QKViewSummary{
 		ID:          id,

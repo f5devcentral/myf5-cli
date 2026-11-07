@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -122,6 +123,34 @@ func LoadClientCertificate(certFile, keyFile string) (*tls.Certificate, error) {
 	return &cert, nil
 }
 
+// SecureRedirectPolicy validates HTTP redirects to prevent credential leakage and protocol downgrades.
+func SecureRedirectPolicy(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return fmt.Errorf("stopped after 10 redirects")
+	}
+	if len(via) > 0 {
+		isCrossHost := !strings.EqualFold(req.URL.Host, via[0].URL.Host)
+		isDowngrade := (strings.EqualFold(via[0].URL.Scheme, "https") || strings.EqualFold(via[len(via)-1].URL.Scheme, "https")) && strings.EqualFold(req.URL.Scheme, "http")
+
+		if isDowngrade {
+			return fmt.Errorf("refusing insecure HTTP redirect from HTTPS endpoint")
+		}
+
+		if isCrossHost {
+			req.Header.Del("Authorization")
+			req.Header.Del("X-F5-Auth-Token")
+
+			if _, ok := via[0].URL.Query()["k"]; ok {
+				return fmt.Errorf("refusing cross-origin redirect that would leak query credentials")
+			}
+			if _, ok := req.URL.Query()["k"]; ok {
+				return fmt.Errorf("refusing cross-origin redirect that would leak query credentials")
+			}
+		}
+	}
+	return nil
+}
+
 // NewSecureHTTPClient returns an *http.Client configured with modern TLS and transport settings.
 func NewSecureHTTPClient(timeout time.Duration) *http.Client {
 	return NewSecureHTTPClientWithCert(timeout, nil)
@@ -134,8 +163,9 @@ func NewSecureHTTPClientWithCert(timeout time.Duration, cert *tls.Certificate) *
 		certs = []tls.Certificate{*cert}
 	}
 	return &http.Client{
-		Transport: NewProductionTransport(SecureTLSConfigWithCerts(false, certs...)),
-		Timeout:   timeout,
+		Transport:     NewProductionTransport(SecureTLSConfigWithCerts(false, certs...)),
+		Timeout:       timeout,
+		CheckRedirect: SecureRedirectPolicy,
 	}
 }
 
@@ -152,7 +182,8 @@ func NewInsecureHTTPClientWithCert(timeout time.Duration, cert *tls.Certificate)
 	}
 	// #nosec G402 -- InsecureSkipVerify is purposefully allowed for lab BIG-IPs with self-signed certs
 	return &http.Client{
-		Transport: NewProductionTransport(SecureTLSConfigWithCerts(true, certs...)),
-		Timeout:   timeout,
+		Transport:     NewProductionTransport(SecureTLSConfigWithCerts(true, certs...)),
+		Timeout:       timeout,
+		CheckRedirect: SecureRedirectPolicy,
 	}
 }

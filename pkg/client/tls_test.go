@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -47,10 +48,85 @@ func TestNewClients(t *testing.T) {
 	if secClient == nil || secClient.Timeout != 10*time.Second {
 		t.Fatalf("expected client with 10s timeout, got %v", secClient)
 	}
+	if secClient.CheckRedirect == nil {
+		t.Errorf("expected CheckRedirect policy configured on secure client")
+	}
 
 	insecClient := NewInsecureHTTPClient(5 * time.Second)
 	if insecClient == nil || insecClient.Timeout != 5*time.Second {
 		t.Fatalf("expected client with 5s timeout, got %v", insecClient)
+	}
+	if insecClient.CheckRedirect == nil {
+		t.Errorf("expected CheckRedirect policy configured on insecure client")
+	}
+}
+
+func TestSecureRedirectPolicy(t *testing.T) {
+	origReq, err := http.NewRequest(http.MethodGet, "https://api.example.com/cases", nil)
+	if err != nil {
+		t.Fatalf("NewRequest failed: %v", err)
+	}
+
+	// 1. Insecure downgrade: HTTPS -> HTTP
+	httpReq, err := http.NewRequest(http.MethodGet, "http://api.example.com/cases", nil)
+	if err != nil {
+		t.Fatalf("NewRequest failed: %v", err)
+	}
+	err = SecureRedirectPolicy(httpReq, []*http.Request{origReq})
+	if err == nil || !strings.Contains(err.Error(), "refusing insecure HTTP redirect") {
+		t.Errorf("expected insecure downgrade to be rejected, got: %v", err)
+	}
+
+	// 2. Cross-host redirect strips Authorization & X-F5-Auth-Token
+	crossHostReq, err := http.NewRequest(http.MethodGet, "https://other.example.com/cases", nil)
+	if err != nil {
+		t.Fatalf("NewRequest failed: %v", err)
+	}
+	crossHostReq.Header.Set("Authorization", "Bearer secret")
+	crossHostReq.Header.Set("X-F5-Auth-Token", "f5secret")
+	err = SecureRedirectPolicy(crossHostReq, []*http.Request{origReq})
+	if err != nil {
+		t.Fatalf("unexpected redirect error: %v", err)
+	}
+	if crossHostReq.Header.Get("Authorization") != "" {
+		t.Errorf("expected Authorization header to be stripped on cross-host redirect")
+	}
+	if crossHostReq.Header.Get("X-F5-Auth-Token") != "" {
+		t.Errorf("expected X-F5-Auth-Token header to be stripped on cross-host redirect")
+	}
+
+	// 3. Cross-host redirect with query credential 'k' on original URL
+	origWithK, err := http.NewRequest(http.MethodGet, "https://api.example.com/cases?k=my-secret-key", nil)
+	if err != nil {
+		t.Fatalf("NewRequest failed: %v", err)
+	}
+	err = SecureRedirectPolicy(crossHostReq, []*http.Request{origWithK})
+	if err == nil || !strings.Contains(err.Error(), "refusing cross-origin redirect that would leak query credentials") {
+		t.Errorf("expected leak prevention on cross-host redirect with k, got: %v", err)
+	}
+
+	// 4. Cross-host redirect with query credential 'k' on destination URL
+	crossWithK, err := http.NewRequest(http.MethodGet, "https://other.example.com/cases?k=my-secret-key", nil)
+	if err != nil {
+		t.Fatalf("NewRequest failed: %v", err)
+	}
+	err = SecureRedirectPolicy(crossWithK, []*http.Request{origReq})
+	if err == nil || !strings.Contains(err.Error(), "refusing cross-origin redirect that would leak query credentials") {
+		t.Errorf("expected leak prevention when redirect URL has k, got: %v", err)
+	}
+
+	// 5. Same host redirect preserves Authorization
+	sameHostReq, err := http.NewRequest(http.MethodGet, "https://api.example.com/v2/cases", nil)
+	if err != nil {
+		t.Fatalf("NewRequest failed: %v", err)
+	}
+	sameHostReq.Header.Set("Authorization", "Bearer secret")
+	err = SecureRedirectPolicy(sameHostReq, []*http.Request{origReq})
+	if err != nil {
+		t.Fatalf("unexpected redirect error: %v", err)
+	}
+	if sameHostReq.Header.Get("Authorization") != "Bearer secret" {
+		t.Errorf("expected Authorization to be retained for same-host redirect")
 	}
 }
 
