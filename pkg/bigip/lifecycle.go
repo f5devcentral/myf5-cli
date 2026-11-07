@@ -583,6 +583,62 @@ func EvaluatePlatformLifecycle(platform string, asOf time.Time) HardwareLifecycl
 	return res
 }
 
+// EvaluateBIGIQLifecycle checks a BIG-IQ Centralized Management software version
+// against F5 Software Lifecycle Policy K5903.
+func EvaluateBIGIQLifecycle(version string, asOf time.Time) SoftwareLifecycle {
+	cleanVer := strings.TrimSpace(version)
+	res := SoftwareLifecycle{
+		Version:   cleanVer,
+		NoticeURL: URLPolicyTMOS,
+		Status:    StatusUnknown,
+	}
+
+	if cleanVer == "" {
+		return res
+	}
+
+	major, minor, _, ok := ParseTMOSVersion(cleanVer)
+	if !ok {
+		return res
+	}
+
+	res.Branch = fmt.Sprintf("%d.%d", major, minor)
+
+	switch {
+	case major < 8 || (major == 8 && minor < 3):
+		res.EoSD = "2024-12-31"
+		res.EoTS = "2024-12-31"
+		res.Status = StatusEOL
+		res.IsEOL = true
+		res.Warning = fmt.Sprintf("BIG-IQ version %s reached End of Life (EoSD/EoTS) on %s (K5903).", cleanVer, res.EoSD)
+		res.Recommendation = "Upgrade to an actively supported BIG-IQ 8.4.x release to receive software fixes and support."
+		return res
+
+	case major == 8 && minor == 3:
+		eosdDate := time.Date(2025, time.December, 31, 23, 59, 59, 0, time.UTC)
+		res.EoSD = eosdDate.Format("2006-01-02")
+		res.EoTS = res.EoSD
+		if asOf.After(eosdDate) {
+			res.Status = StatusEOL
+			res.IsEOL = true
+			res.Warning = fmt.Sprintf("BIG-IQ version %s reached End of Life (EoSD/EoTS) on %s (K5903).", cleanVer, res.EoSD)
+			res.Recommendation = "Upgrade to an actively supported BIG-IQ 8.4.x release to receive software fixes and support."
+		} else {
+			res.Status = StatusSupported
+			res.IsEOL = false
+			res.Recommendation = fmt.Sprintf("Standard support active until %s.", res.EoSD)
+		}
+		return res
+
+	default:
+		// BIG-IQ 8.4.x and newer releases
+		res.Status = StatusSupported
+		res.IsEOL = false
+		res.Recommendation = "Active BIG-IQ release stream (K5903)."
+		return res
+	}
+}
+
 // EvaluateLifecycle evaluates both software and hardware lifecycle statuses.
 func EvaluateLifecycle(version, platform string, asOf time.Time) LifecycleInfo {
 	sw := EvaluateTMOSLifecycle(version, asOf)
@@ -612,7 +668,25 @@ func (s *SystemInfo) EvaluateLifecycle(asOf time.Time) {
 	if plat == "" && s.CaseAttributes != nil && s.CaseAttributes["cloudProvider"] != "" {
 		plat = s.CaseAttributes["cloudProvider"] + " Virtual Edition"
 	}
-	lc := EvaluateLifecycle(s.Version, plat, asOf)
+	var lc LifecycleInfo
+	if s.IsBIGIQ() {
+		sw := EvaluateBIGIQLifecycle(s.Version, asOf)
+		hw := EvaluatePlatformLifecycle(plat, asOf)
+		var warnings []string
+		if sw.Warning != "" {
+			warnings = append(warnings, sw.Warning)
+		}
+		if hw.Warning != "" {
+			warnings = append(warnings, hw.Warning)
+		}
+		lc = LifecycleInfo{
+			Software: sw,
+			Hardware: hw,
+			Warnings: warnings,
+		}
+	} else {
+		lc = EvaluateLifecycle(s.Version, plat, asOf)
+	}
 	s.Lifecycle = &lc
 }
 
