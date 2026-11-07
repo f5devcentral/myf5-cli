@@ -91,6 +91,14 @@ func BuildSSHClientConfig(opts SCPOptions) (*ssh.ClientConfig, error) {
 	if username == "" {
 		username = "admin"
 	}
+	if err := ValidateApplianceUsername(username); err != nil {
+		return nil, err
+	}
+	if opts.KeyPath != "" {
+		if _, err := ValidateCredentialFilePath(opts.KeyPath, "SSH identity key"); err != nil {
+			return nil, err
+		}
+	}
 
 	var authMethods []ssh.AuthMethod
 

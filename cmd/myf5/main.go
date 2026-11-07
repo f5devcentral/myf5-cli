@@ -1893,43 +1893,99 @@ type ApplianceCreds struct {
 	TargetKind string
 }
 
+func requireFlagValue(args []string, i int, flagName string) string {
+	if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+		fmt.Fprintf(os.Stderr, "[ERROR] Flag %s requires a value\n", flagName)
+		exitFunc(1)
+	}
+	return args[i+1]
+}
+
+func rejectSecretFlag(flagName string) {
+	fmt.Fprintf(os.Stderr, "[SECURITY ERROR] Passing passwords or secrets via command-line flags (%s) is prohibited because CLI arguments are exposed in the OS process table. Use environment variables or the interactive prompt.\n", flagName)
+	exitFunc(1)
+}
+
 func resolveApplianceCreds(host, targetKind, flagUser, flagCert, flagKey, flagIdentity string, isSCP bool) ApplianceCreds {
-	cleanHost := strings.TrimSpace(host)
-	if _, h, _, _, err := bigip.ParseAndValidateApplianceHost(cleanHost, 443); err == nil && h != "" {
-		cleanHost = h
+	isLocalFile := false
+	if fi, err := os.Stat(host); err == nil && fi.Mode().IsRegular() {
+		isLocalFile = true
+	}
+	if !isLocalFile {
+		if _, _, _, _, err := bigip.ParseAndValidateApplianceHost(host, 443); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			exitFunc(1)
+		}
 	}
 
-	// Host-matching awareness
-	prefix1 := "BIGIP"
-	prefix2 := "BIGIQ"
+	cleanEnvHost := func(raw string) string {
+		if raw == "" {
+			return ""
+		}
+		if _, h, _, _, err := bigip.ParseAndValidateApplianceHost(raw, 443); err == nil && h != "" {
+			return h
+		}
+		return strings.TrimSpace(raw)
+	}
 
-	if os.Getenv("BIGIQ_HOST") != "" && (strings.EqualFold(host, os.Getenv("BIGIQ_HOST")) || strings.EqualFold(cleanHost, os.Getenv("BIGIQ_HOST"))) {
-		prefix1, prefix2 = "BIGIQ", "BIGIP"
+	envBigipHost := cleanEnvHost(os.Getenv("BIGIP_HOST"))
+	envBigiqHost := cleanEnvHost(os.Getenv("BIGIQ_HOST"))
+	cleanHost := cleanEnvHost(host)
+
+	bigipAllowed := (envBigipHost == "" || strings.EqualFold(cleanHost, envBigipHost))
+	bigiqAllowed := (envBigiqHost == "" || strings.EqualFold(cleanHost, envBigiqHost))
+
+	var prefixes []string
+	if envBigiqHost != "" && strings.EqualFold(cleanHost, envBigiqHost) {
+		prefixes = append(prefixes, "BIGIQ")
 		targetKind = "BIG-IQ"
-	} else if os.Getenv("BIGIP_HOST") != "" && (strings.EqualFold(host, os.Getenv("BIGIP_HOST")) || strings.EqualFold(cleanHost, os.Getenv("BIGIP_HOST"))) {
-		prefix1, prefix2 = "BIGIP", "BIGIQ"
+		if bigipAllowed {
+			prefixes = append(prefixes, "BIGIP")
+		}
+	} else if envBigipHost != "" && strings.EqualFold(cleanHost, envBigipHost) {
+		prefixes = append(prefixes, "BIGIP")
 		targetKind = "BIG-IP"
-	} else if strings.EqualFold(targetKind, "BIG-IQ") || strings.EqualFold(targetKind, "bigiq") {
-		prefix1, prefix2 = "BIGIQ", "BIGIP"
-		targetKind = "BIG-IQ"
-	} else if strings.EqualFold(targetKind, "BIG-IP") || strings.EqualFold(targetKind, "bigip") {
-		prefix1, prefix2 = "BIGIP", "BIGIQ"
-		targetKind = "BIG-IP"
+		if bigiqAllowed {
+			prefixes = append(prefixes, "BIGIQ")
+		}
 	} else {
-		prefix1, prefix2 = "BIGIP", "BIGIQ"
-		targetKind = "auto"
+		if bigipAllowed {
+			prefixes = append(prefixes, "BIGIP")
+		}
+		if bigiqAllowed {
+			prefixes = append(prefixes, "BIGIQ")
+		}
+	}
+
+	if targetKind == "" || strings.EqualFold(targetKind, "auto") {
+		if len(prefixes) > 0 && prefixes[0] == "BIGIQ" {
+			targetKind = "BIG-IQ"
+		} else if len(prefixes) > 0 && prefixes[0] == "BIGIP" {
+			targetKind = "BIG-IP"
+		} else {
+			targetKind = "auto"
+		}
+	} else if strings.EqualFold(targetKind, "bigiq") {
+		targetKind = "BIG-IQ"
+	} else if strings.EqualFold(targetKind, "bigip") {
+		targetKind = "BIG-IP"
 	}
 
 	creds := ApplianceCreds{TargetKind: targetKind}
 
+	getEnv := func(suffix string) string {
+		for _, p := range prefixes {
+			if v := os.Getenv(p + suffix); v != "" {
+				return v
+			}
+		}
+		return ""
+	}
+
 	// Username
 	if flagUser != "" {
 		creds.User = flagUser
-	} else if u := os.Getenv(prefix1 + "_USER"); u != "" {
-		creds.User = u
-	} else if u := os.Getenv(prefix2 + "_USER"); u != "" {
-		creds.User = u
-	} else if u := os.Getenv("APPLIANCE_USER"); u != "" {
+	} else if u := getEnv("_USER"); u != "" {
 		creds.User = u
 	} else {
 		if isSCP {
@@ -1938,43 +1994,53 @@ func resolveApplianceCreds(host, targetKind, flagUser, flagCert, flagKey, flagId
 			creds.User = "admin"
 		}
 	}
+	if err := bigip.ValidateApplianceUsername(creds.User); err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+		exitFunc(1)
+	}
 
 	// Password
-	if p := os.Getenv(prefix1 + "_PASSWORD"); p != "" {
-		creds.Password = p
-	} else if p := os.Getenv(prefix2 + "_PASSWORD"); p != "" {
-		creds.Password = p
-	} else if p := os.Getenv("APPLIANCE_PASSWORD"); p != "" {
-		creds.Password = p
-	}
+	creds.Password = getEnv("_PASSWORD")
 
 	// Cert
 	if flagCert != "" {
 		creds.Cert = flagCert
-	} else if c := os.Getenv(prefix1 + "_CERT"); c != "" {
-		creds.Cert = c
-	} else if c := os.Getenv(prefix2 + "_CERT"); c != "" {
-		creds.Cert = c
+	} else {
+		creds.Cert = getEnv("_CERT")
+	}
+	if creds.Cert != "" {
+		if _, err := bigip.ValidateCredentialFilePath(creds.Cert, "Client certificate"); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			exitFunc(1)
+		}
 	}
 
-	// Cert Key
+	// Key
 	if flagKey != "" {
 		creds.Key = flagKey
-	} else if k := os.Getenv(prefix1 + "_KEY"); k != "" {
-		creds.Key = k
-	} else if k := os.Getenv(prefix2 + "_KEY"); k != "" {
-		creds.Key = k
+	} else {
+		creds.Key = getEnv("_KEY")
+	}
+	if creds.Key != "" {
+		if _, err := bigip.ValidateCredentialFilePath(creds.Key, "Client key"); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			exitFunc(1)
+		}
 	}
 
 	// SSH Identity
 	if flagIdentity != "" {
 		creds.Identity = flagIdentity
-	} else if i := os.Getenv(prefix1 + "_SSH_KEY"); i != "" {
-		creds.Identity = i
-	} else if i := os.Getenv(prefix2 + "_SSH_KEY"); i != "" {
+	} else if i := getEnv("_SSH_KEY"); i != "" {
 		creds.Identity = i
 	} else if i := os.Getenv("SSH_KEY_PATH"); i != "" {
 		creds.Identity = i
+	}
+	if creds.Identity != "" {
+		if _, err := bigip.ValidateCredentialFilePath(creds.Identity, "SSH identity key"); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			exitFunc(1)
+		}
 	}
 
 	return creds
@@ -2012,74 +2078,70 @@ func handlePush(ctx context.Context, args []string) {
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--user" || arg == "-u" {
-			if i+1 < len(args) {
-				user = args[i+1]
-				i++
-			}
+		if arg == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		} else if arg == "--password" || arg == "--pass" || arg == "-P" || arg == "--token" || arg == "--secret" || arg == "--ssh-passphrase" {
+			rejectSecretFlag(arg)
+		} else if arg == "--user" || arg == "-u" {
+			user = requireFlagValue(args, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--user=") {
 			user = strings.TrimPrefix(arg, "--user=")
 		} else if arg == "--port" || arg == "-p" {
-			if i+1 < len(args) {
-				if p, err := strconv.Atoi(args[i+1]); err == nil {
-					port = p
-				}
-				i++
+			pStr := requireFlagValue(args, i, arg)
+			p, err := bigip.ValidatePort(pStr)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+				exitFunc(1)
 			}
+			port = p
+			i++
 		} else if strings.HasPrefix(arg, "--port=") {
-			if p, err := strconv.Atoi(strings.TrimPrefix(arg, "--port=")); err == nil {
-				port = p
+			p, err := bigip.ValidatePort(strings.TrimPrefix(arg, "--port="))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+				exitFunc(1)
 			}
+			port = p
 		} else if arg == "--method" || arg == "-m" {
-			if i+1 < len(args) {
-				method = args[i+1]
-				i++
-			}
+			method = requireFlagValue(args, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--method=") {
 			method = strings.TrimPrefix(arg, "--method=")
 		} else if arg == "--dest" || arg == "-d" {
-			if i+1 < len(args) {
-				destPath = args[i+1]
-				i++
-			}
+			destPath = requireFlagValue(args, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--dest=") {
 			destPath = strings.TrimPrefix(arg, "--dest=")
 		} else if arg == "--identity" || arg == "-i" {
-			if i+1 < len(args) {
-				keyPath = args[i+1]
-				i++
-			}
+			keyPath = requireFlagValue(args, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--identity=") {
 			keyPath = strings.TrimPrefix(arg, "--identity=")
 		} else if arg == "--target" || arg == "-t" {
-			if i+1 < len(args) {
-				targ := args[i+1]
-				if strings.EqualFold(targ, "bigiq") || strings.EqualFold(targ, "big-iq") {
-					targetKind = "BIG-IQ"
-				} else {
-					targetKind = "BIG-IP"
-				}
-				i++
+			targ := requireFlagValue(args, i, arg)
+			if !strings.EqualFold(targ, "bigiq") && !strings.EqualFold(targ, "big-iq") && !strings.EqualFold(targ, "bigip") && !strings.EqualFold(targ, "big-ip") && !strings.EqualFold(targ, "auto") {
+				fmt.Fprintf(os.Stderr, "[ERROR] Invalid target %q (must be 'bigip', 'bigiq', or 'auto')\n", targ)
+				exitFunc(1)
 			}
+			targetKind = targ
+			i++
 		} else if strings.HasPrefix(arg, "--target=") {
 			targ := strings.TrimPrefix(arg, "--target=")
-			if strings.EqualFold(targ, "bigiq") || strings.EqualFold(targ, "big-iq") {
-				targetKind = "BIG-IQ"
-			} else {
-				targetKind = "BIG-IP"
+			if !strings.EqualFold(targ, "bigiq") && !strings.EqualFold(targ, "big-iq") && !strings.EqualFold(targ, "bigip") && !strings.EqualFold(targ, "big-ip") && !strings.EqualFold(targ, "auto") {
+				fmt.Fprintf(os.Stderr, "[ERROR] Invalid target %q (must be 'bigip', 'bigiq', or 'auto')\n", targ)
+				exitFunc(1)
 			}
+			targetKind = targ
 		} else if arg == "--cert" {
-			if i+1 < len(args) {
-				certPath = args[i+1]
-				i++
-			}
+			certPath = requireFlagValue(args, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--cert=") {
 			certPath = strings.TrimPrefix(arg, "--cert=")
 		} else if arg == "--cert-key" || arg == "--key-file" {
-			if i+1 < len(args) {
-				certKeyPath = args[i+1]
-				i++
-			}
+			certKeyPath = requireFlagValue(args, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--cert-key=") {
 			certKeyPath = strings.TrimPrefix(arg, "--cert-key=")
 		} else if strings.HasPrefix(arg, "--key-file=") {
@@ -2090,13 +2152,20 @@ func handlePush(ctx context.Context, args []string) {
 			keepExtracted = true
 		} else if arg == "--json" {
 			jsonOutput = true
-		} else if !strings.HasPrefix(arg, "-") {
+		} else if strings.HasPrefix(arg, "-") {
+			fmt.Fprintf(os.Stderr, "[ERROR] Unknown flag %q\n", arg)
+			exitFunc(1)
+		} else {
 			positional = append(positional, arg)
 		}
 	}
 
 	if len(positional) < 2 {
 		printPushUsage()
+		exitFunc(1)
+	}
+	if len(positional) > 2 {
+		fmt.Fprintf(os.Stderr, "[ERROR] Unexpected extra argument(s): %s\n", strings.Join(positional[2:], " "))
 		exitFunc(1)
 	}
 
@@ -2126,87 +2195,90 @@ func handlePull(ctx context.Context, args []string) {
 
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--user" || arg == "-u" {
-			if i+1 < len(args) {
-				user = args[i+1]
-				i++
-			}
+		if arg == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		} else if arg == "--password" || arg == "--pass" || arg == "-P" || arg == "--token" || arg == "--secret" || arg == "--ssh-passphrase" {
+			rejectSecretFlag(arg)
+		} else if arg == "--user" || arg == "-u" {
+			user = requireFlagValue(args, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--user=") {
 			user = strings.TrimPrefix(arg, "--user=")
 		} else if arg == "--port" || arg == "-p" {
-			if i+1 < len(args) {
-				if p, err := strconv.Atoi(args[i+1]); err == nil {
-					port = p
-				}
-				i++
+			pStr := requireFlagValue(args, i, arg)
+			p, err := bigip.ValidatePort(pStr)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+				exitFunc(1)
 			}
+			port = p
+			i++
 		} else if strings.HasPrefix(arg, "--port=") {
-			if p, err := strconv.Atoi(strings.TrimPrefix(arg, "--port=")); err == nil {
-				port = p
+			p, err := bigip.ValidatePort(strings.TrimPrefix(arg, "--port="))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+				exitFunc(1)
 			}
+			port = p
 		} else if arg == "--method" || arg == "-m" {
-			if i+1 < len(args) {
-				method = args[i+1]
-				i++
-			}
+			method = requireFlagValue(args, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--method=") {
 			method = strings.TrimPrefix(arg, "--method=")
-		} else if arg == "--output" || arg == "-o" || arg == "--dest" || arg == "-d" {
-			if i+1 < len(args) {
-				localDest = args[i+1]
-				i++
-			}
-		} else if strings.HasPrefix(arg, "--output=") {
-			localDest = strings.TrimPrefix(arg, "--output=")
+		} else if arg == "--dest" || arg == "-d" || arg == "--output" || arg == "-o" {
+			localDest = requireFlagValue(args, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--dest=") {
 			localDest = strings.TrimPrefix(arg, "--dest=")
+		} else if strings.HasPrefix(arg, "--output=") {
+			localDest = strings.TrimPrefix(arg, "--output=")
 		} else if arg == "--identity" || arg == "-i" {
-			if i+1 < len(args) {
-				keyPath = args[i+1]
-				i++
-			}
+			keyPath = requireFlagValue(args, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--identity=") {
 			keyPath = strings.TrimPrefix(arg, "--identity=")
 		} else if arg == "--target" || arg == "-t" {
-			if i+1 < len(args) {
-				targ := args[i+1]
-				if strings.EqualFold(targ, "bigiq") || strings.EqualFold(targ, "big-iq") {
-					targetKind = "BIG-IQ"
-				} else {
-					targetKind = "BIG-IP"
-				}
-				i++
+			targ := requireFlagValue(args, i, arg)
+			if !strings.EqualFold(targ, "bigiq") && !strings.EqualFold(targ, "big-iq") && !strings.EqualFold(targ, "bigip") && !strings.EqualFold(targ, "big-ip") && !strings.EqualFold(targ, "auto") {
+				fmt.Fprintf(os.Stderr, "[ERROR] Invalid target %q (must be 'bigip', 'bigiq', or 'auto')\n", targ)
+				exitFunc(1)
 			}
+			targetKind = targ
+			i++
 		} else if strings.HasPrefix(arg, "--target=") {
 			targ := strings.TrimPrefix(arg, "--target=")
-			if strings.EqualFold(targ, "bigiq") || strings.EqualFold(targ, "big-iq") {
-				targetKind = "BIG-IQ"
-			} else {
-				targetKind = "BIG-IP"
+			if !strings.EqualFold(targ, "bigiq") && !strings.EqualFold(targ, "big-iq") && !strings.EqualFold(targ, "bigip") && !strings.EqualFold(targ, "big-ip") && !strings.EqualFold(targ, "auto") {
+				fmt.Fprintf(os.Stderr, "[ERROR] Invalid target %q (must be 'bigip', 'bigiq', or 'auto')\n", targ)
+				exitFunc(1)
 			}
+			targetKind = targ
 		} else if arg == "--cert" {
-			if i+1 < len(args) {
-				certPath = args[i+1]
-				i++
-			}
+			certPath = requireFlagValue(args, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--cert=") {
 			certPath = strings.TrimPrefix(arg, "--cert=")
 		} else if arg == "--cert-key" || arg == "--key-file" {
-			if i+1 < len(args) {
-				certKeyPath = args[i+1]
-				i++
-			}
+			certKeyPath = requireFlagValue(args, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--cert-key=") {
 			certKeyPath = strings.TrimPrefix(arg, "--cert-key=")
 		} else if strings.HasPrefix(arg, "--key-file=") {
 			certKeyPath = strings.TrimPrefix(arg, "--key-file=")
-		} else if !strings.HasPrefix(arg, "-") {
+		} else if strings.HasPrefix(arg, "-") {
+			fmt.Fprintf(os.Stderr, "[ERROR] Unknown flag %q\n", arg)
+			exitFunc(1)
+		} else {
 			positional = append(positional, arg)
 		}
 	}
 
 	if len(positional) < 2 {
 		printPullUsage()
+		exitFunc(1)
+	}
+	if len(positional) > 2 {
+		fmt.Fprintf(os.Stderr, "[ERROR] Unexpected extra argument(s): %s\n", strings.Join(positional[2:], " "))
 		exitFunc(1)
 	}
 
@@ -2285,59 +2357,57 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	for i := 0; i < len(actionArgs); i++ {
 		arg := actionArgs[i]
-		if arg == "--user" || arg == "-u" {
-			if i+1 < len(actionArgs) {
-				user = actionArgs[i+1]
-				i++
-			}
+		if arg == "--" {
+			positional = append(positional, actionArgs[i+1:]...)
+			break
+		} else if arg == "--password" || arg == "--pass" || arg == "-P" || arg == "--token" || arg == "--secret" || arg == "--ssh-passphrase" {
+			rejectSecretFlag(arg)
+		} else if arg == "--user" || arg == "-u" {
+			user = requireFlagValue(actionArgs, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--user=") {
 			user = strings.TrimPrefix(arg, "--user=")
 		} else if arg == "--port" || arg == "-p" {
-			if i+1 < len(actionArgs) {
-				if p, err := strconv.Atoi(actionArgs[i+1]); err == nil {
-					port = p
-				}
-				i++
+			pStr := requireFlagValue(actionArgs, i, arg)
+			p, err := bigip.ValidatePort(pStr)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+				exitFunc(1)
 			}
+			port = p
+			i++
 		} else if strings.HasPrefix(arg, "--port=") {
-			if p, err := strconv.Atoi(strings.TrimPrefix(arg, "--port=")); err == nil {
-				port = p
+			p, err := bigip.ValidatePort(strings.TrimPrefix(arg, "--port="))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+				exitFunc(1)
 			}
+			port = p
 		} else if arg == "--method" || arg == "-m" {
-			if i+1 < len(actionArgs) {
-				method = actionArgs[i+1]
-				i++
-			}
+			method = requireFlagValue(actionArgs, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--method=") {
 			method = strings.TrimPrefix(arg, "--method=")
 		} else if arg == "--output" || arg == "-o" || arg == "--dest" || arg == "-d" {
-			if i+1 < len(actionArgs) {
-				destPath = actionArgs[i+1]
-				i++
-			}
+			destPath = requireFlagValue(actionArgs, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--output=") {
 			destPath = strings.TrimPrefix(arg, "--output=")
 		} else if strings.HasPrefix(arg, "--dest=") {
 			destPath = strings.TrimPrefix(arg, "--dest=")
 		} else if arg == "--identity" || arg == "-i" {
-			if i+1 < len(actionArgs) {
-				keyPath = actionArgs[i+1]
-				i++
-			}
+			keyPath = requireFlagValue(actionArgs, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--identity=") {
 			keyPath = strings.TrimPrefix(arg, "--identity=")
 		} else if arg == "--cert" {
-			if i+1 < len(actionArgs) {
-				certPath = actionArgs[i+1]
-				i++
-			}
+			certPath = requireFlagValue(actionArgs, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--cert=") {
 			certPath = strings.TrimPrefix(arg, "--cert=")
 		} else if arg == "--cert-key" || arg == "--key-file" {
-			if i+1 < len(actionArgs) {
-				certKeyPath = actionArgs[i+1]
-				i++
-			}
+			certKeyPath = requireFlagValue(actionArgs, i, arg)
+			i++
 		} else if strings.HasPrefix(arg, "--cert-key=") {
 			certKeyPath = strings.TrimPrefix(arg, "--cert-key=")
 		} else if strings.HasPrefix(arg, "--key-file=") {
@@ -2350,7 +2420,10 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			keepExtracted = true
 		} else if arg == "--json" {
 			jsonOutput = true
-		} else if !strings.HasPrefix(arg, "-") {
+		} else if strings.HasPrefix(arg, "-") {
+			fmt.Fprintf(os.Stderr, "[ERROR] Unknown flag %q\n", arg)
+			exitFunc(1)
+		} else {
 			positional = append(positional, arg)
 		}
 	}
@@ -2366,7 +2439,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	switch action {
 	case "ready":
-		if len(positional) < 1 {
+		if len(positional) != 1 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s ready <host> [--user <user>] [--port <port>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
 			exitFunc(1)
 		}
@@ -2428,7 +2501,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		}
 
 	case "info", "system-info", "sysinfo":
-		if len(positional) < 1 {
+		if len(positional) != 1 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s info <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
 			exitFunc(1)
 		}
@@ -2446,7 +2519,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		}
 
 	case "serial", "sn", "serialnumber":
-		if len(positional) < 1 {
+		if len(positional) != 1 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s serial <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
 			exitFunc(1)
 		}
@@ -2475,7 +2548,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			}
 		}
 	case "push", "upload":
-		if len(positional) < 2 {
+		if len(positional) != 2 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--apply-geoip] [--keep-extracted] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--json]\n", cmdName)
 			exitFunc(1)
 		}
@@ -2485,7 +2558,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		executePushToAppliance(ctx, host, localFile, method, destPath, creds.User, port, creds.Identity, creds.TargetKind, creds.Cert, creds.Key, applyGeoIP, keepExtracted, jsonOutput)
 
 	case "geoip":
-		if len(positional) < 2 {
+		if len(positional) != 2 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s geoip <host> <zip-path> [--method auto|icontrol|scp] [--dest <path>] [--keep-extracted] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--json]\n", cmdName)
 			exitFunc(1)
 		}
@@ -2595,7 +2668,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		}
 
 	case "download", "pull", "fetch":
-		if len(positional) < 2 {
+		if len(positional) != 2 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
 			exitFunc(1)
 		}
@@ -2605,7 +2678,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		executeDownloadFromAppliance(ctx, host, remoteFile, destPath, method, creds.User, port, creds.Identity, creds.TargetKind, creds.Cert, creds.Key)
 
 	case "qkview":
-		if len(positional) < 1 {
+		if len(positional) != 1 {
 			fmt.Fprintf(os.Stderr, "Usage: myf5 %s qkview <host> [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--keep-remote]\n", cmdName)
 			exitFunc(1)
 		}

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -148,6 +149,18 @@ func validateHostname(h string) error {
 
 // ParseAndValidateApplianceHost extracts scheme, normalized host, and port, validating the host.
 func ParseAndValidateApplianceHost(rawHost string, defaultPort int) (scheme, cleanHost string, port int, isIPv6 bool, err error) {
+	if strings.Contains(rawHost, "://") {
+		u, err := url.Parse(rawHost)
+		if err == nil {
+			if u.User != nil {
+				return "", "", 0, false, fmt.Errorf("embedded credentials in host URL %q are prohibited", rawHost)
+			}
+			if u.RawQuery != "" || u.Fragment != "" {
+				return "", "", 0, false, fmt.Errorf("query parameters or fragments in host URL %q are prohibited", rawHost)
+			}
+		}
+	}
+
 	scheme = "https"
 	s := strings.TrimSpace(rawHost)
 	if strings.HasPrefix(s, "http://") {
@@ -212,6 +225,25 @@ type ClientOptions struct {
 
 // NewClientWithOptions initializes a BIG-IP appliance client with validation and optional mTLS client certificates.
 func NewClientWithOptions(opts ClientOptions) (*Client, error) {
+	if opts.Username != "" {
+		if err := ValidateApplianceUsername(opts.Username); err != nil {
+			return nil, err
+		}
+	}
+	if opts.Port < 0 || opts.Port > 65535 {
+		return nil, fmt.Errorf("invalid port %d: must be between 1 and 65535", opts.Port)
+	}
+	if opts.ClientCertPath != "" {
+		if _, err := ValidateCredentialFilePath(opts.ClientCertPath, "Client certificate"); err != nil {
+			return nil, err
+		}
+	}
+	if opts.ClientKeyPath != "" {
+		if _, err := ValidateCredentialFilePath(opts.ClientKeyPath, "Client key"); err != nil {
+			return nil, err
+		}
+	}
+
 	scheme, cleanHost, port, _, err := ParseAndValidateApplianceHost(opts.Host, opts.Port)
 	if err != nil {
 		return nil, err
@@ -622,7 +654,10 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 
 			if res.resp.StatusCode == http.StatusNotFound {
 				// Fallback to bash for BIG-IQ where /mgmt/tm/util/qkview may return 404
-				bashArgs := fmt.Sprintf("-c \"mkdir -p /var/tmp/qkviews && /usr/bin/qkview %s-f /var/tmp/qkviews/%s && cp /var/tmp/qkviews/%s /var/config/rest/downloads/\"", map[bool]string{true: "-s0 ", false: ""}[complete], filename, filename)
+				if err := ValidateQKViewFilename(filename); err != nil {
+					return "", err
+				}
+				bashArgs := fmt.Sprintf("-c \"mkdir -p /var/tmp/qkviews && /usr/bin/qkview %s-f /var/tmp/qkviews/'%s' && cp /var/tmp/qkviews/'%s' /var/config/rest/downloads/\"", map[bool]string{true: "-s0 ", false: ""}[complete], filename, filename)
 				bashPayload := map[string]string{
 					"command":     "run",
 					"utilCmdArgs": bashArgs,
@@ -640,9 +675,12 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 					return "", fmt.Errorf("bash fallback for qkview failed: %w", err)
 				}
 				defer bashResp.Body.Close()
+				bashBody, _ := io.ReadAll(io.LimitReader(bashResp.Body, 1024*1024))
 				if bashResp.StatusCode < 200 || bashResp.StatusCode >= 300 {
-					b, _ := io.ReadAll(io.LimitReader(bashResp.Body, 1024*1024))
-					return "", fmt.Errorf("bash qkview generation failed with HTTP %d: %s", bashResp.StatusCode, string(b))
+					return "", fmt.Errorf("bash qkview generation failed with HTTP %d: %s", bashResp.StatusCode, string(bashBody))
+				}
+				if strings.Contains(string(bashBody), "command not found") || strings.Contains(string(bashBody), "syntax error") {
+					return "", fmt.Errorf("bash qkview generation command failed: %s", string(bashBody))
 				}
 				return filename, nil
 			}
@@ -895,4 +933,65 @@ func (c *Client) setAuth(req *http.Request) {
 
 	req.Header.Set("Authorization", "Basic "+authHeader)
 	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
+}
+
+var validUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_.\-@]*$`)
+
+// ValidateApplianceUsername validates a username for BIG-IP / BIG-IQ appliance access.
+func ValidateApplianceUsername(username string) error {
+	if username == "" {
+		return fmt.Errorf("username cannot be empty")
+	}
+	if len(username) > 64 {
+		return fmt.Errorf("username exceeds maximum length of 64 characters")
+	}
+	if strings.Contains(username, ":") {
+		return fmt.Errorf("username cannot contain a colon")
+	}
+	for _, r := range username {
+		if r < 32 || r == 127 || r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			return fmt.Errorf("username cannot contain control characters or whitespace")
+		}
+	}
+	if !validUsernameRegex.MatchString(username) {
+		return fmt.Errorf("username contains invalid characters")
+	}
+	return nil
+}
+
+// ValidatePort validates a port string and returns the integer value.
+func ValidatePort(rawPort string) (int, error) {
+	portStr := strings.TrimSpace(rawPort)
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid port %q: must be a numeric value", rawPort)
+	}
+	if port < 1 || port > 65535 {
+		return 0, fmt.Errorf("invalid port %d: must be between 1 and 65535", port)
+	}
+	return port, nil
+}
+
+// ValidateCredentialFilePath validates a file path used for credentials (keys/certs).
+func ValidateCredentialFilePath(filePath, label string) (string, error) {
+	for _, r := range filePath {
+		if r < 32 || r == 127 {
+			return "", fmt.Errorf("%s path cannot contain control characters", label)
+		}
+	}
+	cleanPath := filepath.Clean(strings.TrimSpace(filePath))
+	fi, err := os.Stat(cleanPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to access %s file %s: %w", label, cleanPath, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("%s must be a regular file: %s", label, cleanPath)
+	}
+	if fi.Size() == 0 {
+		return "", fmt.Errorf("%s file is empty: %s", label, cleanPath)
+	}
+	if fi.Size() > 1024*1024 {
+		return "", fmt.Errorf("%s file exceeds maximum allowed size of 1MB: %s", label, cleanPath)
+	}
+	return cleanPath, nil
 }

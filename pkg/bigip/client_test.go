@@ -631,3 +631,96 @@ func TestTransferOptionsZero(t *testing.T) {
 	var nilOpts *TransferOptions
 	nilOpts.Zero() // Must not panic
 }
+
+func TestValidateApplianceUsername(t *testing.T) {
+	tests := []struct {
+		name     string
+		username string
+		wantErr  bool
+	}{
+		{"valid", "admin", false},
+		{"valid email", "user@domain.com", false},
+		{"colon injection", "admin:pass", true},
+		{"spaces", "admin user", true},
+		{"shell meta", "admin;ls", true},
+		{"ANSI escapes", "admin\033[0m", true},
+		{"empty", "", true},
+		{"too long", "a" + string(make([]byte, 64)), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateApplianceUsername(tt.username)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateApplianceUsername() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidatePort(t *testing.T) {
+	tests := []struct {
+		port    string
+		wantErr bool
+	}{
+		{"22", false},
+		{"443", false},
+		{"8443", false},
+		{"0", true},
+		{"-1", true},
+		{"65536", true},
+		{"abc", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.port, func(t *testing.T) {
+			_, err := ValidatePort(tt.port)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidatePort() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateCredentialFilePath(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	validFile := filepath.Join(tmpDir, "valid.key")
+	os.WriteFile(validFile, []byte("key content"), 0600)
+
+	emptyFile := filepath.Join(tmpDir, "empty.key")
+	os.WriteFile(emptyFile, []byte(""), 0600)
+
+	largeFile := filepath.Join(tmpDir, "large.key")
+	largeData := make([]byte, 1024*1024+1)
+	os.WriteFile(largeFile, largeData, 0600)
+
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{"valid", validFile, false},
+		{"nonexistent", filepath.Join(tmpDir, "missing.key"), true},
+		{"directory", tmpDir, true},
+		{"empty file", emptyFile, true},
+		{"large file", largeFile, true},
+		{"null byte", filepath.Join(tmpDir, "file\x00.key"), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ValidateCredentialFilePath(tt.path, "test")
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateCredentialFilePath() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseAndValidateApplianceHost_EmbeddedCreds(t *testing.T) {
+	_, _, _, _, err := ParseAndValidateApplianceHost("https://admin:secret@10.1.1.4", 443)
+	if err == nil {
+		t.Errorf("ParseAndValidateApplianceHost() expected error for embedded credentials")
+	}
+}
