@@ -252,6 +252,12 @@ func generateGeoIPScript(remoteZipPath string, force, keepExtracted bool) string
 
 	return fmt.Sprintf(`(
 set -o pipefail
+
+if grep -qi '^Product:[[:space:]]*BIG-IQ' /VERSION 2>/dev/null; then
+  echo "ERROR: Autodetected BIG-IQ appliance. GeoIP database updates are only supported on BIG-IP appliances." >&2
+  exit 8
+fi
+
 ZIP_FILE=%q
 
 if [ ! -f "$ZIP_FILE" ]; then
@@ -333,15 +339,24 @@ exit $SCRIPT_EXIT_CODE
 }
 
 func applyGeoIPSSH(ctx context.Context, host, scriptB64 string, opts GeoIPOptions) (string, error) {
+	var pwCopy, ppCopy []byte
+	if len(opts.PasswordBytes) > 0 {
+		pwCopy = make([]byte, len(opts.PasswordBytes))
+		copy(pwCopy, opts.PasswordBytes)
+	}
+	if len(opts.SSHPassphraseBytes) > 0 {
+		ppCopy = make([]byte, len(opts.SSHPassphraseBytes))
+		copy(ppCopy, opts.SSHPassphraseBytes)
+	}
 	scpOpts := SCPOptions{
 		Host:            host,
 		Port:            opts.Port,
 		Username:        opts.Username,
 		Password:        opts.Password,
-		PasswordBytes:   opts.PasswordBytes,
+		PasswordBytes:   pwCopy,
 		KeyPath:         opts.IdentityFile,
 		Passphrase:      opts.SSHPassphrase,
-		PassphraseBytes: opts.SSHPassphraseBytes,
+		PassphraseBytes: ppCopy,
 		Timeout:         opts.Timeout,
 	}
 	defer scpOpts.Zero()
@@ -422,12 +437,18 @@ func applyGeoIPREST(ctx context.Context, host, scriptB64 string, opts GeoIPOptio
 		user = "admin"
 	}
 
+	var pwCopy []byte
+	if len(opts.PasswordBytes) > 0 {
+		pwCopy = make([]byte, len(opts.PasswordBytes))
+		copy(pwCopy, opts.PasswordBytes)
+	}
+
 	client, err := NewClientWithOptions(ClientOptions{
 		Host:           host,
 		Port:           port,
 		Username:       user,
 		Password:       opts.Password,
-		PasswordBytes:  opts.PasswordBytes,
+		PasswordBytes:  pwCopy,
 		SkipTLSVerify:  true,
 		ClientCertPath: opts.ClientCertPath,
 		ClientKeyPath:  opts.ClientKeyPath,

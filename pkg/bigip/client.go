@@ -336,23 +336,23 @@ func (c *Client) BaseURL() string {
 	return fmt.Sprintf("%s://%s:%d", scheme, host, c.Port)
 }
 
-// CheckReady queries /mgmt/tm/sys/ready (or /mgmt/shared/echo for BIG-IQ) to verify appliance availability.
-func (c *Client) CheckReady(ctx context.Context) (bool, error) {
+// CheckReadyWithKind queries /mgmt/tm/sys/ready (or /mgmt/shared/echo for BIG-IQ) to verify appliance availability and returns the appliance kind.
+func (c *Client) CheckReadyWithKind(ctx context.Context) (string, error) {
 	url := fmt.Sprintf("%s/mgmt/tm/sys/ready", c.BaseURL())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	c.setAuth(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("device reachability check failed: %w", err)
+		return "", fmt.Errorf("device reachability check failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
-		return true, nil
+		return "BIG-IP", nil
 	}
 
 	// Fallback to /mgmt/shared/echo for BIG-IQ and appliances without sys ready
@@ -363,12 +363,23 @@ func (c *Client) CheckReady(ctx context.Context) (bool, error) {
 			c.setAuth(echoReq)
 			if echoResp, doErr := c.HTTPClient.Do(echoReq); doErr == nil {
 				defer echoResp.Body.Close()
-				return echoResp.StatusCode == http.StatusOK, nil
+				if echoResp.StatusCode == http.StatusOK {
+					return "BIG-IQ", nil
+				}
 			}
 		}
 	}
 
-	return false, nil
+	return "", nil
+}
+
+// CheckReady queries /mgmt/tm/sys/ready (or /mgmt/shared/echo for BIG-IQ) to verify appliance availability.
+func (c *Client) CheckReady(ctx context.Context) (bool, error) {
+	kind, err := c.CheckReadyWithKind(ctx)
+	if err != nil {
+		return false, err
+	}
+	return kind != "", nil
 }
 
 var validQKViewFilenameRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
@@ -608,6 +619,33 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 				return "", fmt.Errorf("generate qkview request failed: %w", res.err)
 			}
 			defer res.resp.Body.Close()
+
+			if res.resp.StatusCode == http.StatusNotFound {
+				// Fallback to bash for BIG-IQ where /mgmt/tm/util/qkview may return 404
+				bashArgs := fmt.Sprintf("-c \"mkdir -p /var/tmp/qkviews && /usr/bin/qkview %s-f /var/tmp/qkviews/%s && cp /var/tmp/qkviews/%s /var/config/rest/downloads/\"", map[bool]string{true: "-s0 ", false: ""}[complete], filename, filename)
+				bashPayload := map[string]string{
+					"command":     "run",
+					"utilCmdArgs": bashArgs,
+				}
+				bashBytes, _ := json.Marshal(bashPayload)
+				bashURL := fmt.Sprintf("%s/mgmt/tm/util/bash", c.BaseURL())
+				bashReq, err := http.NewRequestWithContext(ctx, http.MethodPost, bashURL, bytes.NewReader(bashBytes))
+				if err != nil {
+					return "", err
+				}
+				c.setAuth(bashReq)
+				bashReq.Header.Set("Content-Type", "application/json")
+				bashResp, err := c.HTTPClient.Do(bashReq)
+				if err != nil {
+					return "", fmt.Errorf("bash fallback for qkview failed: %w", err)
+				}
+				defer bashResp.Body.Close()
+				if bashResp.StatusCode < 200 || bashResp.StatusCode >= 300 {
+					b, _ := io.ReadAll(io.LimitReader(bashResp.Body, 1024*1024))
+					return "", fmt.Errorf("bash qkview generation failed with HTTP %d: %s", bashResp.StatusCode, string(b))
+				}
+				return filename, nil
+			}
 
 			if res.resp.StatusCode < 200 || res.resp.StatusCode >= 300 {
 				b, _ := io.ReadAll(io.LimitReader(res.resp.Body, 1024*1024))

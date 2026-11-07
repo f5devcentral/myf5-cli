@@ -58,6 +58,14 @@ func (s *SystemInfo) PreferredSerialNumber() string {
 	return s.RegistrationKey
 }
 
+// ApplianceKind returns "BIG-IQ" if the appliance is detected as BIG-IQ, or "BIG-IP" otherwise.
+func (s *SystemInfo) ApplianceKind() string {
+	if s.IsBIGIQ() {
+		return "BIG-IQ"
+	}
+	return "BIG-IP"
+}
+
 // IsBIGIQ returns true if the appliance is a BIG-IQ Centralized Management system.
 func (s *SystemInfo) IsBIGIQ() bool {
 	if s == nil {

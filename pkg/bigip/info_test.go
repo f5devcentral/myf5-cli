@@ -530,6 +530,18 @@ Active License
 	}
 }
 
+func TestApplianceKind(t *testing.T) {
+	s1 := &SystemInfo{Product: "BIG-IQ"}
+	if got := s1.ApplianceKind(); got != "BIG-IQ" {
+		t.Errorf("ApplianceKind() = %v, want BIG-IQ", got)
+	}
+
+	s2 := &SystemInfo{Product: "BIG-IP"}
+	if got := s2.ApplianceKind(); got != "BIG-IP" {
+		t.Errorf("ApplianceKind() = %v, want BIG-IP", got)
+	}
+}
+
 func TestSystemInfo_SummaryPlatformEnrichment(t *testing.T) {
 	// Case 1: Raw platform code C119
 	info1 := &SystemInfo{Platform: "C119"}

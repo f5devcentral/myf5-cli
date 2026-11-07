@@ -16,11 +16,12 @@ import (
 
 func TestCheckReady(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/mgmt/tm/sys/ready" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
+		if r.URL.Path == "/mgmt/tm/sys/ready" {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"kind": "tm:sys:ready"}`))
+			return
 		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"kind": "tm:sys:ready"}`))
+		t.Errorf("unexpected path: %s", r.URL.Path)
 	}))
 	defer server.Close()
 
@@ -37,6 +38,44 @@ func TestCheckReady(t *testing.T) {
 	}
 	if !ready {
 		t.Errorf("expected appliance to be ready")
+	}
+
+	kind, err := c.CheckReadyWithKind(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if kind != "BIG-IP" {
+		t.Errorf("expected BIG-IP, got %q", kind)
+	}
+}
+
+func TestCheckReadyWithKind_BIGIQ(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mgmt/tm/sys/ready" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/mgmt/shared/echo" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		t.Errorf("unexpected path: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	kind, err := c.CheckReadyWithKind(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if kind != "BIG-IQ" {
+		t.Errorf("expected BIG-IQ, got %q", kind)
 	}
 }
 
@@ -192,6 +231,47 @@ func TestGenerateQKViewDefaultFilenameISO8601(t *testing.T) {
 	re := regexp.MustCompile(`^qkview_.*_\d{8}T\d{6}Z\.qkview$`)
 	if !re.MatchString(filename) {
 		t.Errorf("expected filename matching ISO-8601 UTC timestamp pattern, got %q", filename)
+	}
+}
+
+func TestGenerateQKViewBIGIQFallback(t *testing.T) {
+	bashCalled := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/mgmt/tm/util/qkview" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/mgmt/tm/util/bash" {
+			bashCalled = true
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"commandResult":"success"}`))
+			return
+		}
+		if r.URL.Path == "/mgmt/cm/autodeploy/qkview" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	filename, err := c.GenerateQKViewWithStatus(context.Background(), "test.qkview", true, nil)
+	if err != nil {
+		t.Fatalf("GenerateQKViewWithStatus failed: %v", err)
+	}
+
+	if filename != "test.qkview" {
+		t.Errorf("expected test.qkview, got %q", filename)
+	}
+	if !bashCalled {
+		t.Errorf("expected bash fallback to be called for BIG-IQ")
 	}
 }
 

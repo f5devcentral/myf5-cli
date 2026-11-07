@@ -161,3 +161,32 @@ func TestDownloadFileWithFailover_BothFail(t *testing.T) {
 		t.Errorf("expected failover logger to be invoked")
 	}
 }
+
+func TestTransferOptionsPasswordBytesNotZeroedAcrossCalls(t *testing.T) {
+	opts := TransferOptions{
+		PasswordBytes:      []byte("secret123"),
+		SSHPassphraseBytes: []byte("pass123"),
+	}
+
+	// 1. Verify client creation with newClientFromOptions does not zero opts.PasswordBytes
+	client := newClientFromOptions("10.0.0.1", opts, 443)
+	if client == nil {
+		t.Fatalf("expected non-nil client")
+	}
+	client.Zero()
+
+	if string(opts.PasswordBytes) != "secret123" {
+		t.Errorf("expected opts.PasswordBytes to remain %q, got %q", "secret123", string(opts.PasswordBytes))
+	}
+
+	// 2. Verify newSCPOptions and scpOpts.Zero() do not zero opts.PasswordBytes or opts.SSHPassphraseBytes
+	scpOpts := newSCPOptions("10.0.0.1", opts)
+	scpOpts.Zero()
+
+	if string(opts.PasswordBytes) != "secret123" {
+		t.Errorf("expected opts.PasswordBytes to remain %q after scpOpts.Zero(), got %q", "secret123", string(opts.PasswordBytes))
+	}
+	if string(opts.SSHPassphraseBytes) != "pass123" {
+		t.Errorf("expected opts.SSHPassphraseBytes to remain %q after scpOpts.Zero(), got %q", "pass123", string(opts.SSHPassphraseBytes))
+	}
+}
