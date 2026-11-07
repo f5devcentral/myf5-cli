@@ -225,9 +225,15 @@ func SCPUpload(ctx context.Context, localPath string, destDir string, opts SCPOp
 		} else {
 			destDir = "/var/tmp"
 		}
+	} else if path.Base(destDir) == baseFilename || path.Ext(destDir) != "" {
+		baseFilename = path.Base(destDir)
+		destDir = path.Dir(destDir)
 	}
 	if err := ValidateRemoteAppliancePath(destDir); err != nil {
 		return "", fmt.Errorf("invalid destination directory: %w", err)
+	}
+	if err := ValidateRemoteAppliancePath(path.Join(destDir, baseFilename)); err != nil {
+		return "", fmt.Errorf("invalid destination file path: %w", err)
 	}
 
 	host, port := CleanSSHHost(opts.Host)

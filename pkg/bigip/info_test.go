@@ -551,4 +551,30 @@ func TestSystemInfo_SummaryPlatformEnrichment(t *testing.T) {
 	if !strings.Contains(sum3, "Platform:           BIG-IP Virtual Edition") || strings.Contains(sum3, "BIG-IP Virtual Edition (BIG-IP Virtual Edition)") {
 		t.Errorf("Summary() duplicate enrichment for BIG-IP Virtual Edition:\n%s", sum3)
 	}
+
+	// Case 4: BIG-IQ 8.4.2.3 on Z100 Virtual Edition
+	info4 := &SystemInfo{
+		Product:             "BIG-IQ",
+		Version:             "8.4.2.3",
+		Build:               "0.0.8",
+		Edition:             "Final",
+		Platform:            "Z100",
+		ChassisSerialNumber: "test-bigiq-serial-001",
+		Hostname:            "bigiq-ve.ec2.internal",
+		ProvisionedModules:  map[string]string{"biq": "nominal"},
+	}
+	info4.PopulateCaseAttributes()
+	sum4 := info4.Summary()
+	if info4.CaseAttributes["productFamily"] != "BIG-IQ" {
+		t.Errorf("CaseAttributes[productFamily] = %q; want BIG-IQ", info4.CaseAttributes["productFamily"])
+	}
+	if info4.CaseAttributes["product"] != "BIG-IQ Centralized Management" {
+		t.Errorf("CaseAttributes[product] = %q; want BIG-IQ Centralized Management", info4.CaseAttributes["product"])
+	}
+	if !strings.Contains(sum4, "Platform:           Z100 (BIG-IQ Virtual Edition)") {
+		t.Errorf("Summary() did not enrich Z100 as BIG-IQ Virtual Edition:\n%s", sum4)
+	}
+	if !strings.Contains(sum4, "Software (8.4.2.3  ): Supported") || strings.Contains(sum4, "[WARNING]") {
+		t.Errorf("Summary() did not mark BIG-IQ 8.4.2.3 as Supported:\n%s", sum4)
+	}
 }

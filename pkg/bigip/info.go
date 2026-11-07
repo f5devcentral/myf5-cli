@@ -58,20 +58,42 @@ func (s *SystemInfo) PreferredSerialNumber() string {
 	return s.RegistrationKey
 }
 
+// IsBIGIQ returns true if the appliance is a BIG-IQ Centralized Management system.
+func (s *SystemInfo) IsBIGIQ() bool {
+	if s == nil {
+		return false
+	}
+	if strings.Contains(strings.ToUpper(s.Product), "BIG-IQ") {
+		return true
+	}
+	if lvl, ok := s.ProvisionedModules["biq"]; ok && lvl != "" && lvl != "none" {
+		return true
+	}
+	return false
+}
+
 // PopulateCaseAttributes computes and stores standard attributes for F5 Support Case creation.
 func (s *SystemInfo) PopulateCaseAttributes() {
 	if s == nil {
 		return
 	}
+	isBigIQ := s.IsBIGIQ()
+	family := "BIG-IP"
+	if isBigIQ {
+		family = "BIG-IQ"
+	}
+
 	attrs := map[string]string{
-		"productFamily": "BIG-IP",
+		"productFamily": family,
 		"serialNumber":  s.PreferredSerialNumber(),
 		"version":       s.Version,
 		"hostName":      s.Hostname,
 	}
 
 	product := "BIG-IP"
-	if len(s.ProvisionedModules) > 0 {
+	if isBigIQ {
+		product = "BIG-IQ Centralized Management"
+	} else if len(s.ProvisionedModules) > 0 {
 		var active []string
 		for mod, level := range s.ProvisionedModules {
 			if level != "none" && level != "" && !isInternalModule(mod) {
@@ -133,8 +155,12 @@ func (s *SystemInfo) Summary() string {
 	if s.Platform != "" {
 		platDisplay := s.Platform
 		if rec, ok := LookupPlatform(s.Platform); ok && rec.Model != "" {
-			if !strings.Contains(s.Platform, rec.Model) && s.Platform != rec.Model {
-				platDisplay = fmt.Sprintf("%s (%s)", s.Platform, rec.Model)
+			model := rec.Model
+			if s.IsBIGIQ() && strings.HasPrefix(model, "BIG-IP Virtual Edition") {
+				model = strings.Replace(model, "BIG-IP Virtual Edition", "BIG-IQ Virtual Edition", 1)
+			}
+			if !strings.Contains(s.Platform, model) && s.Platform != model {
+				platDisplay = fmt.Sprintf("%s (%s)", s.Platform, model)
 			}
 		}
 		b.WriteString(fmt.Sprintf("  Platform:           %s\n", platDisplay))

@@ -191,7 +191,8 @@ func DownloadFileWithFailover(
 			strings.HasSuffix(cleanRemote, ".iso") ||
 			strings.HasSuffix(cleanRemote, ".qkview")
 
-		tryRestFirst := isRestFriendly || opts.ClientCertPath != "" || (opts.IdentityFile == "" && (opts.Password != "" || os.Getenv("BIGIP_PASSWORD") != "" || os.Getenv("BIGIQ_PASSWORD") != ""))
+		hasRestAuth := opts.Password != "" || len(opts.PasswordBytes) > 0 || opts.ClientCertPath != "" || os.Getenv("BIGIP_PASSWORD") != "" || os.Getenv("BIGIQ_PASSWORD") != ""
+		tryRestFirst := hasRestAuth && (isRestFriendly || opts.IdentityFile == "")
 
 		if tryRestFirst {
 			savedPath, restErr := downloadViaIControl(ctx, host, remotePath, localDest, opts, progressCb)
