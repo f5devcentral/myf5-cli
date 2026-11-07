@@ -2371,7 +2371,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			exitFunc(1)
 		}
 		host := positional[0]
-		
+
 		creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp")
 		targetKind = creds.TargetKind
 
@@ -2407,7 +2407,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		})
 		checkErr(ctx, err, "Failed to initialize appliance client")
 		defer client.Zero()
-		
+
 		var kind string
 		if client != nil {
 			kind, err = client.CheckReadyWithKind(ctx)
@@ -2415,7 +2415,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			// CheckReady fallback?
 			kind = targetKind
 		}
-		
+
 		checkErr(ctx, err, "Ready check failed")
 		if kind != "" {
 			targetKind = kind
@@ -2493,7 +2493,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		zipTarget := positional[1]
 
 		creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp")
-		
+
 		if creds.TargetKind == "auto" {
 			// Note: ApplyGeoIP will error out if it detects BIG-IQ, but we can do a quick check
 			// We can leave TargetKind as is; we will pass it.
@@ -2610,7 +2610,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			exitFunc(1)
 		}
 		host := positional[0]
-		
+
 		creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp" || method == "ssh")
 		targetKind = creds.TargetKind
 
