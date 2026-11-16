@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -174,8 +175,10 @@ func TestDownloadFromURI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to stat destFile: %v", err)
 	}
-	if info.Mode().Perm() != 0600 {
-		t.Errorf("expected file mode 0600, got %04o", info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		if info.Mode().Perm() != 0600 {
+			t.Errorf("expected file mode 0600, got %04o", info.Mode().Perm())
+		}
 	}
 }
 
