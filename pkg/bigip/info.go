@@ -500,8 +500,7 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 		if err != nil {
 			return nil, err
 		}
-		c.setAuth(req)
-		resp, err := c.HTTPClient.Do(req)
+		resp, err := c.doWithAuth(req)
 		if err != nil {
 			return nil, err
 		}

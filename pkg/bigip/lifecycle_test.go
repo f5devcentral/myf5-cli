@@ -442,3 +442,48 @@ func TestLookupPlatform(t *testing.T) {
 		})
 	}
 }
+
+func TestEvaluateBIGIQLifecycle(t *testing.T) {
+	now2026 := time.Date(2026, time.October, 7, 0, 0, 0, 0, time.UTC)
+	now2024 := time.Date(2024, time.October, 7, 0, 0, 0, 0, time.UTC)
+
+	// 1. Empty version
+	rEmpty := EvaluateBIGIQLifecycle("", now2026)
+	if rEmpty.Status != StatusUnknown {
+		t.Errorf("expected StatusUnknown for empty, got %v", rEmpty.Status)
+	}
+
+	// 2. Invalid version
+	rInvalid := EvaluateBIGIQLifecycle("invalid-ver", now2026)
+	if rInvalid.Status != StatusUnknown {
+		t.Errorf("expected StatusUnknown for invalid, got %v", rInvalid.Status)
+	}
+
+	// 3. Older version (e.g. 7.1.0 or 8.2.0) -> EOL
+	r82 := EvaluateBIGIQLifecycle("8.2.0", now2026)
+	if r82.Status != StatusEOL || !r82.IsEOL {
+		t.Errorf("expected StatusEOL for 8.2.0, got %v", r82.Status)
+	}
+
+	// 4. 8.3.0 in 2024 (supported) vs 2026 (EOL)
+	r83Supported := EvaluateBIGIQLifecycle("8.3.0", now2024)
+	if r83Supported.Status != StatusSupported {
+		t.Errorf("expected StatusSupported for 8.3.0 in 2024, got %v", r83Supported.Status)
+	}
+	r83EOL := EvaluateBIGIQLifecycle("8.3.0", now2026)
+	if r83EOL.Status != StatusEOL {
+		t.Errorf("expected StatusEOL for 8.3.0 in 2026, got %v", r83EOL.Status)
+	}
+
+	// 5. 8.4.0 in 2026 (supported)
+	r84 := EvaluateBIGIQLifecycle("8.4.0", now2026)
+	if r84.Status != StatusSupported {
+		t.Errorf("expected StatusSupported for 8.4.0, got %v", r84.Status)
+	}
+
+	// 6. 9.0.0 (future major)
+	r90 := EvaluateBIGIQLifecycle("9.0.0", now2026)
+	if r90.Status != StatusSupported {
+		t.Errorf("expected StatusSupported for 9.0.0, got %v", r90.Status)
+	}
+}

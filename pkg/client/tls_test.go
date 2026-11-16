@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -9,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -58,6 +60,30 @@ func TestNewClients(t *testing.T) {
 	}
 	if insecClient.CheckRedirect == nil {
 		t.Errorf("expected CheckRedirect policy configured on insecure client")
+	}
+}
+
+func TestNewProductionTransportWithProxy(t *testing.T) {
+	customDialed := false
+	SetDialContext(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		customDialed = true
+		c1, c2 := net.Pipe()
+		c2.Close()
+		return c1, nil
+	})
+	defer SetDialContext(nil)
+
+	tr := NewProductionTransport(SecureTLSConfig(true))
+	if tr == nil {
+		t.Fatal("expected non-nil transport")
+	}
+	conn, err := tr.DialContext(context.Background(), "tcp", "127.0.0.1:80")
+	if err != nil {
+		t.Fatalf("unexpected dial error: %v", err)
+	}
+	conn.Close()
+	if !customDialed {
+		t.Errorf("expected custom dialer to be invoked from transport")
 	}
 }
 

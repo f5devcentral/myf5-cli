@@ -6,6 +6,8 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
@@ -77,6 +79,26 @@ func TestBuildSSHClientConfig(t *testing.T) {
 		t.Errorf("expected error with missing key file, got nil")
 	}
 
+	// Invalid username
+	_, err = BuildSSHClientConfig(SCPOptions{
+		Host:     "127.0.0.1",
+		Username: "admin;rm",
+		Password: "testpassword",
+	})
+	if err == nil {
+		t.Errorf("expected error with invalid username, got nil")
+	}
+
+	// Invalid password
+	_, err = BuildSSHClientConfig(SCPOptions{
+		Host:     "127.0.0.1",
+		Username: "admin",
+		Password: "test password",
+	})
+	if err == nil {
+		t.Errorf("expected error with invalid password, got nil")
+	}
+
 	// Password auth
 	cfg, err := BuildSSHClientConfig(SCPOptions{
 		Host:     "127.0.0.1",
@@ -91,6 +113,40 @@ func TestBuildSSHClientConfig(t *testing.T) {
 	}
 	if len(cfg.Auth) == 0 {
 		t.Errorf("expected auth methods to be present")
+	}
+
+	// PasswordBytes auth
+	cfgBytes, err := BuildSSHClientConfig(SCPOptions{
+		Host:          "127.0.0.1",
+		Username:      "admin",
+		PasswordBytes: []byte("testpassword"),
+	})
+	if err != nil || len(cfgBytes.Auth) == 0 {
+		t.Fatalf("expected valid config with passwordBytes, got: %v", err)
+	}
+
+	// KeyPath auth
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8})
+	keyFile := filepath.Join(t.TempDir(), "id_test")
+	if err := os.WriteFile(keyFile, pemBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgKey, err := BuildSSHClientConfig(SCPOptions{
+		Host:     "127.0.0.1",
+		Username: "admin",
+		KeyPath:  keyFile,
+	})
+	if err != nil || len(cfgKey.Auth) == 0 {
+		t.Fatalf("expected valid config with keyPath, got: %v", err)
 	}
 }
 
@@ -118,14 +174,8 @@ func TestSCPUploadMockServer(t *testing.T) {
 	}
 	serverConfig.AddHostKey(signer)
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to listen on local port: %v", err)
-	}
+	listener, port := newPipeSSHServer()
 	defer listener.Close()
-
-	_, portStr, _ := net.SplitHostPort(listener.Addr().String())
-	port, _ := strconv.Atoi(portStr)
 
 	var receivedHeader string
 	var receivedBody []byte
@@ -286,13 +336,8 @@ func TestSCPDownloadMockServer(t *testing.T) {
 	}
 	serverConfig.AddHostKey(signer)
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to listen: %v", err)
-	}
+	listener, port := newPipeSSHServer()
 	defer listener.Close()
-
-	port := listener.Addr().(*net.TCPAddr).Port
 
 	go func() {
 		nConn, err := listener.Accept()
@@ -437,13 +482,8 @@ func TestQKViewSSHTmshFallback(t *testing.T) {
 	}
 	serverConfig.AddHostKey(signer)
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to listen: %v", err)
-	}
+	listener, port := newPipeSSHServer()
 	defer listener.Close()
-
-	port := listener.Addr().(*net.TCPAddr).Port
 
 	var (
 		mu           sync.Mutex

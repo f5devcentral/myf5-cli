@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -42,6 +43,7 @@ type TransferOptions struct {
 	ClientCertPath     string         // Path to TLS client certificate file (PEM) for mTLS
 	ClientKeyPath      string         // Path to TLS client certificate private key file (PEM)
 	Timeout            time.Duration  // Connection timeout
+	HTTPClient         *http.Client   // Custom HTTP client (used for in-memory testing or custom transports)
 }
 
 // Zero scrubs sensitive password and passphrase bytes and clears string fields from memory.
@@ -258,12 +260,15 @@ func newClientFromOptions(host string, opts TransferOptions, defaultPort int) *C
 		ClientCertPath: opts.ClientCertPath,
 		ClientKeyPath:  opts.ClientKeyPath,
 		Timeout:        opts.Timeout,
+		HTTPClient:     opts.HTTPClient,
 	})
 	if err == nil {
 		return c
 	}
 	c = NewClient(host, port, user, opts.Password)
-	if opts.Timeout > 0 {
+	if opts.HTTPClient != nil {
+		c.HTTPClient = opts.HTTPClient
+	} else if opts.Timeout > 0 {
 		c.HTTPClient.Timeout = opts.Timeout
 	}
 	return c

@@ -36,6 +36,7 @@ type GeoIPOptions struct {
 	ClientCertPath     string         // mTLS client certificate path
 	ClientKeyPath      string         // mTLS client private key path
 	Timeout            time.Duration  // Execution timeout (default: 3 minutes)
+	HTTPClient         *http.Client   // Custom HTTP client for mock/testing
 	Force              bool           // Pass --force to rpm via geoip_update_data -f (default: true)
 	KeepExtracted      bool           // Retain extracted files on appliance (default: false, cleans up temp dir)
 }
@@ -455,6 +456,7 @@ func applyGeoIPREST(ctx context.Context, host, scriptB64 string, opts GeoIPOptio
 		ClientCertPath: opts.ClientCertPath,
 		ClientKeyPath:  opts.ClientKeyPath,
 		Timeout:        opts.Timeout,
+		HTTPClient:     opts.HTTPClient,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to initialize appliance REST client: %w", err)

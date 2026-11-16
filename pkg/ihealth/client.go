@@ -75,7 +75,11 @@ func (c *Client) Zero() {
 // NewClient initializes a new iHealth API client.
 func NewClient(token string, baseFQDN string) *Client {
 	if baseFQDN == "" {
-		baseFQDN = DefaultIHealthFQDN
+		if envFQDN := os.Getenv("F5_IHEALTH_FQDN"); envFQDN != "" {
+			baseFQDN = envFQDN
+		} else {
+			baseFQDN = DefaultIHealthFQDN
+		}
 	}
 	return &Client{
 		HTTPClient: client.NewSecureHTTPClient(60 * time.Minute),

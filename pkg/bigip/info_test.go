@@ -5,13 +5,17 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func createTestQKViewArchive(t *testing.T, files map[string]string) []byte {
@@ -397,7 +401,7 @@ sys provision asm {
 }
 
 func TestGetSystemInfo_RestMock(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/mgmt/tm/sys/hardware":
@@ -621,5 +625,107 @@ func TestSystemInfo_SummaryPlatformEnrichment(t *testing.T) {
 	}
 	if !strings.Contains(sum4, "Software (8.4.2.3  ): Supported") || strings.Contains(sum4, "[WARNING]") {
 		t.Errorf("Summary() did not mark BIG-IQ 8.4.2.3 as Supported:\n%s", sum4)
+	}
+}
+
+func TestGetSystemInfoSSHMockServer(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed generating key: %v", err)
+	}
+	signer, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatalf("failed creating signer: %v", err)
+	}
+
+	serverConfig := &ssh.ServerConfig{
+		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+			if c.User() == "admin" && string(pass) == "secret" {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("password rejected")
+		},
+	}
+	serverConfig.AddHostKey(signer)
+
+	listener, port := newPipeSSHServer()
+	defer listener.Close()
+
+	mockOutput := `
+Sys::Version
+Main Package
+  Product  BIG-IP
+  Version  16.1.4
+  Build    0.0.12
+  Edition  Final
+
+Platform
+  Name           BIG-IP i5800
+  Base MAC       00:98:76:54:32:10
+
+System Information
+  Type           C119
+  Chassis Serial f5-tmsh-serial-888
+`
+
+	go func() {
+		tcpConn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer tcpConn.Close()
+
+		sshConn, chans, reqs, err := ssh.NewServerConn(tcpConn, serverConfig)
+		if err != nil {
+			return
+		}
+		defer sshConn.Close()
+		go ssh.DiscardRequests(reqs)
+
+		for newChannel := range chans {
+			if newChannel.ChannelType() != "session" {
+				_ = newChannel.Reject(ssh.UnknownChannelType, "unknown")
+				continue
+			}
+			channel, requests, err := newChannel.Accept()
+			if err != nil {
+				return
+			}
+			defer channel.Close()
+
+			go func(in <-chan *ssh.Request) {
+				for req := range in {
+					switch req.Type {
+					case "exec":
+						_ = req.Reply(true, nil)
+						_, _ = channel.Write([]byte(mockOutput))
+						_, _ = channel.SendRequest("exit-status", false, []byte{0, 0, 0, 0})
+						_ = channel.Close()
+						return
+					default:
+						_ = req.Reply(false, nil)
+					}
+				}
+			}(requests)
+		}
+	}()
+
+	opts := SCPOptions{
+		Host:     "127.0.0.1",
+		Port:     port,
+		Username: "admin",
+		Password: "secret",
+		Timeout:  2 * time.Second,
+	}
+
+	info, err := GetSystemInfoSSH(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("GetSystemInfoSSH failed: %v", err)
+	}
+	if info.ChassisSerialNumber != "f5-tmsh-serial-888" {
+		t.Errorf("got serial %s, want f5-tmsh-serial-888", info.ChassisSerialNumber)
+	}
+	if info.Product != "BIG-IP" {
+		t.Errorf("got product %s, want BIG-IP", info.Product)
 	}
 }

@@ -32,6 +32,7 @@ type Client struct {
 	Username      string
 	Password      string
 	PasswordBytes []byte
+	authToken     []byte
 	HTTPClient    *http.Client
 }
 
@@ -43,6 +44,10 @@ func (c *Client) Zero() {
 	if len(c.PasswordBytes) > 0 {
 		auth.ZeroBytes(c.PasswordBytes)
 		c.PasswordBytes = nil
+	}
+	if len(c.authToken) > 0 {
+		auth.ZeroBytes(c.authToken)
+		c.authToken = nil
 	}
 	c.Password = ""
 }
@@ -221,6 +226,7 @@ type ClientOptions struct {
 	ClientCertPath string
 	ClientKeyPath  string
 	Timeout        time.Duration
+	HTTPClient     *http.Client
 }
 
 // NewClientWithOptions initializes a BIG-IP appliance client with validation and optional mTLS client certificates.
@@ -264,7 +270,9 @@ func NewClientWithOptions(opts ClientOptions) (*Client, error) {
 	}
 
 	var httpClient *http.Client
-	if opts.ClientCertPath != "" {
+	if opts.HTTPClient != nil {
+		httpClient = opts.HTTPClient
+	} else if opts.ClientCertPath != "" {
 		cert, err := client.LoadClientCertificate(opts.ClientCertPath, opts.ClientKeyPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load client certificate: %w", err)
@@ -384,15 +392,29 @@ func (c *Client) CheckReadyWithKind(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	c.setAuth(req)
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.doWithAuth(req)
 	if err != nil {
 		return "", fmt.Errorf("device reachability check failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
+		verURL := fmt.Sprintf("%s/mgmt/tm/sys/version", c.BaseURL())
+		verReq, verErr := http.NewRequestWithContext(ctx, http.MethodGet, verURL, nil)
+		if verErr == nil {
+			if verResp, verDoErr := c.doWithAuth(verReq); verDoErr == nil {
+				defer verResp.Body.Close()
+				if verResp.StatusCode == http.StatusOK {
+					verBody, _ := io.ReadAll(io.LimitReader(verResp.Body, 512*1024))
+					var vInfo SystemInfo
+					parseVersionJSON(verBody, &vInfo)
+					if vInfo.ApplianceKind() == "BIG-IQ" {
+						return "BIG-IQ", nil
+					}
+				}
+			}
+		}
 		return "BIG-IP", nil
 	}
 
@@ -401,8 +423,7 @@ func (c *Client) CheckReadyWithKind(ctx context.Context) (string, error) {
 		echoURL := fmt.Sprintf("%s/mgmt/shared/echo", c.BaseURL())
 		echoReq, echoErr := http.NewRequestWithContext(ctx, http.MethodGet, echoURL, nil)
 		if echoErr == nil {
-			c.setAuth(echoReq)
-			if echoResp, doErr := c.HTTPClient.Do(echoReq); doErr == nil {
+			if echoResp, doErr := c.doWithAuth(echoReq); doErr == nil {
 				defer echoResp.Body.Close()
 				if echoResp.StatusCode == http.StatusOK {
 					return "BIG-IQ", nil
@@ -480,10 +501,9 @@ func (c *Client) CreateQKViewTaskWithOptions(ctx context.Context, filename strin
 	if err != nil {
 		return nil, err
 	}
-	c.setAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.doWithAuth(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create qkview task: %w", err)
 	}
@@ -508,9 +528,8 @@ func (c *Client) QueryQKViewTask(ctx context.Context, taskID string) (*QKViewTas
 	if err != nil {
 		return nil, err
 	}
-	c.setAuth(req)
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.doWithAuth(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query qkview task %s: %w", taskID, err)
 	}
@@ -621,7 +640,6 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 	if err != nil {
 		return "", err
 	}
-	c.setAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 
 	type result struct {
@@ -630,7 +648,7 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 	}
 	resCh := make(chan result, 1)
 	go func() {
-		resp, err := c.HTTPClient.Do(req)
+		resp, err := c.doWithAuth(req)
 		resCh <- result{resp: resp, err: err}
 	}()
 
@@ -677,9 +695,8 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 				if err != nil {
 					return "", err
 				}
-				c.setAuth(bashReq)
 				bashReq.Header.Set("Content-Type", "application/json")
-				bashResp, err := c.HTTPClient.Do(bashReq)
+				bashResp, err := c.doWithAuth(bashReq)
 				if err != nil {
 					return "", fmt.Errorf("bash fallback for qkview failed: %w", err)
 				}
@@ -742,16 +759,15 @@ func (c *Client) DownloadFromURI(ctx context.Context, endpointURI, localPath str
 		if err != nil {
 			return err
 		}
-		c.setAuth(req)
 		req.Header.Set("Content-Type", "application/octet-stream")
 		req.Header.Set("Content-Range", fmt.Sprintf("%d-%d/%d", start, end, totalSize))
 
-		resp, err := c.HTTPClient.Do(req)
+		resp, err := c.doWithAuth(req)
 		if err != nil {
 			return fmt.Errorf("failed to download chunk from %s: %w", endpointURI, err)
 		}
 
-		if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 			_ = resp.Body.Close()
 			return fmt.Errorf("chunk download failed with HTTP %d: %s", resp.StatusCode, string(b))
@@ -857,9 +873,8 @@ func (c *Client) DeleteQKView(ctx context.Context, remoteFilename string) error 
 	if err != nil {
 		return err
 	}
-	c.setAuth(req)
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.doWithAuth(req)
 	if err != nil {
 		return fmt.Errorf("delete qkview failed: %w", err)
 	}
@@ -902,9 +917,8 @@ func (c *Client) GetEndpointExample(ctx context.Context, endpoint string) ([]byt
 		return nil, fmt.Errorf("failed to create request for example endpoint: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	c.setAuth(req)
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.doWithAuth(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch example for %s: %w", p, err)
 	}
@@ -929,6 +943,12 @@ func (c *Client) GetEndpointExample(ctx context.Context, endpoint string) ([]byt
 }
 
 func (c *Client) setAuth(req *http.Request) {
+	if len(c.authToken) > 0 {
+		req.Header.Set("X-F5-Auth-Token", string(c.authToken))
+		req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
+		return
+	}
+
 	pwBytes := c.PasswordBytes
 	if len(pwBytes) == 0 && c.Password != "" {
 		pwBytes = []byte(c.Password)
@@ -942,6 +962,82 @@ func (c *Client) setAuth(req *http.Request) {
 
 	req.Header.Set("Authorization", "Basic "+authHeader)
 	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
+}
+
+func (c *Client) acquireAuthToken(ctx context.Context) error {
+	loginURL := fmt.Sprintf("%s/mgmt/shared/authn/login", c.BaseURL())
+	pw := string(c.PasswordBytes)
+	if pw == "" && c.Password != "" {
+		pw = c.Password
+	}
+	payload := map[string]string{
+		"username":          c.Username,
+		"password":          pw,
+		"loginProviderName": "tmos",
+	}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal login payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create login request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("login request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+		return fmt.Errorf("login failed with HTTP %d: %s", resp.StatusCode, string(b))
+	}
+
+	var parsed struct {
+		Token struct {
+			Token string `json:"token"`
+		} `json:"token"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024*1024)).Decode(&parsed); err != nil {
+		return fmt.Errorf("failed to decode login token response: %w", err)
+	}
+	if parsed.Token.Token == "" {
+		return errors.New("empty token received from login response")
+	}
+
+	c.authToken = []byte(parsed.Token.Token)
+	return nil
+}
+
+func (c *Client) doWithAuth(req *http.Request) (*http.Response, error) {
+	c.setAuth(req)
+	resp, err := c.HTTPClient.Do(req)
+	if err == nil && resp.StatusCode == http.StatusUnauthorized && len(c.authToken) == 0 && (len(c.PasswordBytes) > 0 || c.Password != "") {
+		if req.Body == nil || req.GetBody != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+
+			if tokenErr := c.acquireAuthToken(req.Context()); tokenErr == nil {
+				req2 := req.Clone(req.Context())
+				if req.GetBody != nil {
+					b, err := req.GetBody()
+					if err != nil {
+						return resp, err
+					}
+					req2.Body = b
+				}
+				req2.Header.Del("Authorization")
+				c.setAuth(req2)
+				return c.HTTPClient.Do(req2)
+			}
+		}
+	}
+	return resp, err
 }
 
 var validUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_.\-@]*$`)

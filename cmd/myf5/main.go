@@ -33,18 +33,29 @@ import (
 const Version = "1.1.0"
 
 func main() {
+	runMain(os.Args)
+}
+
+func runMain(rawArgs []string) {
+	var argsToInspect []string
+	if len(rawArgs) > 1 {
+		argsToInspect = rawArgs[1:]
+	}
+
 	// Enforce Zero-Secret CLI Policy
-	if err := auth.CheckNoCLISecrets(os.Args[1:]); err != nil {
+	if err := auth.CheckNoCLISecrets(argsToInspect); err != nil {
 		fmt.Fprintf(os.Stderr, "\n[SECURITY ERROR] %s\n\n", err.Error())
 		exitFunc(2)
+		return
 	}
 
 	// Extract global --proxy flag if present
-	cleanArgs, proxyFlag := extractProxyFlag(os.Args[1:])
+	cleanArgs, proxyFlag := extractProxyFlag(argsToInspect)
 	if proxyFlag != "" {
 		if err := client.SetGlobalProxy(proxyFlag); err != nil {
 			fmt.Fprintf(os.Stderr, "\n[ERROR] Invalid proxy URL: %v\n\n", err)
 			exitFunc(1)
+			return
 		}
 	}
 

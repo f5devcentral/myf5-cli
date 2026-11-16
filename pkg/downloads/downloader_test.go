@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -21,11 +20,13 @@ func TestDownloadFileWithChecksum(t *testing.T) {
 	hasher.Write(testData)
 	expectedSHA256 := hex.EncodeToString(hasher.Sum(nil))
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", strconv.Itoa(len(testData)))
 		w.Write(testData)
 	}))
 	defer server.Close()
+	downloadHTTPClient = server.Client()
+	defer func() { downloadHTTPClient = nil }()
 
 	tempDir := t.TempDir()
 	outFile := filepath.Join(tempDir, "test_image.iso")
@@ -70,11 +71,13 @@ func TestDownloadFileWithChecksum(t *testing.T) {
 
 func TestDownloadFile_DirectoryTarget(t *testing.T) {
 	testData := []byte("directory-target-data")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", strconv.Itoa(len(testData)))
 		w.Write(testData)
 	}))
 	defer server.Close()
+	downloadHTTPClient = server.Client()
+	defer func() { downloadHTTPClient = nil }()
 
 	tempDir := t.TempDir()
 	// Download into directory with trailing slash
@@ -165,11 +168,13 @@ func TestDownloadLink_Expiration(t *testing.T) {
 }
 
 func TestDownloadFile_ExpiredLink(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		w.Write([]byte("<Error><Code>AccessDenied</Code><Message>Request has expired</Message></Error>"))
 	}))
 	defer server.Close()
+	downloadHTTPClient = server.Client()
+	defer func() { downloadHTTPClient = nil }()
 
 	tempDir := t.TempDir()
 	outFile := filepath.Join(tempDir, "expired.iso")

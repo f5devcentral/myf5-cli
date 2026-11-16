@@ -19,15 +19,20 @@ type exitPanic struct {
 	code int
 }
 
-// exitFunc is the process termination function, replaced during interactive mode
-// so failed commands return to the shell prompt instead of exiting the process.
-var exitFunc = os.Exit
+var (
+	exitFunc                      = os.Exit
+	isTerminalFunc                = term.IsTerminal
+	makeRawFunc                   = term.MakeRaw
+	restoreTerminalFunc           = term.Restore
+	interactiveIn       io.Reader = os.Stdin
+	interactiveOut      io.Writer = os.Stdout
+)
 
 // startInteractive launches the interactive CLI shell with command history
 // and tab-completion.
 func startInteractive() {
 	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
+	if !isTerminalFunc(fd) {
 		fmt.Fprintln(os.Stderr, "[ERROR] Interactive mode requires a terminal TTY.")
 		exitFunc(1)
 		return
@@ -50,7 +55,7 @@ func startInteractive() {
 
 	for {
 		// Put terminal in raw mode for line editing, history, and tab completion
-		oldState, err := term.MakeRaw(fd)
+		oldState, err := makeRawFunc(fd)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ERROR] Failed to set raw terminal: %v\n", err)
 			return
@@ -59,7 +64,7 @@ func startInteractive() {
 		terminal := term.NewTerminal(struct {
 			io.Reader
 			io.Writer
-		}{os.Stdin, os.Stdout}, "myf5> ")
+		}{interactiveIn, interactiveOut}, "myf5> ")
 
 		terminal.AutoCompleteCallback = func(line string, pos int, key rune) (string, int, bool) {
 			if key != '\t' {
@@ -69,7 +74,7 @@ func startInteractive() {
 		}
 
 		line, err := terminal.ReadLine()
-		_ = term.Restore(fd, oldState)
+		_ = restoreTerminalFunc(fd, oldState)
 
 		if err != nil {
 			// EOF (Ctrl-D) or terminal closed

@@ -23,16 +23,25 @@ func newOSLogger() Logger {
 }
 
 func (l *SyslogLogger) Info(format string, args ...any) {
+	if l.writer == nil {
+		return
+	}
 	msg := ScrubSecrets(fmt.Sprintf(format, args...))
 	_ = l.writer.Info(msg)
 }
 
 func (l *SyslogLogger) Warn(format string, args ...any) {
+	if l.writer == nil {
+		return
+	}
 	msg := ScrubSecrets(fmt.Sprintf(format, args...))
 	_ = l.writer.Warning(msg)
 }
 
 func (l *SyslogLogger) Error(format string, args ...any) {
+	if l.writer == nil {
+		return
+	}
 	msg := ScrubSecrets(fmt.Sprintf(format, args...))
 	_ = l.writer.Err(msg)
 }

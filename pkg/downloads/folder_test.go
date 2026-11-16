@@ -124,3 +124,23 @@ func TestResolveOSDownloadsDir(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultDownloadsDir(t *testing.T) {
+	dir := DefaultDownloadsDir()
+	if dir == "" {
+		t.Errorf("DefaultDownloadsDir() returned empty string")
+	}
+}
+
+func TestExpandHome(t *testing.T) {
+	home := "/Users/test"
+	if got := expandHome("$HOME/Downloads", home); got != "/Users/test/Downloads" {
+		t.Errorf("got %s, want /Users/test/Downloads", got)
+	}
+	if got := expandHome("${HOME}/Downloads", home); got != "/Users/test/Downloads" {
+		t.Errorf("got %s, want /Users/test/Downloads", got)
+	}
+	if got := expandHome("/var/tmp", home); got != "/var/tmp" {
+		t.Errorf("got %s, want /var/tmp", got)
+	}
+}

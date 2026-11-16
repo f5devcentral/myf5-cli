@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -50,10 +51,12 @@ func NewProductionTransportWithProxy(tlsConfig *tls.Config, explicitProxy *url.U
 	return &http.Transport{
 		Proxy: ProxyFunc(explicitProxy),
 		// Restrict TCP connect and DNS dial phases to prevent slowloris hanging
-		DialContext: (&net.Dialer{
-			Timeout:   15 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			globalProxyMu.RLock()
+			d := proxyDialContext
+			globalProxyMu.RUnlock()
+			return d(ctx, network, addr)
+		},
 		TLSClientConfig: tlsConfig,
 		// Limit TLS negotiation phase duration
 		TLSHandshakeTimeout: 10 * time.Second,

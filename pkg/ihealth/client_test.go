@@ -2,6 +2,8 @@ package ihealth
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -14,12 +16,46 @@ import (
 	"time"
 )
 
+type roundTripFunc func(req *http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type mockServer struct {
+	URL    string
+	client *http.Client
+	Config *http.Server
+}
+
+func (m *mockServer) Close()               {}
+func (m *mockServer) Client() *http.Client { return m.client }
+
+func newMockServer(handler http.Handler) *mockServer {
+	return &mockServer{
+		URL:    "http://mock.ihealth.f5.invalid",
+		Config: &http.Server{},
+		client: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (resp *http.Response, err error) {
+				defer func() {
+					if r := recover(); r != nil {
+						err = fmt.Errorf("connection reset by peer: %v", r)
+					}
+				}()
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+				return rec.Result(), nil
+			}),
+		},
+	}
+}
+
 // TestListQKViewsFetchesDetailPerID verifies that ListQKViews negotiates JSON
 // via the +json vendor media type and populates summary metadata by fetching
 // each QKView detail resource.
 func TestListQKViewsFetchesDetailPerID(t *testing.T) {
 	var sawAccept string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sawAccept = r.Header.Get("Accept")
 
 		// A server that honours the header the way iHealth does: the bare
@@ -82,7 +118,7 @@ func TestListQKViewsFetchesDetailPerID(t *testing.T) {
 }
 
 func TestUploadQKView(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
@@ -159,7 +195,7 @@ func TestUploadQKView(t *testing.T) {
 // this one counts goroutines after forcing a failure.
 func TestUploadQKViewReleasesWriterOnRequestFailure(t *testing.T) {
 	// A server that hangs up immediately, so Do() fails mid-request.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		panic("closing connection to force a client-side failure")
 	}))
 	server.Config.ErrorLog = log.New(io.Discard, "", 0)
@@ -258,7 +294,7 @@ func TestParseUploadResponse(t *testing.T) {
 }
 
 func TestGetQKViewHTTP202Accepted(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != QKViewsPath+"/26991271" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -298,5 +334,77 @@ func TestGetQKViewHTTP202Accepted(t *testing.T) {
 	wantGUI := "https://ihealth.f5.com/qkview-analyzer/qv/26991271"
 	if summary.GUIURL != wantGUI {
 		t.Errorf("GUIURL = %q, want fallback %q", summary.GUIURL, wantGUI)
+	}
+}
+
+func TestIHealthClientMethods(t *testing.T) {
+	var nilClient *Client
+	if nilClient.String() != "<nil>" {
+		t.Errorf("nil Client.String() = %q, want <nil>", nilClient.String())
+	}
+	nilClient.Zero()
+
+	c := NewClient("tok123", "ihealth.example.com")
+	if !strings.Contains(c.String(), "ihealth.example.com") {
+		t.Errorf("String() missing BaseFQDN: %s", c.String())
+	}
+	if strings.Contains(c.String(), "tok123") {
+		t.Errorf("String() leaked token: %s", c.String())
+	}
+	if c.GoString() != c.String() {
+		t.Errorf("GoString() != String()")
+	}
+
+	cEmpty := NewClient("", "")
+	if !strings.Contains(cEmpty.String(), "[EMPTY]") {
+		t.Errorf("String() should show [EMPTY] for empty token")
+	}
+	if cEmpty.BaseFQDN != DefaultIHealthFQDN {
+		t.Errorf("BaseFQDN = %s, want %s", cEmpty.BaseFQDN, DefaultIHealthFQDN)
+	}
+
+	c.Zero()
+	if c.Token != "" {
+		t.Errorf("Zero() did not clear token")
+	}
+}
+
+func TestStringifyUploadID(t *testing.T) {
+	cases := []struct {
+		input any
+		want  string
+	}{
+		{nil, ""},
+		{" 12345 ", "12345"},
+		{float64(12345), "12345"},
+		{int64(12345), "12345"},
+		{int(12345), "12345"},
+		{json.Number("12345"), "12345"},
+		{true, "true"},
+	}
+	for _, tc := range cases {
+		got := stringifyUploadID(tc.input)
+		if got != tc.want {
+			t.Errorf("stringifyUploadID(%v) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestIDFromURL(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"https://ihealth.f5.com/qkview-analyzer/api/qkviews/12345", "12345"},
+		{"https://ihealth.f5.com/qkview-analyzer/api/qkviews/12345/", "12345"},
+		{"https://ihealth.f5.com/", ""},
+		{"://invalid-url/path/foo", "foo"},
+	}
+	for _, tc := range cases {
+		got := idFromURL(tc.input)
+		if got != tc.want {
+			t.Errorf("idFromURL(%q) = %q, want %q", tc.input, got, tc.want)
+		}
 	}
 }

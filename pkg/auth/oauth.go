@@ -67,7 +67,11 @@ func AuthenticateWithClient(ctx context.Context, httpClient *http.Client, authFQ
 // AuthenticateWithSecretBytes authenticates using a mutable clientSecret byte slice that is scrubbed from memory.
 func AuthenticateWithSecretBytes(ctx context.Context, httpClient *http.Client, authFQDN, appID, clientID string, clientSecret []byte, scope string) (string, error) {
 	if authFQDN == "" {
-		authFQDN = DefaultAuthFQDN
+		if envFQDN := os.Getenv("F5_AUTH_FQDN"); envFQDN != "" {
+			authFQDN = envFQDN
+		} else {
+			authFQDN = DefaultAuthFQDN
+		}
 	}
 	if appID == "" {
 		appID = DefaultAppID

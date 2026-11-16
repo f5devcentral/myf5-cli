@@ -25,6 +25,8 @@ import (
 // ProgressCallback is called periodically during download with bytes transferred and total size.
 type ProgressCallback func(transferred, total int64, speedBytesPerSec float64)
 
+var downloadHTTPClient *http.Client
+
 // DownloadFile streams a file from downloadURL directly to outputPath, calculating
 // checksums in real-time and updating progress.
 func DownloadFile(
@@ -42,7 +44,10 @@ func DownloadFile(
 	req.Header.Set("User-Agent", "myf5-cli-go-downloader/1.0.0")
 
 	// Long timeout for large image downloads (e.g. 10 GB ISOs)
-	httpClient := client.NewSecureHTTPClient(6 * time.Hour)
+	httpClient := downloadHTTPClient
+	if httpClient == nil {
+		httpClient = client.NewSecureHTTPClient(6 * time.Hour)
+	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("download connection failed: %w", err)
