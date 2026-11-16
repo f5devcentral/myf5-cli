@@ -134,11 +134,12 @@ func TestDefaultDownloadsDir(t *testing.T) {
 
 func TestExpandHome(t *testing.T) {
 	home := "/Users/test"
-	if got := expandHome("$HOME/Downloads", home); got != "/Users/test/Downloads" {
-		t.Errorf("got %s, want /Users/test/Downloads", got)
+	expected := filepath.Join(home, "Downloads")
+	if got := expandHome("$HOME/Downloads", home); got != expected {
+		t.Errorf("got %s, want %s", got, expected)
 	}
-	if got := expandHome("${HOME}/Downloads", home); got != "/Users/test/Downloads" {
-		t.Errorf("got %s, want /Users/test/Downloads", got)
+	if got := expandHome("${HOME}/Downloads", home); got != expected {
+		t.Errorf("got %s, want %s", got, expected)
 	}
 	if got := expandHome("/var/tmp", home); got != "/var/tmp" {
 		t.Errorf("got %s, want /var/tmp", got)

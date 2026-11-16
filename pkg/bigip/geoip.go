@@ -403,25 +403,28 @@ func applyGeoIPSSH(ctx context.Context, host, scriptB64 string, opts GeoIPOption
 	}
 	defer session.Close()
 
-	var outBuf bytes.Buffer
-	session.Stdout = &outBuf
-	session.Stderr = &outBuf
-
 	cmd := fmt.Sprintf("echo '%s' | base64 -d | bash", scriptB64)
-	runDone := make(chan error, 1)
+	type runResult struct {
+		output []byte
+		err    error
+	}
+	runDone := make(chan runResult, 1)
 	go func() {
-		runDone <- session.Run(cmd)
+		out, rErr := session.CombinedOutput(cmd)
+		runDone <- runResult{output: out, err: rErr}
 	}()
 
 	var runErr error
+	var rawOutput string
 	select {
 	case <-ctx.Done():
 		_ = session.Signal(ssh.SIGINT)
 		_ = session.Close()
-		return outBuf.String(), ctx.Err()
-	case runErr = <-runDone:
+		return "", ctx.Err()
+	case res := <-runDone:
+		rawOutput = string(res.output)
+		runErr = res.err
 	}
-	rawOutput := outBuf.String()
 
 	if runErr != nil && !strings.Contains(rawOutput, "--- SCRIPT_EXIT_CODE:") {
 		return rawOutput, fmt.Errorf("SSH execution error: %w (output: %s)", runErr, strings.TrimSpace(rawOutput))

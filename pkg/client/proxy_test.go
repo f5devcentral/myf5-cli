@@ -837,6 +837,9 @@ func TestSOCKS5ErrorsAndAuth(t *testing.T) {
 }
 
 func TestSetDialContext(t *testing.T) {
+	t.Cleanup(func() {
+		SetDialContext(memDial)
+	})
 	customDialed := false
 	customFn := func(ctx context.Context, network, addr string) (net.Conn, error) {
 		customDialed = true

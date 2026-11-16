@@ -334,17 +334,18 @@ func TestResolveApplianceCreds_Validations(t *testing.T) {
 
 func TestHasDefaultSSHAuth(t *testing.T) {
 	// 1. With SSH_AUTH_SOCK set
-	os.Setenv("SSH_AUTH_SOCK", "/tmp/fake-ssh-agent.sock")
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/fake-ssh-agent.sock")
 	if !hasDefaultSSHAuth() {
 		t.Errorf("expected hasDefaultSSHAuth to be true with SSH_AUTH_SOCK")
 	}
-	os.Unsetenv("SSH_AUTH_SOCK")
+	t.Setenv("SSH_AUTH_SOCK", "")
 
 	// 2. With clean temp home directory without keys
 	fakeHome := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", fakeHome)
-	defer os.Setenv("HOME", origHome)
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("USERPROFILE", fakeHome)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
 
 	if hasDefaultSSHAuth() {
 		t.Errorf("expected hasDefaultSSHAuth to be false in empty home")
@@ -352,8 +353,12 @@ func TestHasDefaultSSHAuth(t *testing.T) {
 
 	// 3. With id_rsa created
 	sshDir := filepath.Join(fakeHome, ".ssh")
-	os.MkdirAll(sshDir, 0700)
-	os.WriteFile(filepath.Join(sshDir, "id_rsa"), []byte("dummy-key"), 0600)
+	if err := os.MkdirAll(sshDir, 0700); err != nil {
+		t.Fatalf("failed to create sshDir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sshDir, "id_rsa"), []byte("dummy-key"), 0600); err != nil {
+		t.Fatalf("failed to write id_rsa: %v", err)
+	}
 
 	if !hasDefaultSSHAuth() {
 		t.Errorf("expected hasDefaultSSHAuth to be true with id_rsa present")

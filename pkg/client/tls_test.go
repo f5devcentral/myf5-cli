@@ -71,7 +71,7 @@ func TestNewProductionTransportWithProxy(t *testing.T) {
 		c2.Close()
 		return c1, nil
 	})
-	defer SetDialContext(nil)
+	defer SetDialContext(memDial)
 
 	tr := NewProductionTransport(SecureTLSConfig(true))
 	if tr == nil {
