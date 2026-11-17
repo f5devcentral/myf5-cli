@@ -50,7 +50,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - macos-latest
+          - macos-15-intel
+          - windows-latest
+          - windows-11-arm
         go-version: ["1.26.x", "stable"]
 
     steps:
@@ -63,10 +69,19 @@ jobs:
           go-version: ${{ matrix.go-version }}
           cache: true
 
+      - name: Inspect Compiler Environment (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          gcc --version || true
+          go env CGO_ENABLED CC
+
       - name: Run Unit Tests with Race Detector & Coverage
         shell: bash
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            CGO_ENABLED=1 go test -v -race ./...
+          elif [ "${{ runner.os }}" = "Windows" ]; then
             go test -v ./...
           else
             go test -v -race -covermode=atomic -coverprofile=coverage.out ./...
@@ -79,13 +94,26 @@ jobs:
           name: code-coverage-report
           path: coverage.out
 
-  host-build:
-    name: Build Verification on ${{ matrix.os }}
+  release-smoke:
+    name: Release Smoke Test on ${{ matrix.os }} (${{ matrix.target }})
     needs: [lint-and-vet, unit-test]
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            target: linux-amd64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+          - os: macos-latest
+            target: darwin-arm64
+          - os: macos-15-intel
+            target: darwin-amd64
+          - os: windows-latest
+            target: windows-amd64
+          - os: windows-11-arm
+            target: windows-arm64
 
     steps:
       - name: Checkout Code
@@ -97,10 +125,83 @@ jobs:
           go-version: "stable"
           cache: true
 
-      - name: Build Binary
-        run: go build -v -o bin/myf5${{ runner.os == 'Windows' && '.exe' || '' }} ./cmd/myf5
-
-      - name: Smoke Test Version Output
+      - name: Build Release Binary
         shell: bash
         run: |
-          ./bin/myf5${{ runner.os == 'Windows' && '.exe' || '' }} version
+          mkdir -p bin
+          BIN_PATH="bin/myf5"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            BIN_PATH="bin/myf5.exe"
+          fi
+          CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.Version=ci-${{ github.sha }}" -o "$BIN_PATH" ./cmd/myf5
+
+      - name: Run Release Smoke Tests
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TMP_HOME="$(mktemp -d)"
+          export HOME="$TMP_HOME"
+          export USERPROFILE="$TMP_HOME"
+          if command -v cygpath >/dev/null 2>&1; then
+            export USERPROFILE="$(cygpath -w "$TMP_HOME")"
+          fi
+
+          BIN="./bin/myf5"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            BIN="./bin/myf5.exe"
+          fi
+
+          echo "=== (a) Verify version output ==="
+          VERSION_OUT="$("$BIN" version)"
+          echo "$VERSION_OUT"
+          echo "$VERSION_OUT" | grep -F "${{ matrix.target }}"
+          echo "$VERSION_OUT" | grep -F "ci-${{ github.sha }}"
+
+          echo "=== (b) Verify --help exits 0 for all top-level commands ==="
+          COMMANDS=(downloads cases wizard ihealth bigip bigiq push pull geoip proxy doctor interactive version)
+          for cmd in "${COMMANDS[@]}"; do
+            "$BIN" "$cmd" --help </dev/null
+          done
+
+          echo "=== (c) Proxy assertions ==="
+          # 0. Unset proxy environment variables
+          unset MYF5_PROXY F5_PROXY HTTPS_PROXY HTTP_PROXY ALL_PROXY https_proxy http_proxy all_proxy NO_PROXY no_proxy || true
+
+          # 1. proxy show exits 0 and its output contains "No proxy configured"
+          SHOW_NONE="$("$BIN" proxy show)"
+          echo "$SHOW_NONE"
+          echo "$SHOW_NONE" | grep -F "No proxy configured"
+
+          # 2. proxy set http://proxy.invalid:3128 exits 0 and its output contains "Global proxy set to http://proxy.invalid:3128"
+          SET_OUT="$("$BIN" proxy set http://proxy.invalid:3128)"
+          echo "$SET_OUT"
+          echo "$SET_OUT" | grep -F "Global proxy set to http://proxy.invalid:3128"
+
+          # 3. MYF5_PROXY=http://proxy.invalid:3128 "$BIN" proxy show contains "proxy.invalid:3128"
+          ENV_SHOW="$(MYF5_PROXY=http://proxy.invalid:3128 "$BIN" proxy show)"
+          echo "$ENV_SHOW"
+          echo "$ENV_SHOW" | grep -F "proxy.invalid:3128"
+
+          # 4. Redaction: "$BIN" --proxy http://user:s3cr3tpw@proxy.invalid:3128 proxy show exits 0, contains proxy.invalid:3128, and does NOT contain s3cr3tpw
+          REDACT_SHOW="$("$BIN" --proxy http://user:s3cr3tpw@proxy.invalid:3128 proxy show)"
+          echo "$REDACT_SHOW"
+          echo "$REDACT_SHOW" | grep -F "proxy.invalid:3128"
+          if echo "$REDACT_SHOW" | grep -F "s3cr3tpw"; then
+            echo "FAIL: secret appeared in output"
+            exit 1
+          fi
+
+          # 5. Invalid input: "$BIN" proxy set ':::bad' must exit non-zero
+          if "$BIN" proxy set ':::bad' >/dev/null 2>&1; then
+            echo "FAIL: invalid proxy set succeeded"
+            exit 1
+          fi
+
+          echo "=== (d) Interactive fails fast without a TTY ==="
+          if "$BIN" interactive </dev/null >"$TMP_HOME/out.txt" 2>"$TMP_HOME/err.txt"; then
+            echo "FAIL: interactive succeeded without a TTY"
+            exit 1
+          fi
+          grep -F "requires a terminal" "$TMP_HOME/err.txt"

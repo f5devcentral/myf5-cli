@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,10 @@ import (
 )
 
 const Version = "1.1.0"
+
+func versionString() string {
+	return fmt.Sprintf("myf5-cli version %s (Go %s / %s-%s)", Version, strings.TrimPrefix(runtime.Version(), "go"), runtime.GOOS, runtime.GOARCH)
+}
 
 func main() {
 	runMain(os.Args)
@@ -157,7 +162,7 @@ func executeSubcommand(ctx context.Context, subcommand string, args []string) {
 	case "interactive", "shell", "repl", "i":
 		startInteractive()
 	case "version", "--version", "-v":
-		fmt.Printf("myf5-cli version %s (Go 1.27.1 / darwin-arm64)\n", Version)
+		fmt.Println(versionString())
 	case "help", "--help", "-h":
 		printUsage()
 	default:
@@ -379,6 +384,7 @@ func handleProxyCommand(args []string) {
 	if args[0] == "clear" || args[0] == "unset" || args[0] == "off" {
 		client.ClearGlobalProxy()
 		fmt.Println("Global proxy cleared. Outbound connections will connect directly (unless environment proxy is active).")
+		fmt.Println("Note: this applies to the current myf5 process only (for example, an interactive session). To persist it, use --proxy <url> or set MYF5_PROXY.")
 		return
 	}
 	if args[0] == "set" && len(args) > 1 {
@@ -388,6 +394,7 @@ func handleProxyCommand(args []string) {
 			return
 		}
 		fmt.Printf("Global proxy set to %s\n", client.RedactProxyURL(args[1]))
+		fmt.Println("Note: this applies to the current myf5 process only (for example, an interactive session). To persist it, use --proxy <url> or set MYF5_PROXY.")
 		return
 	}
 	if err := client.SetGlobalProxy(args[0]); err != nil {
@@ -396,6 +403,7 @@ func handleProxyCommand(args []string) {
 		return
 	}
 	fmt.Printf("Global proxy set to %s\n", client.RedactProxyURL(args[0]))
+	fmt.Println("Note: this applies to the current myf5 process only (for example, an interactive session). To persist it, use --proxy <url> or set MYF5_PROXY.")
 }
 
 func printDoctorUsage() {
@@ -495,7 +503,11 @@ func suggestRemediation(err error) string {
 	if strings.Contains(msg, "429") || strings.Contains(msg, "Too Many Requests") {
 		return "  • MyF5 APIs enforce a rate limit of approximately 10 requests per minute.\n  • Wait 60 seconds before retrying your command."
 	}
-	if strings.Contains(msg, "connection refused") || strings.Contains(msg, "timeout") || strings.Contains(msg, "no such host") || strings.Contains(msg, "i/o timeout") {
+	if strings.Contains(msg, "connection refused") || strings.Contains(msg, "actively refused") ||
+		strings.Contains(msg, "timeout") || strings.Contains(msg, "timed out") ||
+		strings.Contains(msg, "did not properly respond") ||
+		strings.Contains(msg, "no such host") || strings.Contains(msg, "no route to host") ||
+		strings.Contains(msg, "network is unreachable") || strings.Contains(msg, "i/o timeout") {
 		return "  • Verify hostname DNS resolution and that port 443 (HTTPS) or 22 (SSH) is reachable.\n  • Check security group and firewall egress rules.\n  • Run 'myf5 doctor' to test network egress."
 	}
 	if strings.Contains(msg, "traversal") || strings.Contains(msg, "outside destination") {

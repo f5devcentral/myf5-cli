@@ -187,3 +187,62 @@ func TestDownloadFile_ExpiredLink(t *testing.T) {
 		t.Errorf("expected error message to mention expired, got: %v", err)
 	}
 }
+
+func TestFileNameFromURL(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"https://cdn.example/path/BIGIP-17.1.iso?Expires=1&Signature=a~b&Key-Pair-Id=K", "BIGIP-17.1.iso"},
+		{"https://cdn.example/a%20b.iso", "a b.iso"},
+		{"https://cdn.example/x/..%5C..%5Cevil.exe", "download.bin"},
+		{"https://cdn.example/", "download.bin"},
+		{"https://cdn.example/file%3Aads", "download.bin"},
+		{"https://cdn.example/%2e%2e", "download.bin"},
+		{"::not a url", "download.bin"},
+	}
+
+	for _, tt := range tests {
+		got := fileNameFromURL(tt.input)
+		if got != tt.expected {
+			t.Errorf("fileNameFromURL(%q) = %q; want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestDownloadFile_PresignedURL(t *testing.T) {
+	testData := []byte("presigned-url-download-data")
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(testData)))
+		w.Write(testData)
+	}))
+	defer server.Close()
+	downloadHTTPClient = server.Client()
+	defer func() { downloadHTTPClient = nil }()
+
+	tempDir := t.TempDir()
+	presignedURL := server.URL + "/sample.iso?Expires=9999999999&Signature=abc"
+	err := DownloadFile(context.Background(), presignedURL, tempDir+"/", "", "", nil)
+	if err != nil {
+		t.Fatalf("DownloadFile with presigned URL failed: %v", err)
+	}
+
+	samplePath := filepath.Join(tempDir, "sample.iso")
+	content, err := os.ReadFile(samplePath)
+	if err != nil {
+		t.Fatalf("failed to read downloaded sample.iso: %v", err)
+	}
+	if string(content) != string(testData) {
+		t.Errorf("content mismatch, got %s, want %s", string(content), string(testData))
+	}
+
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatalf("failed to read tempDir entries: %v", err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "?") || strings.Contains(entry.Name(), "Signature") {
+			t.Errorf("found unwanted directory entry: %s", entry.Name())
+		}
+	}
+}

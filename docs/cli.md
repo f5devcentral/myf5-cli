@@ -456,8 +456,8 @@ Manage outbound HTTP, HTTPS, and SOCKS5 proxy settings for routing API traffic t
 
 ```bash
 myf5 proxy show            # Display active egress proxy configuration
-myf5 proxy set <url>       # Persistently configure default proxy (http://, https://, socks5://)
-myf5 proxy clear           # Remove persistent proxy configuration
+myf5 proxy set <url>       # Configure proxy for current process/session (use --proxy or MYF5_PROXY to persist)
+myf5 proxy clear           # Clear proxy for current process/session
 myf5 --proxy <url> <cmd>   # Specify proxy for a single command invocation
 ```
 

@@ -27,6 +27,26 @@ type ProgressCallback func(transferred, total int64, speedBytesPerSec float64)
 
 var downloadHTTPClient *http.Client
 
+func fileNameFromURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "download.bin"
+	}
+	name := path.Base(u.Path)
+	if name == "" || name == "." || name == ".." || name == "/" {
+		return "download.bin"
+	}
+	if strings.ContainsAny(name, "/\\:*?\"<>|") {
+		return "download.bin"
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return "download.bin"
+		}
+	}
+	return name
+}
+
 // DownloadFile streams a file from downloadURL directly to outputPath, calculating
 // checksums in real-time and updating progress.
 func DownloadFile(
@@ -80,18 +100,14 @@ func DownloadFile(
 
 	totalSize := resp.ContentLength
 	cleanOut := filepath.Clean(outputPath)
-	if strings.HasSuffix(outputPath, "/") || strings.HasSuffix(outputPath, string(filepath.Separator)) {
-		uBase := path.Base(downloadURL)
-		if uBase == "" || uBase == "." || uBase == "/" {
-			uBase = "download.bin"
+	isDirTarget := strings.HasSuffix(outputPath, "/") || strings.HasSuffix(outputPath, string(filepath.Separator))
+	if !isDirTarget {
+		if fi, statErr := os.Stat(cleanOut); statErr == nil && fi.IsDir() {
+			isDirTarget = true
 		}
-		cleanOut = filepath.Join(cleanOut, uBase)
-	} else if fi, statErr := os.Stat(cleanOut); statErr == nil && fi.IsDir() {
-		uBase := path.Base(downloadURL)
-		if uBase == "" || uBase == "." || uBase == "/" {
-			uBase = "download.bin"
-		}
-		cleanOut = filepath.Join(cleanOut, uBase)
+	}
+	if isDirTarget {
+		cleanOut = filepath.Join(cleanOut, fileNameFromURL(downloadURL))
 	}
 	outputPath = cleanOut
 

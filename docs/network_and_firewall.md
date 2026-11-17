@@ -71,7 +71,7 @@ In air-gapped data centers, DMZs, or secured corporate networks, direct Internet
    myf5 --proxy http://proxy.corp.internal:8080 downloads families
    ```
 
-2. **Persistent Configuration (`myf5 proxy set`)**: Writes default proxy to `~/.f5api_credentials` or config.
+2. **Process/Session Configuration (`myf5 proxy set`)**: Configures proxy for the current process or interactive session (to persist across commands, use `--proxy <url>` or set `MYF5_PROXY`).
    ```bash
    myf5 proxy set socks5://127.0.0.1:1080
    myf5 proxy show

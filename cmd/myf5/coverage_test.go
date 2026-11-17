@@ -15,7 +15,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"golang.org/x/term"
@@ -112,6 +114,21 @@ func TestUsagePrinters(t *testing.T) {
 	}
 }
 
+func TestVersionStringReflectsRuntime(t *testing.T) {
+	v := versionString()
+	if !strings.Contains(v, Version) {
+		t.Errorf("versionString() %q does not contain Version %q", v, Version)
+	}
+	expectedPlatform := runtime.GOOS + "-" + runtime.GOARCH
+	if !strings.Contains(v, expectedPlatform) {
+		t.Errorf("versionString() %q does not contain platform %q", v, expectedPlatform)
+	}
+	expectedGoVer := strings.TrimPrefix(runtime.Version(), "go")
+	if !strings.Contains(v, expectedGoVer) {
+		t.Errorf("versionString() %q does not contain Go version %q", v, expectedGoVer)
+	}
+}
+
 func TestSuggestRemediationAndCheckErr(t *testing.T) {
 	remediations := []struct {
 		errStr   string
@@ -123,6 +140,11 @@ func TestSuggestRemediationAndCheckErr(t *testing.T) {
 		{"401 Unauthorized: invalid_client credentials", "Run 'myf5 doctor'"},
 		{"HTTP 429 Too Many Requests", "Wait 60 seconds"},
 		{"dial tcp: connection refused", "Verify hostname DNS resolution"},
+		{"dial tcp 10.0.0.1:443: connectex: No connection could be made because the target machine actively refused it.", "Verify hostname DNS resolution"},
+		{"dial tcp 10.0.0.1:443: connect: connection timed out", "Verify hostname DNS resolution"},
+		{"dial tcp 10.0.0.1:443: connectex: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.", "Verify hostname DNS resolution"},
+		{"dial tcp 10.0.0.1:443: connect: no route to host", "Verify hostname DNS resolution"},
+		{"dial tcp 10.0.0.1:443: connect: network is unreachable", "Verify hostname DNS resolution"},
 		{"network timeout occurred", "Verify hostname DNS resolution"},
 		{"directory traversal detected outside destination", "illegal directory traversal"},
 		{"unrelated generic failure", ""},
@@ -184,7 +206,18 @@ func TestHandleProxyCommand(t *testing.T) {
 	handleProxyCommand([]string{"status"})
 
 	// 2. Set valid proxy
+	origStdout := os.Stdout
+	rStdout, wStdout, _ := os.Pipe()
+	os.Stdout = wStdout
 	handleProxyCommand([]string{"set", "http://proxy.corp.internal:8080"})
+	wStdout.Close()
+	os.Stdout = origStdout
+	var setBuf bytes.Buffer
+	_, _ = io.Copy(&setBuf, rStdout)
+	rStdout.Close()
+	if !strings.Contains(setBuf.String(), "MYF5_PROXY") {
+		t.Errorf("expected proxy set output to contain 'MYF5_PROXY', got %q", setBuf.String())
+	}
 	if p := client.GetGlobalProxy(); p == nil || !strings.Contains(p.String(), "8080") {
 		t.Fatalf("expected proxy to be set, got %v", p)
 	}
@@ -193,7 +226,17 @@ func TestHandleProxyCommand(t *testing.T) {
 	handleProxyCommand([]string{"status"})
 
 	// 3. Clear proxy
+	rStdout, wStdout, _ = os.Pipe()
+	os.Stdout = wStdout
 	handleProxyCommand([]string{"clear"})
+	wStdout.Close()
+	os.Stdout = origStdout
+	var clearBuf bytes.Buffer
+	_, _ = io.Copy(&clearBuf, rStdout)
+	rStdout.Close()
+	if !strings.Contains(clearBuf.String(), "MYF5_PROXY") {
+		t.Errorf("expected proxy clear output to contain 'MYF5_PROXY', got %q", clearBuf.String())
+	}
 	if p := client.GetGlobalProxy(); p != nil {
 		t.Errorf("expected proxy to be cleared, got %v", p)
 	}
@@ -391,12 +434,8 @@ func TestHandleDoctor(t *testing.T) {
 	}()
 
 	_ = client.SetGlobalProxy("http://127.0.0.1:1")
-	os.Setenv("F5_CLIENT_ID", "dummy-client-id")
-	os.Setenv("F5_CLIENT_SECRET", "dummy-client-secret")
-	defer func() {
-		os.Unsetenv("F5_CLIENT_ID")
-		os.Unsetenv("F5_CLIENT_SECRET")
-	}()
+	t.Setenv("F5_CLIENT_ID", "dummy-client-id")
+	t.Setenv("F5_CLIENT_SECRET", "dummy-client-secret")
 
 	code, exited = runWithExitCapture(func() {
 		handleDoctor(context.Background(), nil)
@@ -1341,6 +1380,26 @@ func TestSubcommandAliasesAndInteractive(t *testing.T) {
 	}
 }
 
+func newInMemoryPipeDialer(handler http.Handler) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		c1, c2 := net.Pipe()
+		go func() {
+			defer c2.Close()
+			req, err := http.ReadRequest(bufio.NewReader(c2))
+			if err != nil {
+				return
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			_, _ = io.Copy(io.Discard, req.Body)
+			_ = req.Body.Close()
+			resp := rec.Result()
+			_ = resp.Write(c2)
+		}()
+		return c1, nil
+	}
+}
+
 func TestHandleCases_AdditionalBranches(t *testing.T) {
 	// wizard / new action with cancel input in Step 5
 	cancelLines := []string{
@@ -1396,12 +1455,24 @@ func TestHandleCases_AdditionalBranches(t *testing.T) {
 	}
 
 	// With credentials set, authentication fails cleanly
-	os.Setenv("F5_CLIENT_ID", "dummy-id")
-	os.Setenv("F5_CLIENT_SECRET", "dummy-secret")
-	defer func() {
-		os.Unsetenv("F5_CLIENT_ID")
-		os.Unsetenv("F5_CLIENT_SECRET")
-	}()
+	var authHits atomic.Int64
+	mockMux := http.NewServeMux()
+	mockMux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		authHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"access_denied","error_description":"Unauthorized"}`))
+	})
+	dialer := newInMemoryPipeDialer(mockMux)
+	client.SetDialContext(dialer)
+	defer client.SetDialContext(nil)
+
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
+	t.Setenv("F5_CLIENT_ID", "dummy-id")
+	t.Setenv("F5_CLIENT_SECRET", "dummy-secret")
+	t.Setenv("F5_AUTH_FQDN", "http://auth.test")
 
 	for _, action := range []string{"list", "metadata"} {
 		code, exited = runWithExitCapture(func() {
@@ -1411,16 +1482,31 @@ func TestHandleCases_AdditionalBranches(t *testing.T) {
 			t.Errorf("expected exit 1 for handleCases %s with failing auth, got %d", action, code)
 		}
 	}
+	if authHits.Load() < 1 {
+		t.Errorf("expected mock auth hits >= 1, got %d", authHits.Load())
+	}
 }
 
 func TestHandleDownloads_AuthBranches(t *testing.T) {
 	// With credentials set, calling families/lines/versions/containers/files triggers getDownloadsClient
-	os.Setenv("F5_CLIENT_ID", "dummy-id")
-	os.Setenv("F5_CLIENT_SECRET", "dummy-secret")
-	defer func() {
-		os.Unsetenv("F5_CLIENT_ID")
-		os.Unsetenv("F5_CLIENT_SECRET")
-	}()
+	var authHits atomic.Int64
+	mockMux := http.NewServeMux()
+	mockMux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		authHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"access_denied","error_description":"Unauthorized"}`))
+	})
+	dialer := newInMemoryPipeDialer(mockMux)
+	client.SetDialContext(dialer)
+	defer client.SetDialContext(nil)
+
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
+	t.Setenv("F5_CLIENT_ID", "dummy-id")
+	t.Setenv("F5_CLIENT_SECRET", "dummy-secret")
+	t.Setenv("F5_AUTH_FQDN", "http://auth.test")
 
 	downloadsActions := [][]string{
 		{"families"},
@@ -1439,22 +1525,40 @@ func TestHandleDownloads_AuthBranches(t *testing.T) {
 			t.Errorf("expected exit 1 for handleDownloads %v with failing auth, got %d", args, code)
 		}
 	}
+	if authHits.Load() < 1 {
+		t.Errorf("expected mock auth hits >= 1, got %d", authHits.Load())
+	}
 }
 
 func TestHandleIHealth_AuthBranches(t *testing.T) {
 	// With credentials set, list triggers authentication
-	os.Setenv("F5_CLIENT_ID", "dummy-id")
-	os.Setenv("F5_CLIENT_SECRET", "dummy-secret")
-	defer func() {
-		os.Unsetenv("F5_CLIENT_ID")
-		os.Unsetenv("F5_CLIENT_SECRET")
-	}()
+	var authHits atomic.Int64
+	mockMux := http.NewServeMux()
+	mockMux.HandleFunc("/oauth/token", func(w http.ResponseWriter, r *http.Request) {
+		authHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"access_denied","error_description":"Unauthorized"}`))
+	})
+	dialer := newInMemoryPipeDialer(mockMux)
+	client.SetDialContext(dialer)
+	defer client.SetDialContext(nil)
+
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
+	t.Setenv("F5_CLIENT_ID", "dummy-id")
+	t.Setenv("F5_CLIENT_SECRET", "dummy-secret")
+	t.Setenv("F5_AUTH_FQDN", "http://auth.test")
 
 	code, exited := runWithExitCapture(func() {
 		handleIHealth(context.Background(), []string{"list"})
 	})
 	if !exited || code != 1 {
 		t.Errorf("expected exit 1 for ihealth list with failing auth, got %d", code)
+	}
+	if authHits.Load() < 1 {
+		t.Errorf("expected mock auth hits >= 1, got %d", authHits.Load())
 	}
 }
 
