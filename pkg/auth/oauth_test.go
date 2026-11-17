@@ -8,8 +8,25 @@ import (
 	"testing"
 )
 
+type roundTripFunc func(req *http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func newMockServer(handler http.Handler) (*http.Client, string) {
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			return rec.Result(), nil
+		}),
+	}
+	return client, "https://mock.auth.f5.invalid"
+}
+
 func TestAuthenticate(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
 		}
@@ -28,10 +45,10 @@ func TestAuthenticate(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
-	}))
-	defer server.Close()
+	})
+	mockClient, mockURL := newMockServer(handler)
 
-	token, err := AuthenticateWithClient(context.Background(), server.Client(), server.URL, "app123", "client_id", "client_secret", "myf5_scope")
+	token, err := AuthenticateWithClient(context.Background(), mockClient, mockURL, "app123", "client_id", "client_secret", "myf5_scope")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -59,17 +76,17 @@ func TestAuthenticateAudienceSelection(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var gotAudience, gotScope string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if err := r.ParseForm(); err != nil {
 					t.Fatalf("parse form: %v", err)
 				}
 				gotAudience = r.PostForm.Get("audience")
 				gotScope = r.PostForm.Get("scope")
 				json.NewEncoder(w).Encode(TokenResponse{AccessToken: "tok"})
-			}))
-			defer server.Close()
+			})
+			mockClient, mockURL := newMockServer(handler)
 
-			if _, err := AuthenticateWithClient(context.Background(), server.Client(), server.URL, "", "cid", "csec", tc.scope); err != nil {
+			if _, err := AuthenticateWithClient(context.Background(), mockClient, mockURL, "", "cid", "csec", tc.scope); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if gotAudience != tc.wantAudience {
@@ -83,7 +100,7 @@ func TestAuthenticateAudienceSelection(t *testing.T) {
 }
 
 func TestAuthenticateWithSecretBytes(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader != "Basic Y2xpZW50X2lkOnNlY3JldF9ieXRlcw==" { // base64 of "client_id:secret_bytes"
 			t.Errorf("unexpected Authorization header: %s", authHeader)
@@ -93,15 +110,24 @@ func TestAuthenticateWithSecretBytes(t *testing.T) {
 			AccessToken: "bytes-token-xyz",
 			TokenType:   "Bearer",
 		})
-	}))
-	defer server.Close()
+	})
+	mockClient, mockURL := newMockServer(handler)
 
 	sec := []byte("secret_bytes")
-	tok, err := AuthenticateWithSecretBytes(context.Background(), server.Client(), server.URL, "app", "client_id", sec, "myf5_scope")
+	tok, err := AuthenticateWithSecretBytes(context.Background(), mockClient, mockURL, "app", "client_id", sec, "myf5_scope")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if tok != "bytes-token-xyz" {
 		t.Errorf("got token %s, want bytes-token-xyz", tok)
+	}
+}
+
+func TestAuthenticateDirect(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Authenticate(ctx, "https://invalid.example.com", "app", "cid", "csec", "scope")
+	if err == nil {
+		t.Fatal("expected error with canceled context")
 	}
 }

@@ -36,6 +36,7 @@ type GeoIPOptions struct {
 	ClientCertPath     string         // mTLS client certificate path
 	ClientKeyPath      string         // mTLS client private key path
 	Timeout            time.Duration  // Execution timeout (default: 3 minutes)
+	HTTPClient         *http.Client   // Custom HTTP client for mock/testing
 	Force              bool           // Pass --force to rpm via geoip_update_data -f (default: true)
 	KeepExtracted      bool           // Retain extracted files on appliance (default: false, cleans up temp dir)
 }
@@ -250,9 +251,17 @@ func generateGeoIPScript(remoteZipPath string, force, keepExtracted bool) string
 		extractCmd = `tar -xzf "$ZIP_FILE" -C "$EXTRACT_DIR"`
 	}
 
+	safeZipPath := strings.ReplaceAll(remoteZipPath, "'", `'\''`)
+
 	return fmt.Sprintf(`(
 set -o pipefail
-ZIP_FILE=%q
+
+if grep -qi '^Product:[[:space:]]*BIG-IQ' /VERSION 2>/dev/null; then
+  echo "ERROR: Autodetected BIG-IQ appliance. GeoIP database updates are only supported on BIG-IP appliances." >&2
+  exit 8
+fi
+
+ZIP_FILE='%s'
 
 if [ ! -f "$ZIP_FILE" ]; then
   echo "ERROR: GeoIP archive file not found: $ZIP_FILE" >&2
@@ -329,19 +338,28 @@ echo "--- GEOIP_COMPLETE ---"
 SCRIPT_EXIT_CODE=$?
 echo "--- SCRIPT_EXIT_CODE: $SCRIPT_EXIT_CODE ---"
 exit $SCRIPT_EXIT_CODE
-`, remoteZipPath, cleanupAction, extractCmd, forceFlag)
+`, safeZipPath, cleanupAction, extractCmd, forceFlag)
 }
 
 func applyGeoIPSSH(ctx context.Context, host, scriptB64 string, opts GeoIPOptions) (string, error) {
+	var pwCopy, ppCopy []byte
+	if len(opts.PasswordBytes) > 0 {
+		pwCopy = make([]byte, len(opts.PasswordBytes))
+		copy(pwCopy, opts.PasswordBytes)
+	}
+	if len(opts.SSHPassphraseBytes) > 0 {
+		ppCopy = make([]byte, len(opts.SSHPassphraseBytes))
+		copy(ppCopy, opts.SSHPassphraseBytes)
+	}
 	scpOpts := SCPOptions{
 		Host:            host,
 		Port:            opts.Port,
 		Username:        opts.Username,
 		Password:        opts.Password,
-		PasswordBytes:   opts.PasswordBytes,
+		PasswordBytes:   pwCopy,
 		KeyPath:         opts.IdentityFile,
 		Passphrase:      opts.SSHPassphrase,
-		PassphraseBytes: opts.SSHPassphraseBytes,
+		PassphraseBytes: ppCopy,
 		Timeout:         opts.Timeout,
 	}
 	defer scpOpts.Zero()
@@ -385,25 +403,28 @@ func applyGeoIPSSH(ctx context.Context, host, scriptB64 string, opts GeoIPOption
 	}
 	defer session.Close()
 
-	var outBuf bytes.Buffer
-	session.Stdout = &outBuf
-	session.Stderr = &outBuf
-
 	cmd := fmt.Sprintf("echo '%s' | base64 -d | bash", scriptB64)
-	runDone := make(chan error, 1)
+	type runResult struct {
+		output []byte
+		err    error
+	}
+	runDone := make(chan runResult, 1)
 	go func() {
-		runDone <- session.Run(cmd)
+		out, rErr := session.CombinedOutput(cmd)
+		runDone <- runResult{output: out, err: rErr}
 	}()
 
 	var runErr error
+	var rawOutput string
 	select {
 	case <-ctx.Done():
 		_ = session.Signal(ssh.SIGINT)
 		_ = session.Close()
-		return outBuf.String(), ctx.Err()
-	case runErr = <-runDone:
+		return "", ctx.Err()
+	case res := <-runDone:
+		rawOutput = string(res.output)
+		runErr = res.err
 	}
-	rawOutput := outBuf.String()
 
 	if runErr != nil && !strings.Contains(rawOutput, "--- SCRIPT_EXIT_CODE:") {
 		return rawOutput, fmt.Errorf("SSH execution error: %w (output: %s)", runErr, strings.TrimSpace(rawOutput))
@@ -422,16 +443,23 @@ func applyGeoIPREST(ctx context.Context, host, scriptB64 string, opts GeoIPOptio
 		user = "admin"
 	}
 
+	var pwCopy []byte
+	if len(opts.PasswordBytes) > 0 {
+		pwCopy = make([]byte, len(opts.PasswordBytes))
+		copy(pwCopy, opts.PasswordBytes)
+	}
+
 	client, err := NewClientWithOptions(ClientOptions{
 		Host:           host,
 		Port:           port,
 		Username:       user,
 		Password:       opts.Password,
-		PasswordBytes:  opts.PasswordBytes,
+		PasswordBytes:  pwCopy,
 		SkipTLSVerify:  true,
 		ClientCertPath: opts.ClientCertPath,
 		ClientKeyPath:  opts.ClientKeyPath,
 		Timeout:        opts.Timeout,
+		HTTPClient:     opts.HTTPClient,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to initialize appliance REST client: %w", err)

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -31,6 +32,7 @@ type Client struct {
 	Username      string
 	Password      string
 	PasswordBytes []byte
+	authToken     []byte
 	HTTPClient    *http.Client
 }
 
@@ -42,6 +44,10 @@ func (c *Client) Zero() {
 	if len(c.PasswordBytes) > 0 {
 		auth.ZeroBytes(c.PasswordBytes)
 		c.PasswordBytes = nil
+	}
+	if len(c.authToken) > 0 {
+		auth.ZeroBytes(c.authToken)
+		c.authToken = nil
 	}
 	c.Password = ""
 }
@@ -148,6 +154,18 @@ func validateHostname(h string) error {
 
 // ParseAndValidateApplianceHost extracts scheme, normalized host, and port, validating the host.
 func ParseAndValidateApplianceHost(rawHost string, defaultPort int) (scheme, cleanHost string, port int, isIPv6 bool, err error) {
+	if strings.Contains(rawHost, "://") {
+		u, err := url.Parse(rawHost)
+		if err == nil {
+			if u.User != nil {
+				return "", "", 0, false, fmt.Errorf("embedded credentials in host URL %q are prohibited", rawHost)
+			}
+			if u.RawQuery != "" || u.Fragment != "" {
+				return "", "", 0, false, fmt.Errorf("query parameters or fragments in host URL %q are prohibited", rawHost)
+			}
+		}
+	}
+
 	scheme = "https"
 	s := strings.TrimSpace(rawHost)
 	if strings.HasPrefix(s, "http://") {
@@ -208,10 +226,39 @@ type ClientOptions struct {
 	ClientCertPath string
 	ClientKeyPath  string
 	Timeout        time.Duration
+	HTTPClient     *http.Client
 }
 
 // NewClientWithOptions initializes a BIG-IP appliance client with validation and optional mTLS client certificates.
 func NewClientWithOptions(opts ClientOptions) (*Client, error) {
+	if opts.Username != "" {
+		if err := ValidateApplianceUsername(opts.Username); err != nil {
+			return nil, err
+		}
+	}
+	if opts.Password != "" {
+		if err := ValidateAppliancePassword(opts.Password); err != nil {
+			return nil, err
+		}
+	} else if len(opts.PasswordBytes) > 0 {
+		if err := ValidateAppliancePassword(string(opts.PasswordBytes)); err != nil {
+			return nil, err
+		}
+	}
+	if opts.Port < 0 || opts.Port > 65535 {
+		return nil, fmt.Errorf("invalid port %d: must be between 1 and 65535", opts.Port)
+	}
+	if opts.ClientCertPath != "" {
+		if _, err := ValidateCredentialFilePath(opts.ClientCertPath, "Client certificate"); err != nil {
+			return nil, err
+		}
+	}
+	if opts.ClientKeyPath != "" {
+		if _, err := ValidateCredentialFilePath(opts.ClientKeyPath, "Client key"); err != nil {
+			return nil, err
+		}
+	}
+
 	scheme, cleanHost, port, _, err := ParseAndValidateApplianceHost(opts.Host, opts.Port)
 	if err != nil {
 		return nil, err
@@ -223,7 +270,9 @@ func NewClientWithOptions(opts ClientOptions) (*Client, error) {
 	}
 
 	var httpClient *http.Client
-	if opts.ClientCertPath != "" {
+	if opts.HTTPClient != nil {
+		httpClient = opts.HTTPClient
+	} else if opts.ClientCertPath != "" {
 		cert, err := client.LoadClientCertificate(opts.ClientCertPath, opts.ClientKeyPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load client certificate: %w", err)
@@ -336,23 +385,37 @@ func (c *Client) BaseURL() string {
 	return fmt.Sprintf("%s://%s:%d", scheme, host, c.Port)
 }
 
-// CheckReady queries /mgmt/tm/sys/ready (or /mgmt/shared/echo for BIG-IQ) to verify appliance availability.
-func (c *Client) CheckReady(ctx context.Context) (bool, error) {
+// CheckReadyWithKind queries /mgmt/tm/sys/ready (or /mgmt/shared/echo for BIG-IQ) to verify appliance availability and returns the appliance kind.
+func (c *Client) CheckReadyWithKind(ctx context.Context) (string, error) {
 	url := fmt.Sprintf("%s/mgmt/tm/sys/ready", c.BaseURL())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	c.setAuth(req)
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.doWithAuth(req)
 	if err != nil {
-		return false, fmt.Errorf("device reachability check failed: %w", err)
+		return "", fmt.Errorf("device reachability check failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusOK {
-		return true, nil
+		verURL := fmt.Sprintf("%s/mgmt/tm/sys/version", c.BaseURL())
+		verReq, verErr := http.NewRequestWithContext(ctx, http.MethodGet, verURL, nil)
+		if verErr == nil {
+			if verResp, verDoErr := c.doWithAuth(verReq); verDoErr == nil {
+				defer verResp.Body.Close()
+				if verResp.StatusCode == http.StatusOK {
+					verBody, _ := io.ReadAll(io.LimitReader(verResp.Body, 512*1024))
+					var vInfo SystemInfo
+					parseVersionJSON(verBody, &vInfo)
+					if vInfo.ApplianceKind() == "BIG-IQ" {
+						return "BIG-IQ", nil
+					}
+				}
+			}
+		}
+		return "BIG-IP", nil
 	}
 
 	// Fallback to /mgmt/shared/echo for BIG-IQ and appliances without sys ready
@@ -360,15 +423,25 @@ func (c *Client) CheckReady(ctx context.Context) (bool, error) {
 		echoURL := fmt.Sprintf("%s/mgmt/shared/echo", c.BaseURL())
 		echoReq, echoErr := http.NewRequestWithContext(ctx, http.MethodGet, echoURL, nil)
 		if echoErr == nil {
-			c.setAuth(echoReq)
-			if echoResp, doErr := c.HTTPClient.Do(echoReq); doErr == nil {
+			if echoResp, doErr := c.doWithAuth(echoReq); doErr == nil {
 				defer echoResp.Body.Close()
-				return echoResp.StatusCode == http.StatusOK, nil
+				if echoResp.StatusCode == http.StatusOK {
+					return "BIG-IQ", nil
+				}
 			}
 		}
 	}
 
-	return false, nil
+	return "", nil
+}
+
+// CheckReady queries /mgmt/tm/sys/ready (or /mgmt/shared/echo for BIG-IQ) to verify appliance availability.
+func (c *Client) CheckReady(ctx context.Context) (bool, error) {
+	kind, err := c.CheckReadyWithKind(ctx)
+	if err != nil {
+		return false, err
+	}
+	return kind != "", nil
 }
 
 var validQKViewFilenameRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
@@ -428,10 +501,9 @@ func (c *Client) CreateQKViewTaskWithOptions(ctx context.Context, filename strin
 	if err != nil {
 		return nil, err
 	}
-	c.setAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.doWithAuth(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create qkview task: %w", err)
 	}
@@ -443,7 +515,7 @@ func (c *Client) CreateQKViewTaskWithOptions(ctx context.Context, filename strin
 	}
 
 	var task QKViewTask
-	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024*1024)).Decode(&task); err != nil {
 		return nil, fmt.Errorf("failed to decode qkview task response: %w", err)
 	}
 	return &task, nil
@@ -456,9 +528,8 @@ func (c *Client) QueryQKViewTask(ctx context.Context, taskID string) (*QKViewTas
 	if err != nil {
 		return nil, err
 	}
-	c.setAuth(req)
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.doWithAuth(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query qkview task %s: %w", taskID, err)
 	}
@@ -470,7 +541,7 @@ func (c *Client) QueryQKViewTask(ctx context.Context, taskID string) (*QKViewTas
 	}
 
 	var task QKViewTask
-	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024*1024)).Decode(&task); err != nil {
 		return nil, fmt.Errorf("failed to decode qkview task query: %w", err)
 	}
 	return &task, nil
@@ -569,7 +640,6 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 	if err != nil {
 		return "", err
 	}
-	c.setAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 
 	type result struct {
@@ -578,7 +648,7 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 	}
 	resCh := make(chan result, 1)
 	go func() {
-		resp, err := c.HTTPClient.Do(req)
+		resp, err := c.doWithAuth(req)
 		resCh <- result{resp: resp, err: err}
 	}()
 
@@ -609,6 +679,38 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 			}
 			defer res.resp.Body.Close()
 
+			if res.resp.StatusCode == http.StatusNotFound {
+				// Fallback to bash for BIG-IQ where /mgmt/tm/util/qkview may return 404
+				if err := ValidateQKViewFilename(filename); err != nil {
+					return "", err
+				}
+				bashArgs := fmt.Sprintf("-c \"mkdir -p /var/tmp/qkviews && /usr/bin/qkview %s-f /var/tmp/qkviews/'%s' && cp /var/tmp/qkviews/'%s' /var/config/rest/downloads/\"", map[bool]string{true: "-s0 ", false: ""}[complete], filename, filename)
+				bashPayload := map[string]string{
+					"command":     "run",
+					"utilCmdArgs": bashArgs,
+				}
+				bashBytes, _ := json.Marshal(bashPayload)
+				bashURL := fmt.Sprintf("%s/mgmt/tm/util/bash", c.BaseURL())
+				bashReq, err := http.NewRequestWithContext(ctx, http.MethodPost, bashURL, bytes.NewReader(bashBytes))
+				if err != nil {
+					return "", err
+				}
+				bashReq.Header.Set("Content-Type", "application/json")
+				bashResp, err := c.doWithAuth(bashReq)
+				if err != nil {
+					return "", fmt.Errorf("bash fallback for qkview failed: %w", err)
+				}
+				defer bashResp.Body.Close()
+				bashBody, _ := io.ReadAll(io.LimitReader(bashResp.Body, 1024*1024))
+				if bashResp.StatusCode < 200 || bashResp.StatusCode >= 300 {
+					return "", fmt.Errorf("bash qkview generation failed with HTTP %d: %s", bashResp.StatusCode, string(bashBody))
+				}
+				if strings.Contains(string(bashBody), "command not found") || strings.Contains(string(bashBody), "syntax error") {
+					return "", fmt.Errorf("bash qkview generation command failed: %s", string(bashBody))
+				}
+				return filename, nil
+			}
+
 			if res.resp.StatusCode < 200 || res.resp.StatusCode >= 300 {
 				b, _ := io.ReadAll(io.LimitReader(res.resp.Body, 1024*1024))
 				return "", fmt.Errorf("qkview generation failed with HTTP %d: %s", res.resp.StatusCode, string(b))
@@ -635,7 +737,7 @@ func (c *Client) DownloadFromURI(ctx context.Context, endpointURI, localPath str
 	}
 
 	partPath := localPath + ".part"
-	out, err := os.Create(partPath)
+	out, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("failed to create local file: %w", err)
 	}
@@ -657,16 +759,15 @@ func (c *Client) DownloadFromURI(ctx context.Context, endpointURI, localPath str
 		if err != nil {
 			return err
 		}
-		c.setAuth(req)
 		req.Header.Set("Content-Type", "application/octet-stream")
 		req.Header.Set("Content-Range", fmt.Sprintf("%d-%d/%d", start, end, totalSize))
 
-		resp, err := c.HTTPClient.Do(req)
+		resp, err := c.doWithAuth(req)
 		if err != nil {
 			return fmt.Errorf("failed to download chunk from %s: %w", endpointURI, err)
 		}
 
-		if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 			_ = resp.Body.Close()
 			return fmt.Errorf("chunk download failed with HTTP %d: %s", resp.StatusCode, string(b))
@@ -772,9 +873,8 @@ func (c *Client) DeleteQKView(ctx context.Context, remoteFilename string) error 
 	if err != nil {
 		return err
 	}
-	c.setAuth(req)
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.doWithAuth(req)
 	if err != nil {
 		return fmt.Errorf("delete qkview failed: %w", err)
 	}
@@ -817,9 +917,8 @@ func (c *Client) GetEndpointExample(ctx context.Context, endpoint string) ([]byt
 		return nil, fmt.Errorf("failed to create request for example endpoint: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
-	c.setAuth(req)
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.doWithAuth(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch example for %s: %w", p, err)
 	}
@@ -844,6 +943,12 @@ func (c *Client) GetEndpointExample(ctx context.Context, endpoint string) ([]byt
 }
 
 func (c *Client) setAuth(req *http.Request) {
+	if len(c.authToken) > 0 {
+		req.Header.Set("X-F5-Auth-Token", string(c.authToken))
+		req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
+		return
+	}
+
 	pwBytes := c.PasswordBytes
 	if len(pwBytes) == 0 && c.Password != "" {
 		pwBytes = []byte(c.Password)
@@ -857,4 +962,169 @@ func (c *Client) setAuth(req *http.Request) {
 
 	req.Header.Set("Authorization", "Basic "+authHeader)
 	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
+}
+
+func (c *Client) acquireAuthToken(ctx context.Context) error {
+	loginURL := fmt.Sprintf("%s/mgmt/shared/authn/login", c.BaseURL())
+	pw := string(c.PasswordBytes)
+	if pw == "" && c.Password != "" {
+		pw = c.Password
+	}
+	payload := map[string]string{
+		"username":          c.Username,
+		"password":          pw,
+		"loginProviderName": "tmos",
+	}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal login payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create login request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("login request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+		return fmt.Errorf("login failed with HTTP %d: %s", resp.StatusCode, string(b))
+	}
+
+	var parsed struct {
+		Token struct {
+			Token string `json:"token"`
+		} `json:"token"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024*1024)).Decode(&parsed); err != nil {
+		return fmt.Errorf("failed to decode login token response: %w", err)
+	}
+	if parsed.Token.Token == "" {
+		return errors.New("empty token received from login response")
+	}
+
+	c.authToken = []byte(parsed.Token.Token)
+	return nil
+}
+
+func (c *Client) doWithAuth(req *http.Request) (*http.Response, error) {
+	c.setAuth(req)
+	resp, err := c.HTTPClient.Do(req)
+	if err == nil && resp.StatusCode == http.StatusUnauthorized && len(c.authToken) == 0 && (len(c.PasswordBytes) > 0 || c.Password != "") {
+		if req.Body == nil || req.GetBody != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+
+			if tokenErr := c.acquireAuthToken(req.Context()); tokenErr == nil {
+				req2 := req.Clone(req.Context())
+				if req.GetBody != nil {
+					b, err := req.GetBody()
+					if err != nil {
+						return resp, err
+					}
+					req2.Body = b
+				}
+				req2.Header.Del("Authorization")
+				c.setAuth(req2)
+				return c.HTTPClient.Do(req2)
+			}
+		}
+	}
+	return resp, err
+}
+
+var validUsernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_.\-@]*$`)
+
+// ValidateApplianceUsername validates a username for BIG-IP / BIG-IQ appliance access.
+func ValidateApplianceUsername(username string) error {
+	if username == "" {
+		return fmt.Errorf("username cannot be empty")
+	}
+	if len(username) > 64 {
+		return fmt.Errorf("username exceeds maximum length of 64 characters")
+	}
+	if strings.Contains(username, ":") {
+		return fmt.Errorf("username cannot contain a colon")
+	}
+	for _, r := range username {
+		if r < 32 || r == 127 || r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			return fmt.Errorf("username cannot contain control characters or whitespace")
+		}
+	}
+	if !validUsernameRegex.MatchString(username) {
+		return fmt.Errorf("username contains invalid characters")
+	}
+	return nil
+}
+
+// K2873SpecialCharacters contains the 32 allowed special characters defined in F5 K2873.
+const K2873SpecialCharacters = "!@#$%^&*()`~-+=[]{};’:\"'./<>|\\?_"
+
+// ValidateAppliancePassword validates an appliance password against F5 K2873 policy.
+// It allows alphanumeric characters and the 32 special characters specified in K2873.
+// To prevent secret disclosure in logs or stderr, error messages never include the password or rejected character.
+func ValidateAppliancePassword(password string) error {
+	if password == "" {
+		return fmt.Errorf("appliance password cannot be empty")
+	}
+	if len(password) > 255 {
+		return fmt.Errorf("appliance password exceeds maximum length of 255 characters")
+	}
+	for i, r := range password {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || strings.ContainsRune(K2873SpecialCharacters, r) {
+			continue
+		}
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			return fmt.Errorf("invalid appliance password: whitespace is not permitted (refer to F5 K2873 for allowed password characters)")
+		}
+		if r < 32 || r == 127 {
+			return fmt.Errorf("invalid appliance password: control characters are not permitted (refer to F5 K2873)")
+		}
+		return fmt.Errorf("invalid appliance password: contains unsupported character at byte offset %d (refer to F5 K2873 for allowed special characters)", i)
+	}
+	return nil
+}
+
+// ValidatePort validates a port string and returns the integer value.
+func ValidatePort(rawPort string) (int, error) {
+	portStr := strings.TrimSpace(rawPort)
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0, fmt.Errorf("invalid port %q: must be a numeric value", rawPort)
+	}
+	if port < 1 || port > 65535 {
+		return 0, fmt.Errorf("invalid port %d: must be between 1 and 65535", port)
+	}
+	return port, nil
+}
+
+// ValidateCredentialFilePath validates a file path used for credentials (keys/certs).
+func ValidateCredentialFilePath(filePath, label string) (string, error) {
+	for _, r := range filePath {
+		if r < 32 || r == 127 {
+			return "", fmt.Errorf("%s path cannot contain control characters", label)
+		}
+	}
+	cleanPath := filepath.Clean(strings.TrimSpace(filePath))
+	fi, err := os.Stat(cleanPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to access %s file %s: %w", label, cleanPath, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return "", fmt.Errorf("%s must be a regular file: %s", label, cleanPath)
+	}
+	if fi.Size() == 0 {
+		return "", fmt.Errorf("%s file is empty: %s", label, cleanPath)
+	}
+	if fi.Size() > 1024*1024 {
+		return "", fmt.Errorf("%s file exceeds maximum allowed size of 1MB: %s", label, cleanPath)
+	}
+	return cleanPath, nil
 }

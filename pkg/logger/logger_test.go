@@ -95,3 +95,16 @@ func TestGetDefaultLogger(t *testing.T) {
 	l.Warn("myf5 test warning message")
 	l.Error("myf5 test error message")
 }
+
+func TestLoggerClose(t *testing.T) {
+	var buf bytes.Buffer
+	fl := NewFallbackLogger(&buf)
+	if err := fl.Close(); err != nil {
+		t.Errorf("FallbackLogger.Close() error: %v", err)
+	}
+
+	l := Get()
+	if err := l.Close(); err != nil {
+		t.Errorf("Get().Close() error: %v", err)
+	}
+}

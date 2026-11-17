@@ -20,7 +20,26 @@ import (
 var (
 	globalProxyMu  sync.RWMutex
 	globalProxyURL *url.URL
+
+	proxyDialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, addr)
+	}
 )
+
+// SetDialContext overrides the internal dialer for testing or custom transports.
+func SetDialContext(fn func(ctx context.Context, network, addr string) (net.Conn, error)) {
+	globalProxyMu.Lock()
+	defer globalProxyMu.Unlock()
+	if fn == nil {
+		proxyDialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, network, addr)
+		}
+		return
+	}
+	proxyDialContext = fn
+}
 
 // SetGlobalProxy sets the global proxy URL for all HTTP clients and dialers.
 func SetGlobalProxy(proxyStr string) error {
@@ -269,8 +288,7 @@ func DialProxy(ctx context.Context, network, targetAddr string, explicitProxy *u
 
 	// If no proxy is configured, or targetAddr is bypassed via NO_PROXY, dial directly
 	if proxyURL == nil || ShouldBypassProxy(targetAddr, getNoProxyEnv()) {
-		var d net.Dialer
-		return d.DialContext(ctx, network, targetAddr)
+		return proxyDialContext(ctx, network, targetAddr)
 	}
 
 	scheme := strings.ToLower(proxyURL.Scheme)
@@ -295,8 +313,7 @@ func dialHTTPConnect(ctx context.Context, proxyURL *url.URL, targetAddr string) 
 		}
 	}
 
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", proxyHost)
+	conn, err := proxyDialContext(ctx, "tcp", proxyHost)
 	if err != nil {
 		return nil, fmt.Errorf("failed connecting to proxy %s: %w", proxyHost, err)
 	}
@@ -362,8 +379,7 @@ func dialSOCKS5(ctx context.Context, proxyURL *url.URL, targetAddr string) (net.
 		proxyHost += ":1080"
 	}
 
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", proxyHost)
+	conn, err := proxyDialContext(ctx, "tcp", proxyHost)
 	if err != nil {
 		return nil, fmt.Errorf("failed connecting to SOCKS5 proxy %s: %w", proxyHost, err)
 	}

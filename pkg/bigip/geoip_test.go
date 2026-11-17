@@ -2,13 +2,17 @@ package bigip
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func TestApplyGeoIPTargetValidation(t *testing.T) {
@@ -47,14 +51,20 @@ func TestApplyGeoIPPathValidation(t *testing.T) {
 
 func TestGenerateGeoIPScript(t *testing.T) {
 	script := generateGeoIPScript("/var/tmp/geoip.zip", true, false)
-	if !strings.Contains(script, `ZIP_FILE="/var/tmp/geoip.zip"`) {
-		t.Errorf("expected script to contain zip file path, got:\n%s", script)
+	if !strings.Contains(script, `ZIP_FILE='/var/tmp/geoip.zip'`) {
+		t.Errorf("expected script to contain single-quoted zip file path, got:\n%s", script)
 	}
 	if !strings.Contains(script, `rm -rf "$EXTRACT_DIR"`) {
 		t.Errorf("expected script to clean up extract dir when keepExtracted is false")
 	}
 	if !strings.Contains(script, "-f") {
 		t.Errorf("expected script to pass -f when force is true")
+	}
+
+	// Test single-quote escaping defense-in-depth
+	scriptEscaped := generateGeoIPScript("/var/tmp/inject'test$(whoami).zip", true, false)
+	if !strings.Contains(scriptEscaped, `ZIP_FILE='/var/tmp/inject'\''test$(whoami).zip'`) {
+		t.Errorf("expected script to properly escape single quotes, got:\n%s", scriptEscaped)
 	}
 
 	scriptKeep := generateGeoIPScript("/var/tmp/geoip.tgz", false, true)
@@ -134,7 +144,7 @@ ERROR: Failed to extract /var/tmp/geoip.zip
 
 func TestApplyGeoIPREST_MockServer(t *testing.T) {
 	var receivedBody map[string]string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/mgmt/tm/util/bash" && r.Method == http.MethodPost {
 			b, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(b, &receivedBody)
@@ -151,6 +161,7 @@ func TestApplyGeoIPREST_MockServer(t *testing.T) {
 		Method:     MethodIControl,
 		Username:   "admin",
 		Password:   "secret",
+		HTTPClient: server.Client(),
 	}
 
 	res, err := ApplyGeoIP(context.Background(), server.URL, "/var/tmp/update.zip", opts, nil)
@@ -167,7 +178,7 @@ func TestApplyGeoIPREST_MockServer(t *testing.T) {
 }
 
 func TestApplyGeoIPREST_ApplianceModeError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/mgmt/tm/util/bash" {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":"bash utility disabled"}`))
@@ -182,6 +193,7 @@ func TestApplyGeoIPREST_ApplianceModeError(t *testing.T) {
 		Method:     MethodIControl,
 		Username:   "admin",
 		Password:   "secret",
+		HTTPClient: server.Client(),
 	}
 
 	_, err := ApplyGeoIP(context.Background(), server.URL, "/var/tmp/update.zip", opts, nil)
@@ -190,5 +202,174 @@ func TestApplyGeoIPREST_ApplianceModeError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Appliance Mode") {
 		t.Errorf("expected remediation hint mentioning Appliance Mode, got: %v", err)
+	}
+}
+
+func TestGeoIPOptionsZero(t *testing.T) {
+	var nilOpts *GeoIPOptions
+	nilOpts.Zero()
+
+	opts := &GeoIPOptions{
+		Password:           "secret",
+		PasswordBytes:      []byte("secret"),
+		SSHPassphrase:      "passphrase",
+		SSHPassphraseBytes: []byte("passphrase"),
+	}
+	opts.Zero()
+	if opts.Password != "" || opts.SSHPassphrase != "" || opts.PasswordBytes != nil || opts.SSHPassphraseBytes != nil {
+		t.Errorf("GeoIPOptions.Zero() did not clear secrets: %+v", opts)
+	}
+}
+
+func TestApplyGeoIPSSHMockServer(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed generating key: %v", err)
+	}
+	signer, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatalf("failed creating signer: %v", err)
+	}
+
+	serverConfig := &ssh.ServerConfig{
+		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+			if c.User() == "admin" && string(pass) == "secret" {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("password rejected")
+		},
+	}
+	serverConfig.AddHostKey(signer)
+
+	listener, port := newPipeSSHServer()
+	defer listener.Close()
+
+	mockOutput := "--- EXTRACT_DIR ---\n/shared/tmp/geoip_update_123\n--- INSTALLED_GEOIP_RPMS ---\ngeoip-data-v2.rpm\n--- GEOIP_LOOKUP_TEST ---\ncountry_code = US\n--- GEOIP_COMPLETE ---\n--- SCRIPT_EXIT_CODE: 0 ---\n"
+
+	go func() {
+		tcpConn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer tcpConn.Close()
+
+		sshConn, chans, reqs, err := ssh.NewServerConn(tcpConn, serverConfig)
+		if err != nil {
+			return
+		}
+		defer sshConn.Close()
+		go ssh.DiscardRequests(reqs)
+
+		for newChannel := range chans {
+			if newChannel.ChannelType() != "session" {
+				_ = newChannel.Reject(ssh.UnknownChannelType, "unknown")
+				continue
+			}
+			channel, requests, err := newChannel.Accept()
+			if err != nil {
+				return
+			}
+
+			go func(in <-chan *ssh.Request) {
+				defer channel.Close()
+				for req := range in {
+					switch req.Type {
+					case "exec":
+						_ = req.Reply(true, nil)
+						_, _ = channel.Write([]byte(mockOutput))
+						_ = channel.CloseWrite()
+						_, _ = channel.SendRequest("exit-status", false, []byte{0, 0, 0, 0})
+						_, _ = io.Copy(io.Discard, channel)
+						return
+					default:
+						_ = req.Reply(false, nil)
+					}
+				}
+			}(requests)
+		}
+	}()
+
+	opts := GeoIPOptions{
+		TargetType: "BIG-IP",
+		Method:     MethodSCP,
+		Username:   "admin",
+		Password:   "secret",
+		Port:       port,
+		Timeout:    2 * time.Second,
+	}
+
+	out, err := applyGeoIPSSH(context.Background(), "127.0.0.1", "c2NyaXB0", opts)
+	if err != nil {
+		t.Fatalf("applyGeoIPSSH failed: %v", err)
+	}
+	if !strings.Contains(out, "GEOIP_COMPLETE") {
+		t.Errorf("expected GEOIP_COMPLETE in output, got: %s", out)
+	}
+}
+
+func TestApplyGeoIPIControlSuccess(t *testing.T) {
+	mockOutput := "--- EXTRACT_DIR ---\n/shared/tmp/geoip_update_123\n--- INSTALLED_GEOIP_RPMS ---\ngeoip-data-v2.rpm\n--- GEOIP_LOOKUP_TEST ---\ncountry_code = US\n--- GEOIP_COMPLETE ---\n--- SCRIPT_EXIT_CODE: 0 ---\n"
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mgmt/tm/util/bash" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"commandResult": mockOutput,
+			})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	opts := GeoIPOptions{
+		TargetType: "BIG-IP",
+		Method:     MethodIControl,
+		Username:   "admin",
+		Password:   "secret",
+		Timeout:    2 * time.Second,
+		HTTPClient: server.Client(),
+	}
+
+	res, err := ApplyGeoIP(context.Background(), server.URL, "/var/tmp/geoip.zip", opts, func(s string) {})
+	if err != nil {
+		t.Fatalf("ApplyGeoIP iControl failed: %v", err)
+	}
+	if res == nil || res.MethodUsed != MethodIControl {
+		t.Errorf("expected MethodIControl result, got %+v", res)
+	}
+
+	// Test MethodAuto with iControl first
+	optsAuto := opts
+	optsAuto.Method = MethodAuto
+	resAuto, err := ApplyGeoIP(context.Background(), server.URL, "/var/tmp/geoip.tgz", optsAuto, func(s string) {})
+	if err != nil {
+		t.Fatalf("ApplyGeoIP Auto failed: %v", err)
+	}
+	if resAuto == nil || resAuto.MethodUsed != MethodIControl {
+		t.Errorf("expected MethodIControl result from Auto, got %+v", resAuto)
+	}
+
+	// Test MethodAuto with SSH first (IdentityFile set), SSH fails, iControl succeeds
+	optsSSHFirst := opts
+	optsSSHFirst.Method = MethodAuto
+	optsSSHFirst.IdentityFile = "/dummy/key"
+	optsSSHFirst.Port = 65530
+	resFallback, err := ApplyGeoIP(context.Background(), server.URL, "/var/tmp/geoip.tar.gz", optsSSHFirst, func(s string) {})
+	if err != nil {
+		t.Fatalf("ApplyGeoIP fallback failed: %v", err)
+	}
+	if resFallback == nil || resFallback.MethodUsed != MethodIControl {
+		t.Errorf("expected MethodIControl from fallback, got %+v", resFallback)
+	}
+
+	// Test both fail
+	optsDead := opts
+	optsDead.Port = 65530
+	optsDead.HTTPClient = nil
+	optsDead.Timeout = 50 * time.Millisecond
+	_, err = ApplyGeoIP(context.Background(), "127.0.0.1", "/var/tmp/geoip.zip", optsDead, func(s string) {})
+	if err == nil {
+		t.Errorf("expected error when both fail, got nil")
 	}
 }

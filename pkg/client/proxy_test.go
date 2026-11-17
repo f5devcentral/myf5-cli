@@ -3,16 +3,101 @@ package client
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+var (
+	memListenersMu sync.Mutex
+	memListeners   = make(map[string]*inMemoryListener)
+	portSeq        = 10000
+)
+
+type inMemoryListener struct {
+	addr  string
+	conns chan net.Conn
+	done  chan struct{}
+	once  sync.Once
+}
+
+func newMemListener() *inMemoryListener {
+	memListenersMu.Lock()
+	portSeq++
+	addr := fmt.Sprintf("127.0.0.1:%d", portSeq)
+	l := &inMemoryListener{
+		addr:  addr,
+		conns: make(chan net.Conn),
+		done:  make(chan struct{}),
+	}
+	memListeners[addr] = l
+	memListenersMu.Unlock()
+	return l
+}
+
+func (l *inMemoryListener) Accept() (net.Conn, error) {
+	select {
+	case c := <-l.conns:
+		return c, nil
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *inMemoryListener) Close() error {
+	l.once.Do(func() {
+		close(l.done)
+		memListenersMu.Lock()
+		delete(memListeners, l.addr)
+		memListenersMu.Unlock()
+	})
+	return nil
+}
+
+func (l *inMemoryListener) Addr() net.Addr {
+	return &testAddr{addr: l.addr}
+}
+
+type testAddr struct {
+	addr string
+}
+
+func (a *testAddr) Network() string { return "tcp" }
+func (a *testAddr) String() string  { return a.addr }
+
+func memDial(ctx context.Context, network, addr string) (net.Conn, error) {
+	memListenersMu.Lock()
+	l, ok := memListeners[addr]
+	memListenersMu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("connect: operation not permitted (mock %s)", addr)
+	}
+	c1, c2 := net.Pipe()
+	select {
+	case l.conns <- c2:
+		return c1, nil
+	case <-ctx.Done():
+		c1.Close()
+		c2.Close()
+		return nil, ctx.Err()
+	case <-l.done:
+		c1.Close()
+		c2.Close()
+		return nil, net.ErrClosed
+	}
+}
+
+func init() {
+	proxyDialContext = memDial
+}
 
 func TestParseProxyURL(t *testing.T) {
 	tests := []struct {
@@ -152,10 +237,7 @@ func TestShouldBypassProxy(t *testing.T) {
 func TestHTTPConnectProxyTunnel(t *testing.T) {
 	// Start target backend echo server
 	backendReceived := make(chan string, 1)
-	backendListener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to start backend listener: %v", err)
-	}
+	backendListener := newMemListener()
 	defer backendListener.Close()
 
 	go func() {
@@ -174,10 +256,7 @@ func TestHTTPConnectProxyTunnel(t *testing.T) {
 
 	// Start mock HTTP CONNECT proxy
 	connectHostReceived := make(chan string, 1)
-	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to start proxy listener: %v", err)
-	}
+	proxyListener := newMemListener()
 	defer proxyListener.Close()
 
 	go func() {
@@ -195,7 +274,7 @@ func TestHTTPConnectProxyTunnel(t *testing.T) {
 		if req.Method == http.MethodConnect {
 			connectHostReceived <- req.Host
 			// Dial target
-			targetConn, err := net.Dial("tcp", req.Host)
+			targetConn, err := memDial(context.Background(), "tcp", req.Host)
 			if err != nil {
 				_, _ = clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 				return
@@ -258,10 +337,7 @@ func TestHTTPConnectProxyTunnel(t *testing.T) {
 
 func TestSOCKS5ProxyTunnel(t *testing.T) {
 	// Start target backend echo server
-	backendListener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to start backend listener: %v", err)
-	}
+	backendListener := newMemListener()
 	defer backendListener.Close()
 
 	go func() {
@@ -278,10 +354,7 @@ func TestSOCKS5ProxyTunnel(t *testing.T) {
 	backendAddr := backendListener.Addr().String()
 
 	// Start mock SOCKS5 server
-	socksListener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to start socks5 listener: %v", err)
-	}
+	socksListener := newMemListener()
 	defer socksListener.Close()
 
 	go func() {
@@ -318,7 +391,7 @@ func TestSOCKS5ProxyTunnel(t *testing.T) {
 		port := int(addrPort[4])<<8 | int(addrPort[5])
 		target := net.JoinHostPort(ip.String(), strconv.Itoa(port))
 
-		targetConn, err := net.Dial("tcp", target)
+		targetConn, err := memDial(context.Background(), "tcp", target)
 		if err != nil {
 			_, _ = clientConn.Write([]byte{0x05, 0x05, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 			return
@@ -361,10 +434,7 @@ func TestSOCKS5ProxyTunnel(t *testing.T) {
 
 func TestSOCKS5ProxyTunnel_IPv6Target(t *testing.T) {
 	// Start mock SOCKS5 server that verifies ATYP=4 (IPv6) request serialization
-	socksListener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to start socks5 listener: %v", err)
-	}
+	socksListener := newMemListener()
 	defer socksListener.Close()
 
 	reqReceived := make(chan []byte, 1)
@@ -458,20 +528,27 @@ func TestSOCKS5ProxyTunnel_IPv6Target(t *testing.T) {
 
 func TestHTTPTransportHonorsProxy(t *testing.T) {
 	proxyHit := false
-	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		proxyHit = true
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("proxied-response"))
-	}))
+	proxyServerListener := newMemListener()
+	proxyServer := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			proxyHit = true
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("proxied-response"))
+		}),
+	}
+	go func() {
+		_ = proxyServer.Serve(proxyServerListener)
+	}()
 	defer proxyServer.Close()
 
-	proxyURL, err := url.Parse(proxyServer.URL)
+	proxyURL, err := url.Parse("http://" + proxyServerListener.Addr().String())
 	if err != nil {
 		t.Fatalf("failed to parse proxy URL: %v", err)
 	}
 
 	transport := NewProductionTransportWithProxy(SecureTLSConfig(true), proxyURL)
+	transport.DialContext = memDial
 	httpClient := &http.Client{Transport: transport, Timeout: 5 * time.Second}
 
 	req, err := http.NewRequest(http.MethodGet, "http://target.example.invalid/test", nil)
@@ -524,4 +601,265 @@ func TestResolveEnvProxy(t *testing.T) {
 
 func bufioReader(conn net.Conn) *bufio.Reader {
 	return bufio.NewReader(conn)
+}
+
+func TestProxyFuncAndCheckNoProxy(t *testing.T) {
+	os.Setenv("NO_PROXY", "example.com,.internal")
+	defer os.Unsetenv("NO_PROXY")
+
+	explicit, _ := url.Parse("http://explicit-proxy:8080")
+	fn := ProxyFunc(explicit)
+
+	req1, _ := http.NewRequest(http.MethodGet, "https://api.f5.com/path", nil)
+	u, err := fn(req1)
+	if err != nil || u == nil || u.String() != "http://explicit-proxy:8080" {
+		t.Errorf("expected explicit proxy, got %v (err: %v)", u, err)
+	}
+
+	req2, _ := http.NewRequest(http.MethodGet, "https://example.com/path", nil)
+	u2, err := fn(req2)
+	if err != nil || u2 != nil {
+		t.Errorf("expected nil proxy for NO_PROXY target, got %v", u2)
+	}
+
+	uNilTarget, err := checkNoProxy(explicit, nil)
+	if err != nil || uNilTarget != explicit {
+		t.Errorf("checkNoProxy with nil target should return proxyURL")
+	}
+
+	fnGlobal := ProxyFunc(nil)
+	SetGlobalProxy("http://global-proxy:8080")
+	defer ClearGlobalProxy()
+
+	uGlobal, err := fnGlobal(req1)
+	if err != nil || uGlobal == nil || uGlobal.String() != "http://global-proxy:8080" {
+		t.Errorf("expected global proxy, got %v", uGlobal)
+	}
+	ClearGlobalProxy()
+
+	os.Setenv("MYF5_PROXY", "http://env-myf5-proxy:8080")
+	defer os.Unsetenv("MYF5_PROXY")
+	uEnv, err := fnGlobal(req1)
+	if err != nil || uEnv == nil || uEnv.String() != "http://env-myf5-proxy:8080" {
+		t.Errorf("expected MYF5_PROXY, got %v", uEnv)
+	}
+	os.Unsetenv("MYF5_PROXY")
+
+	os.Setenv("F5_PROXY", "http://env-f5-proxy:8080")
+	defer os.Unsetenv("F5_PROXY")
+	uF5Env, err := fnGlobal(req1)
+	if err != nil || uF5Env == nil || uF5Env.String() != "http://env-f5-proxy:8080" {
+		t.Errorf("expected F5_PROXY, got %v", uF5Env)
+	}
+}
+
+func TestDialProxyBranches(t *testing.T) {
+	ClearGlobalProxy()
+	for _, envKey := range []string{"MYF5_PROXY", "F5_PROXY", "ALL_PROXY", "all_proxy", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy"} {
+		oldVal := os.Getenv(envKey)
+		defer os.Setenv(envKey, oldVal)
+		os.Unsetenv(envKey)
+	}
+
+	ctx := context.Background()
+
+	listener := newMemListener()
+	defer listener.Close()
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	conn, err := DialProxy(ctx, "tcp", listener.Addr().String(), nil)
+	if err != nil {
+		t.Fatalf("DialProxy direct dial failed: %v", err)
+	}
+	conn.Close()
+
+	badScheme, _ := url.Parse("ftp://proxy.example.com:21")
+	_, err = DialProxy(ctx, "tcp", "example.com:80", badScheme)
+	if err == nil || !strings.Contains(err.Error(), "unsupported proxy protocol") {
+		t.Errorf("expected unsupported proxy protocol error, got %v", err)
+	}
+
+	os.Setenv("NO_PROXY", "127.0.0.1")
+	dummyProxy, _ := url.Parse("http://192.0.2.1:8080")
+	connBypass, err := DialProxy(ctx, "tcp", listener.Addr().String(), dummyProxy)
+	if err != nil {
+		t.Fatalf("DialProxy with NO_PROXY bypass failed: %v", err)
+	}
+	connBypass.Close()
+}
+
+func TestHTTPConnectProxyErrorsAndAuth(t *testing.T) {
+	proxy407 := newMemListener()
+	defer proxy407.Close()
+
+	go func() {
+		for {
+			conn, err := proxy407.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				r := bufio.NewReader(c)
+				req, err := http.ReadRequest(r)
+				if err != nil {
+					return
+				}
+				if req.Header.Get("Proxy-Authorization") == "" {
+					io.WriteString(c, "HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
+				} else {
+					io.WriteString(c, "HTTP/1.1 200 Connection Established\r\n\r\n")
+				}
+			}(conn)
+		}
+	}()
+
+	proxyURL407, _ := ParseProxyURL("http://" + proxy407.Addr().String())
+	ctx := context.Background()
+
+	_, err := DialProxy(ctx, "tcp", "target.corp:443", proxyURL407)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 407") {
+		t.Errorf("expected HTTP 407 error, got %v", err)
+	}
+
+	proxyWithAuth, _ := ParseProxyURL("http://user:pass@" + proxy407.Addr().String())
+	connAuth, err := DialProxy(ctx, "tcp", "target.corp:443", proxyWithAuth)
+	if err != nil {
+		t.Fatalf("expected proxy with auth to succeed, got %v", err)
+	}
+	connAuth.Close()
+
+	proxy500 := newMemListener()
+	defer proxy500.Close()
+	go func() {
+		conn, err := proxy500.Accept()
+		if err == nil {
+			defer conn.Close()
+			r := bufio.NewReader(conn)
+			_, _ = http.ReadRequest(r)
+			io.WriteString(conn, "HTTP/1.1 500 Internal Server Error\r\n\r\n")
+		}
+	}()
+	proxyURL500, _ := ParseProxyURL("http://" + proxy500.Addr().String())
+	_, err = DialProxy(ctx, "tcp", "target.corp:443", proxyURL500)
+	if err == nil || !strings.Contains(err.Error(), "500") {
+		t.Errorf("expected 500 error from proxy, got %v", err)
+	}
+}
+
+func TestSOCKS5ErrorsAndAuth(t *testing.T) {
+	socksAuth := newMemListener()
+	defer socksAuth.Close()
+
+	go func() {
+		for {
+			conn, err := socksAuth.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				greet := make([]byte, 128)
+				n, err := c.Read(greet)
+				if err != nil || n < 3 {
+					return
+				}
+				c.Write([]byte{0x05, 0x02})
+
+				authBuf := make([]byte, 128)
+				an, err := c.Read(authBuf)
+				if err != nil || an < 2 {
+					return
+				}
+				c.Write([]byte{0x01, 0x00})
+
+				reqBuf := make([]byte, 128)
+				rn, err := c.Read(reqBuf)
+				if err != nil || rn < 4 {
+					return
+				}
+				c.Write([]byte{0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+			}(conn)
+		}
+	}()
+
+	proxyAuthURL, _ := ParseProxyURL("socks5://testuser:testpass@" + socksAuth.Addr().String())
+	ctx := context.Background()
+
+	conn, err := DialProxy(ctx, "tcp", "127.0.0.1:8080", proxyAuthURL)
+	if err != nil {
+		t.Fatalf("SOCKS5 auth connection failed: %v", err)
+	}
+	conn.Close()
+
+	socksReject := newMemListener()
+	defer socksReject.Close()
+	go func() {
+		c, err := socksReject.Accept()
+		if err == nil {
+			defer c.Close()
+			buf := make([]byte, 128)
+			c.Read(buf)
+			c.Write([]byte{0x05, 0xFF})
+		}
+	}()
+	proxyRejectURL, _ := ParseProxyURL("socks5://" + socksReject.Addr().String())
+	_, err = DialProxy(ctx, "tcp", "127.0.0.1:8080", proxyRejectURL)
+	if err == nil || !strings.Contains(err.Error(), "rejected") {
+		t.Errorf("expected SOCKS5 rejected auth error, got %v", err)
+	}
+
+	socksBadVer := newMemListener()
+	defer socksBadVer.Close()
+	go func() {
+		c, err := socksBadVer.Accept()
+		if err == nil {
+			defer c.Close()
+			buf := make([]byte, 128)
+			c.Read(buf)
+			c.Write([]byte{0x04, 0x00})
+		}
+	}()
+	proxyBadVerURL, _ := ParseProxyURL("socks5://" + socksBadVer.Addr().String())
+	_, err = DialProxy(ctx, "tcp", "127.0.0.1:8080", proxyBadVerURL)
+	if err == nil || !strings.Contains(err.Error(), "invalid SOCKS version") {
+		t.Errorf("expected invalid SOCKS version error, got %v", err)
+	}
+}
+
+func TestSetDialContext(t *testing.T) {
+	t.Cleanup(func() {
+		SetDialContext(memDial)
+	})
+	customDialed := false
+	customFn := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		customDialed = true
+		c1, _ := net.Pipe()
+		return c1, nil
+	}
+
+	SetDialContext(customFn)
+	conn, err := proxyDialContext(context.Background(), "tcp", "127.0.0.1:9999")
+	if err != nil {
+		t.Fatalf("unexpected dial error: %v", err)
+	}
+	conn.Close()
+	if !customDialed {
+		t.Errorf("expected custom dialer to be invoked")
+	}
+
+	// Reset to nil
+	SetDialContext(nil)
+	if proxyDialContext == nil {
+		t.Errorf("expected non-nil default dialer after SetDialContext(nil)")
+	}
 }

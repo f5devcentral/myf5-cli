@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -67,7 +68,11 @@ func NewClient(token string, baseFQDN string) *Client {
 // An empty apiKey falls back to DefaultKParam.
 func NewClientWithKey(token, baseFQDN, apiKey string) *Client {
 	if baseFQDN == "" {
-		baseFQDN = DefaultSupportFQDN
+		if envFQDN := os.Getenv("F5_SUPPORT_FQDN"); envFQDN != "" {
+			baseFQDN = envFQDN
+		} else {
+			baseFQDN = DefaultSupportFQDN
+		}
 	}
 	if apiKey == "" {
 		apiKey = DefaultKParam

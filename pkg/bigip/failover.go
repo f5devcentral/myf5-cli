@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -42,6 +43,7 @@ type TransferOptions struct {
 	ClientCertPath     string         // Path to TLS client certificate file (PEM) for mTLS
 	ClientKeyPath      string         // Path to TLS client certificate private key file (PEM)
 	Timeout            time.Duration  // Connection timeout
+	HTTPClient         *http.Client   // Custom HTTP client (used for in-memory testing or custom transports)
 }
 
 // Zero scrubs sensitive password and passphrase bytes and clears string fields from memory.
@@ -183,16 +185,10 @@ func DownloadFileWithFailover(
 		return savedPath, MethodSCP, nil
 
 	case MethodAuto:
-		// Try iControl REST first if password is provided or file looks like an autodeploy resource (/shared/images or /var/tmp/qkviews)
-		cleanRemote := path.Clean(remotePath)
-		isRestFriendly := strings.HasPrefix(cleanRemote, "/shared/images") ||
-			strings.HasPrefix(cleanRemote, "/var/tmp/qkviews") ||
-			strings.HasPrefix(cleanRemote, "/mgmt/") ||
-			strings.HasSuffix(cleanRemote, ".iso") ||
-			strings.HasSuffix(cleanRemote, ".qkview")
-
+		// If an explicit SSH identity key (-i) was provided, prefer SCP first.
+		// Otherwise, try iControl REST first when REST credentials (password/cert) are available.
 		hasRestAuth := opts.Password != "" || len(opts.PasswordBytes) > 0 || opts.ClientCertPath != "" || os.Getenv("BIGIP_PASSWORD") != "" || os.Getenv("BIGIQ_PASSWORD") != ""
-		tryRestFirst := hasRestAuth && (isRestFriendly || opts.IdentityFile == "")
+		tryRestFirst := opts.IdentityFile == "" && hasRestAuth
 
 		if tryRestFirst {
 			savedPath, restErr := downloadViaIControl(ctx, host, remotePath, localDest, opts, progressCb)
@@ -249,22 +245,30 @@ func newClientFromOptions(host string, opts TransferOptions, defaultPort int) *C
 	if user == "" {
 		user = "admin"
 	}
+	var pwBytes []byte
+	if len(opts.PasswordBytes) > 0 {
+		pwBytes = make([]byte, len(opts.PasswordBytes))
+		copy(pwBytes, opts.PasswordBytes)
+	}
 	c, err := NewClientWithOptions(ClientOptions{
 		Host:           host,
 		Port:           port,
 		Username:       user,
 		Password:       opts.Password,
-		PasswordBytes:  opts.PasswordBytes,
+		PasswordBytes:  pwBytes,
 		SkipTLSVerify:  true,
 		ClientCertPath: opts.ClientCertPath,
 		ClientKeyPath:  opts.ClientKeyPath,
 		Timeout:        opts.Timeout,
+		HTTPClient:     opts.HTTPClient,
 	})
 	if err == nil {
 		return c
 	}
 	c = NewClient(host, port, user, opts.Password)
-	if opts.Timeout > 0 {
+	if opts.HTTPClient != nil {
+		c.HTTPClient = opts.HTTPClient
+	} else if opts.Timeout > 0 {
 		c.HTTPClient.Timeout = opts.Timeout
 	}
 	return c
@@ -296,23 +300,37 @@ func pushViaIControl(
 	return remoteUploaded, nil
 }
 
+func newSCPOptions(host string, opts TransferOptions) SCPOptions {
+	var pwBytes []byte
+	if len(opts.PasswordBytes) > 0 {
+		pwBytes = make([]byte, len(opts.PasswordBytes))
+		copy(pwBytes, opts.PasswordBytes)
+	}
+	var passBytes []byte
+	if len(opts.SSHPassphraseBytes) > 0 {
+		passBytes = make([]byte, len(opts.SSHPassphraseBytes))
+		copy(passBytes, opts.SSHPassphraseBytes)
+	}
+	return SCPOptions{
+		Host:            host,
+		Port:            opts.Port,
+		Username:        opts.Username,
+		Password:        opts.Password,
+		PasswordBytes:   pwBytes,
+		KeyPath:         opts.IdentityFile,
+		Passphrase:      opts.SSHPassphrase,
+		PassphraseBytes: passBytes,
+		Timeout:         opts.Timeout,
+	}
+}
+
 func pushViaSCP(
 	ctx context.Context,
 	host, localFile, destDir string,
 	opts TransferOptions,
 	progressCb func(transferred, total int64),
 ) (string, error) {
-	scpOpts := SCPOptions{
-		Host:            host,
-		Port:            opts.Port,
-		Username:        opts.Username,
-		Password:        opts.Password,
-		PasswordBytes:   opts.PasswordBytes,
-		KeyPath:         opts.IdentityFile,
-		Passphrase:      opts.SSHPassphrase,
-		PassphraseBytes: opts.SSHPassphraseBytes,
-		Timeout:         opts.Timeout,
-	}
+	scpOpts := newSCPOptions(host, opts)
 	defer scpOpts.Zero()
 	return SCPUpload(ctx, localFile, destDir, scpOpts, progressCb)
 }
@@ -348,17 +366,7 @@ func downloadViaSCP(
 	opts TransferOptions,
 	progressCb func(transferred, total int64),
 ) (string, error) {
-	scpOpts := SCPOptions{
-		Host:            host,
-		Port:            opts.Port,
-		Username:        opts.Username,
-		Password:        opts.Password,
-		PasswordBytes:   opts.PasswordBytes,
-		KeyPath:         opts.IdentityFile,
-		Passphrase:      opts.SSHPassphrase,
-		PassphraseBytes: opts.SSHPassphraseBytes,
-		Timeout:         opts.Timeout,
-	}
+	scpOpts := newSCPOptions(host, opts)
 	defer scpOpts.Zero()
 	return SCPDownload(ctx, remotePath, localDest, scpOpts, progressCb)
 }
@@ -390,17 +398,7 @@ func GenerateQKViewWithFailover(
 		return filename, MethodIControl, nil
 
 	case MethodSCP:
-		scpOpts := SCPOptions{
-			Host:            host,
-			Port:            opts.Port,
-			Username:        opts.Username,
-			Password:        opts.Password,
-			PasswordBytes:   opts.PasswordBytes,
-			KeyPath:         opts.IdentityFile,
-			Passphrase:      opts.SSHPassphrase,
-			PassphraseBytes: opts.SSHPassphraseBytes,
-			Timeout:         opts.Timeout,
-		}
+		scpOpts := newSCPOptions(host, opts)
 		defer scpOpts.Zero()
 		filename, err := GenerateQKViewSSH(ctx, scpOpts, requestedFilename, complete, statusCb)
 		if err != nil {
@@ -410,7 +408,7 @@ func GenerateQKViewWithFailover(
 
 	case MethodAuto:
 		// If password or client certificate is provided and no key, try iControl REST first
-		tryRestFirst := opts.Password != "" || len(opts.PasswordBytes) > 0 || opts.ClientCertPath != "" || (opts.IdentityFile == "" && os.Getenv("BIGIP_PASSWORD") != "")
+		tryRestFirst := opts.IdentityFile == "" && (opts.Password != "" || len(opts.PasswordBytes) > 0 || opts.ClientCertPath != "" || os.Getenv("BIGIP_PASSWORD") != "")
 
 		if tryRestFirst {
 			client := newClientFromOptions(host, opts, 443)
@@ -427,17 +425,7 @@ func GenerateQKViewWithFailover(
 				logFn("iControl REST QKView generation failed (%v). Automatically falling back to SSH...", restErr)
 			}
 
-			scpOpts := SCPOptions{
-				Host:            host,
-				Port:            opts.Port,
-				Username:        opts.Username,
-				Password:        opts.Password,
-				PasswordBytes:   opts.PasswordBytes,
-				KeyPath:         opts.IdentityFile,
-				Passphrase:      opts.SSHPassphrase,
-				PassphraseBytes: opts.SSHPassphraseBytes,
-				Timeout:         opts.Timeout,
-			}
+			scpOpts := newSCPOptions(host, opts)
 			defer scpOpts.Zero()
 			filename, sshErr := GenerateQKViewSSH(ctx, scpOpts, requestedFilename, complete, statusCb)
 			if sshErr == nil {
@@ -448,17 +436,7 @@ func GenerateQKViewWithFailover(
 		}
 
 		// Try SSH first
-		scpOpts := SCPOptions{
-			Host:            host,
-			Port:            opts.Port,
-			Username:        opts.Username,
-			Password:        opts.Password,
-			PasswordBytes:   opts.PasswordBytes,
-			KeyPath:         opts.IdentityFile,
-			Passphrase:      opts.SSHPassphrase,
-			PassphraseBytes: opts.SSHPassphraseBytes,
-			Timeout:         opts.Timeout,
-		}
+		scpOpts := newSCPOptions(host, opts)
 		filename, sshErr := GenerateQKViewSSH(ctx, scpOpts, requestedFilename, complete, statusCb)
 		scpOpts.Zero()
 		if sshErr == nil {
@@ -489,7 +467,7 @@ func GenerateQKViewWithFailover(
 // DeleteQKViewWithFailover deletes a generated QKView archive on the appliance via REST or SSH.
 func DeleteQKViewWithFailover(ctx context.Context, host, remoteFilename string, opts TransferOptions) error {
 	method := opts.Method
-	if method == MethodIControl || (method == MethodAuto && (opts.Password != "" || len(opts.PasswordBytes) > 0 || opts.ClientCertPath != "")) {
+	if method == MethodIControl || (method == MethodAuto && opts.IdentityFile == "" && (opts.Password != "" || len(opts.PasswordBytes) > 0 || opts.ClientCertPath != "")) {
 		client := newClientFromOptions(host, opts, 443)
 		defer client.Zero()
 		if err := client.DeleteQKView(ctx, remoteFilename); err == nil {
@@ -499,17 +477,7 @@ func DeleteQKViewWithFailover(ctx context.Context, host, remoteFilename string, 
 		}
 	}
 
-	scpOpts := SCPOptions{
-		Host:            host,
-		Port:            opts.Port,
-		Username:        opts.Username,
-		Password:        opts.Password,
-		PasswordBytes:   opts.PasswordBytes,
-		KeyPath:         opts.IdentityFile,
-		Passphrase:      opts.SSHPassphrase,
-		PassphraseBytes: opts.SSHPassphraseBytes,
-		Timeout:         opts.Timeout,
-	}
+	scpOpts := newSCPOptions(host, opts)
 	defer scpOpts.Zero()
 	return DeleteQKViewSSH(ctx, scpOpts, remoteFilename)
 }

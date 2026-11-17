@@ -91,6 +91,14 @@ func BuildSSHClientConfig(opts SCPOptions) (*ssh.ClientConfig, error) {
 	if username == "" {
 		username = "admin"
 	}
+	if err := ValidateApplianceUsername(username); err != nil {
+		return nil, err
+	}
+	if opts.KeyPath != "" {
+		if _, err := ValidateCredentialFilePath(opts.KeyPath, "SSH identity key"); err != nil {
+			return nil, err
+		}
+	}
 
 	var authMethods []ssh.AuthMethod
 
@@ -100,6 +108,9 @@ func BuildSSHClientConfig(opts SCPOptions) (*ssh.ClientConfig, error) {
 		pw = string(opts.PasswordBytes)
 	}
 	if pw != "" {
+		if err := ValidateAppliancePassword(pw); err != nil {
+			return nil, err
+		}
 		authMethods = append(authMethods, ssh.Password(pw))
 		// Also support keyboard-interactive (PAM / TACACS+ / RADIUS)
 		authMethods = append(authMethods, ssh.KeyboardInteractive(

@@ -249,3 +249,36 @@ func TestCaseCreate_LifecycleWarnings(t *testing.T) {
 		t.Errorf("expected no Hardware Rec in stderr, got: %q", errOutput)
 	}
 }
+
+func TestResolveApplianceCreds_HostBinding(t *testing.T) {
+	// Setup env
+	os.Setenv("BIGIP_HOST", "10.0.0.1")
+	os.Setenv("BIGIP_PASSWORD", "secret1")
+	os.Setenv("BIGIQ_HOST", "10.0.0.2")
+	os.Setenv("BIGIQ_PASSWORD", "secret2")
+
+	defer func() {
+		os.Unsetenv("BIGIP_HOST")
+		os.Unsetenv("BIGIP_PASSWORD")
+		os.Unsetenv("BIGIQ_HOST")
+		os.Unsetenv("BIGIQ_PASSWORD")
+	}()
+
+	// 1. Target exactly matches BIGIP_HOST
+	creds1 := resolveApplianceCreds("10.0.0.1", "BIG-IP", "", "", "", "", false)
+	if creds1.Password != "secret1" {
+		t.Errorf("expected secret1 for 10.0.0.1, got %q", creds1.Password)
+	}
+
+	// 2. Target exactly matches BIGIQ_HOST
+	creds2 := resolveApplianceCreds("10.0.0.2", "BIG-IQ", "", "", "", "", false)
+	if creds2.Password != "secret2" {
+		t.Errorf("expected secret2 for 10.0.0.2, got %q", creds2.Password)
+	}
+
+	// 3. Unrelated host should NOT get leaked passwords
+	creds3 := resolveApplianceCreds("1.2.3.4", "BIG-IP", "", "", "", "", false)
+	if creds3.Password != "" {
+		t.Errorf("expected NO password for unrelated host 1.2.3.4, got leaked password %q", creds3.Password)
+	}
+}

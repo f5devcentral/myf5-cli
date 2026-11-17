@@ -10,8 +10,35 @@ import (
 	"testing"
 )
 
+type roundTripFunc func(req *http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type mockServer struct {
+	URL    string
+	client *http.Client
+}
+
+func (m *mockServer) Close()               {}
+func (m *mockServer) Client() *http.Client { return m.client }
+
+func newMockServer(handler http.Handler) *mockServer {
+	return &mockServer{
+		URL: "https://mock.cases.f5.invalid",
+		client: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+				return rec.Result(), nil
+			}),
+		},
+	}
+}
+
 func TestListCases(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/case-management/v1/cases" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -54,7 +81,7 @@ func TestListCases(t *testing.T) {
 // with a {"comments": ...} JSON payload and decodes the response envelope.
 func TestAddCommentRequestShape(t *testing.T) {
 	var gotMethod, gotPath, gotBody string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotPath = r.URL.Path
 		b, _ := io.ReadAll(r.Body)
@@ -98,7 +125,7 @@ func TestAddCommentRequestShape(t *testing.T) {
 func TestListCasesDecodesLiveFieldNames(t *testing.T) {
 	payload := `{"data":[{"caseNumber":"01234567","subject":"Example Case Subject","status":"Resolution Provided","priority":"3 - Site Not At Risk","dateOpened":"2025-09-12"}]}`
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write([]byte(payload)); err != nil {
 			t.Fatalf("write: %v", err)
@@ -135,7 +162,7 @@ func TestBodyReportedErrorsBecomeErrors(t *testing.T) {
 	const payload = `{"status":"Error","message":"Something went wrong upstream","isError":true,"data":null}`
 
 	t.Run("ListCases", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK) // 2xx despite the failure
 			io.WriteString(w, payload)
@@ -155,7 +182,7 @@ func TestBodyReportedErrorsBecomeErrors(t *testing.T) {
 	})
 
 	t.Run("GetMetadata", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			io.WriteString(w, payload)
@@ -172,7 +199,7 @@ func TestBodyReportedErrorsBecomeErrors(t *testing.T) {
 	})
 
 	t.Run("GetCase", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			io.WriteString(w, payload)
@@ -191,7 +218,7 @@ func TestBodyReportedErrorsBecomeErrors(t *testing.T) {
 	// A healthy response must still succeed: the check must not reject
 	// everything.
 	t.Run("success is unaffected", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			io.WriteString(w, `{"status":"Success","isError":false,"data":[]}`)
 		}))
@@ -204,4 +231,166 @@ func TestBodyReportedErrorsBecomeErrors(t *testing.T) {
 			t.Errorf("a genuinely empty list is not an error: %v", err)
 		}
 	})
+}
+
+func TestClientMethods(t *testing.T) {
+	var nilClient *Client
+	if nilClient.String() != "<nil>" {
+		t.Errorf("nil Client.String() = %q, want <nil>", nilClient.String())
+	}
+	nilClient.Zero()
+
+	c := NewClient("secret-token", "https://api.f5.com")
+	if !strings.Contains(c.String(), "https://api.f5.com") {
+		t.Errorf("String() missing BaseFQDN: %s", c.String())
+	}
+	if strings.Contains(c.String(), "secret-token") {
+		t.Errorf("String() leaked token: %s", c.String())
+	}
+	if c.GoString() != c.String() {
+		t.Errorf("GoString() != String()")
+	}
+
+	cEmpty := NewClient("", "https://api.f5.com")
+	if !strings.Contains(cEmpty.String(), "[EMPTY]") {
+		t.Errorf("String() should show [EMPTY] for empty token")
+	}
+
+	c.Zero()
+	if c.Token != "" || c.KParam != "" {
+		t.Errorf("Zero() did not clear tokens")
+	}
+}
+
+func TestEntitlementAndValidation(t *testing.T) {
+	if got := EntitlementFieldFor("NGINX"); got != "subscriptionId" {
+		t.Errorf("EntitlementFieldFor(NGINX) = %s, want subscriptionId", got)
+	}
+	if got := EntitlementFieldFor("Aspen Mesh"); got != "subscriptionId" {
+		t.Errorf("EntitlementFieldFor(Aspen Mesh) = %s, want subscriptionId", got)
+	}
+	if got := EntitlementFieldFor("BIG-IP"); got != "serialNumber" {
+		t.Errorf("EntitlementFieldFor(BIG-IP) = %s, want serialNumber", got)
+	}
+
+	req := RequiredCreateFields()
+	if len(req) == 0 {
+		t.Errorf("RequiredCreateFields() returned empty slice")
+	}
+
+	err := &ErrMissingCreateFields{Missing: []string{"subject", "serialNumber"}}
+	errStr := err.Error()
+	if !strings.Contains(errStr, "missing required field(s)") || !strings.Contains(errStr, "Salesforce") {
+		t.Errorf("unexpected error string: %s", errStr)
+	}
+
+	err2 := &ErrMissingCreateFields{Missing: []string{"subject"}}
+	if strings.Contains(err2.Error(), "Salesforce") {
+		t.Errorf("unexpected Salesforce notice for non-serial error")
+	}
+}
+
+func TestCreateCase(t *testing.T) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/case-management/v1/cases" {
+			t.Errorf("path = %s, want /case-management/v1/cases", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"status":"Success","message":"Case created","isError":false,"code":201,"data":{"caseNumber":"01234567"}}`)
+	}))
+	defer server.Close()
+
+	c := NewClient("tok", server.URL)
+	c.HTTPClient = server.Client()
+
+	_, err := c.CreateCase(context.Background(), map[string]interface{}{"subject": "test"})
+	if err == nil {
+		t.Fatal("expected error with missing fields")
+	}
+
+	payload := map[string]interface{}{
+		"subject":                "Test Case",
+		"description":            "Test Description",
+		"priority":               "3 - Site Not At Risk",
+		"productFamily":          "BIG-IP",
+		"product":                "BIG-IP",
+		"version":                "17.1.0",
+		"reasonForContact":       "Question",
+		"caseOwnerEmail":         "user@example.com",
+		"preferredContactMethod": "Email",
+		"timezone":               "UTC",
+		"serialNumber":           "f5-1234",
+	}
+	resp, err := c.CreateCase(context.Background(), payload)
+	if err != nil {
+		t.Fatalf("CreateCase failed: %v", err)
+	}
+	if resp.Data.CaseNumber != "01234567" {
+		t.Errorf("got case number %s, want 01234567", resp.Data.CaseNumber)
+	}
+
+	respUnchecked, err := c.CreateCaseUnchecked(context.Background(), map[string]interface{}{"foo": "bar"})
+	if err != nil {
+		t.Fatalf("CreateCaseUnchecked failed: %v", err)
+	}
+	if respUnchecked.Data.CaseNumber != "01234567" {
+		t.Errorf("got case number %s, want 01234567", respUnchecked.Data.CaseNumber)
+	}
+}
+
+func TestGetCaseNotFound(t *testing.T) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"status":"Success","isError":false,"data":[]}`)
+	}))
+	defer server.Close()
+
+	c := NewClient("tok", server.URL)
+	c.HTTPClient = server.Client()
+
+	_, err := c.GetCase(context.Background(), "99999999")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected not found error, got %v", err)
+	}
+}
+
+func TestGetCaseSuccess(t *testing.T) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"status":"Success","isError":false,"data":[{"caseNumber":"01234567","subject":"test"}]}`)
+	}))
+	defer server.Close()
+
+	c := NewClient("tok", server.URL)
+	c.HTTPClient = server.Client()
+
+	detail, err := c.GetCase(context.Background(), "01234567")
+	if err != nil {
+		t.Fatalf("GetCase failed: %v", err)
+	}
+	if detail.CaseNumber != "01234567" {
+		t.Errorf("got case number %s, want 01234567", detail.CaseNumber)
+	}
+}
+
+func TestContactDisplayName(t *testing.T) {
+	c1 := CaseContact{Name: "Full Name"}
+	if c1.DisplayName() != "Full Name" {
+		t.Errorf("got %s, want Full Name", c1.DisplayName())
+	}
+	c2 := CaseContact{FirstName: "First", LastName: "Last"}
+	if c2.DisplayName() != "First Last" {
+		t.Errorf("got %s, want First Last", c2.DisplayName())
+	}
+	c3 := CaseContact{FirstName: "OnlyFirst"}
+	if c3.DisplayName() != "OnlyFirst" {
+		t.Errorf("got %s, want OnlyFirst", c3.DisplayName())
+	}
+	c4 := CaseContact{LastName: "OnlyLast"}
+	if c4.DisplayName() != "OnlyLast" {
+		t.Errorf("got %s, want OnlyLast", c4.DisplayName())
+	}
 }

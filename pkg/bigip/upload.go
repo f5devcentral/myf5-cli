@@ -104,11 +104,10 @@ func (c *Client) UploadFile(ctx context.Context, localPath string, remoteFilenam
 			if err != nil {
 				return "", fmt.Errorf("failed to create upload request: %w", err)
 			}
-			c.setAuth(req)
 			req.Header.Set("Content-Type", "application/octet-stream")
 			req.Header.Set("Content-Range", contentRange)
 
-			resp, err := c.HTTPClient.Do(req)
+			resp, err := c.doWithAuth(req)
 			if err != nil {
 				return "", fmt.Errorf("upload chunk failed at bytes %d-%d: %w", start, end, err)
 			}
@@ -168,10 +167,9 @@ func (c *Client) CopyRemoteFile(ctx context.Context, srcPath, destDir string) (s
 	if err != nil {
 		return "", err
 	}
-	c.setAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := c.doWithAuth(req)
 	if err != nil {
 		return "", fmt.Errorf("failed executing remote copy on appliance: %w", err)
 	}

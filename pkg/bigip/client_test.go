@@ -2,25 +2,32 @@ package bigip
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCheckReady(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/mgmt/tm/sys/ready" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mgmt/tm/sys/ready" {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"kind": "tm:sys:ready"}`))
+			return
 		}
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"kind": "tm:sys:ready"}`))
+		if r.URL.Path == "/mgmt/tm/sys/version" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		t.Errorf("unexpected path: %s", r.URL.Path)
 	}))
 	defer server.Close()
 
@@ -37,6 +44,44 @@ func TestCheckReady(t *testing.T) {
 	}
 	if !ready {
 		t.Errorf("expected appliance to be ready")
+	}
+
+	kind, err := c.CheckReadyWithKind(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if kind != "BIG-IP" {
+		t.Errorf("expected BIG-IP, got %q", kind)
+	}
+}
+
+func TestCheckReadyWithKind_BIGIQ(t *testing.T) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mgmt/tm/sys/ready" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/mgmt/shared/echo" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		t.Errorf("unexpected path: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	kind, err := c.CheckReadyWithKind(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if kind != "BIG-IQ" {
+		t.Errorf("expected BIG-IQ, got %q", kind)
 	}
 }
 
@@ -93,7 +138,7 @@ func TestValidateQKViewFilename(t *testing.T) {
 
 func TestDownloadFromURI(t *testing.T) {
 	testData := []byte("f5-mock-download-content-54321")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Range", fmt.Sprintf("0-%d/%d", len(testData)-1, len(testData)))
 		w.WriteHeader(http.StatusOK)
@@ -129,11 +174,21 @@ func TestDownloadFromURI(t *testing.T) {
 	if !progressCalled {
 		t.Errorf("expected progress callback to be called")
 	}
+
+	info, err := os.Stat(destFile)
+	if err != nil {
+		t.Fatalf("failed to stat destFile: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if info.Mode().Perm() != 0600 {
+			t.Errorf("expected file mode 0600, got %04o", info.Mode().Perm())
+		}
+	}
 }
 
 func TestDeleteQKView(t *testing.T) {
 	var receivedMethod, receivedPath, receivedAuth string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedMethod = r.Method
 		receivedPath = r.URL.Path
 		receivedAuth = r.Header.Get("Authorization")
@@ -170,7 +225,7 @@ func TestDeleteQKView(t *testing.T) {
 }
 
 func TestGenerateQKViewDefaultFilenameISO8601(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"command":"run","utilCmdArgs":"-f /var/tmp/qkviews/test.qkview","status":"completed"}`))
@@ -192,6 +247,47 @@ func TestGenerateQKViewDefaultFilenameISO8601(t *testing.T) {
 	re := regexp.MustCompile(`^qkview_.*_\d{8}T\d{6}Z\.qkview$`)
 	if !re.MatchString(filename) {
 		t.Errorf("expected filename matching ISO-8601 UTC timestamp pattern, got %q", filename)
+	}
+}
+
+func TestGenerateQKViewBIGIQFallback(t *testing.T) {
+	bashCalled := false
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/mgmt/tm/util/qkview" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/mgmt/tm/util/bash" {
+			bashCalled = true
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"commandResult":"success"}`))
+			return
+		}
+		if r.URL.Path == "/mgmt/cm/autodeploy/qkview" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	filename, err := c.GenerateQKViewWithStatus(context.Background(), "test.qkview", true, nil)
+	if err != nil {
+		t.Fatalf("GenerateQKViewWithStatus failed: %v", err)
+	}
+
+	if filename != "test.qkview" {
+		t.Errorf("expected test.qkview, got %q", filename)
+	}
+	if !bashCalled {
+		t.Errorf("expected bash fallback to be called for BIG-IQ")
 	}
 }
 
@@ -329,7 +425,7 @@ func TestNewClientWithOptions(t *testing.T) {
 
 func TestCreateQKViewTaskWithOptions(t *testing.T) {
 	var receivedBody string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/mgmt/cm/autodeploy/qkview" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -372,7 +468,7 @@ func TestGetEndpointExample(t *testing.T) {
 	var requestedPath string
 	var authHeader string
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestedPath = r.URL.Path
 		authHeader = r.Header.Get("Authorization")
 		if r.URL.Path == "/mgmt/tm/ltm/pool/example" {
@@ -550,4 +646,459 @@ func TestTransferOptionsZero(t *testing.T) {
 
 	var nilOpts *TransferOptions
 	nilOpts.Zero() // Must not panic
+}
+
+func TestValidateApplianceUsername(t *testing.T) {
+	tests := []struct {
+		name     string
+		username string
+		wantErr  bool
+	}{
+		{"valid", "admin", false},
+		{"valid email", "user@domain.com", false},
+		{"colon injection", "admin:pass", true},
+		{"spaces", "admin user", true},
+		{"shell meta", "admin;ls", true},
+		{"ANSI escapes", "admin\033[0m", true},
+		{"empty", "", true},
+		{"too long", "a" + string(make([]byte, 64)), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateApplianceUsername(tt.username)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateApplianceUsername() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidatePort(t *testing.T) {
+	tests := []struct {
+		port    string
+		wantErr bool
+	}{
+		{"22", false},
+		{"443", false},
+		{"8443", false},
+		{"0", true},
+		{"-1", true},
+		{"65536", true},
+		{"abc", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.port, func(t *testing.T) {
+			_, err := ValidatePort(tt.port)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidatePort() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateCredentialFilePath(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	validFile := filepath.Join(tmpDir, "valid.key")
+	os.WriteFile(validFile, []byte("key content"), 0600)
+
+	emptyFile := filepath.Join(tmpDir, "empty.key")
+	os.WriteFile(emptyFile, []byte(""), 0600)
+
+	largeFile := filepath.Join(tmpDir, "large.key")
+	largeData := make([]byte, 1024*1024+1)
+	os.WriteFile(largeFile, largeData, 0600)
+
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{"valid", validFile, false},
+		{"nonexistent", filepath.Join(tmpDir, "missing.key"), true},
+		{"directory", tmpDir, true},
+		{"empty file", emptyFile, true},
+		{"large file", largeFile, true},
+		{"null byte", filepath.Join(tmpDir, "file\x00.key"), true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ValidateCredentialFilePath(tt.path, "test")
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateCredentialFilePath() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseAndValidateApplianceHost_EmbeddedCreds(t *testing.T) {
+	_, _, _, _, err := ParseAndValidateApplianceHost("https://admin:secret@10.1.1.4", 443)
+	if err == nil {
+		t.Errorf("ParseAndValidateApplianceHost() expected error for embedded credentials")
+	}
+}
+
+func TestValidateAppliancePassword_K2873(t *testing.T) {
+	// 32 K2873 special characters:
+	// ! @ # $ % ^ & * ( ) ` ~ - + = [ ] { } ; ’ : " ' . / < > | \ ? _
+	allSpecialCharsPw := "Abc123!@#$%^&*()`~-+=[]{};’:\"'./<>|\\?_"
+
+	if err := ValidateAppliancePassword(allSpecialCharsPw); err != nil {
+		t.Fatalf("ValidateAppliancePassword failed on valid K2873 password: %v", err)
+	}
+
+	// Verify Basic Auth serialization & deserialization with all 32 K2873 characters
+	c := &Client{
+		Username: "admin",
+		Password: allSpecialCharsPw,
+	}
+	req, err := http.NewRequest(http.MethodGet, "https://10.1.1.4/mgmt/tm/sys/ready", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest failed: %v", err)
+	}
+	c.setAuth(req)
+
+	authHdr := req.Header.Get("Authorization")
+	if !strings.HasPrefix(authHdr, "Basic ") {
+		t.Fatalf("expected Basic auth header, got %q", authHdr)
+	}
+	rawEncoded := strings.TrimPrefix(authHdr, "Basic ")
+	decodedBytes, err := base64.StdEncoding.DecodeString(rawEncoded)
+	if err != nil {
+		t.Fatalf("failed to decode base64 auth header: %v", err)
+	}
+	expectedAuth := "admin:" + allSpecialCharsPw
+	if string(decodedBytes) != expectedAuth {
+		t.Fatalf("decoded auth mismatch:\n got:  %q\n want: %q", string(decodedBytes), expectedAuth)
+	}
+
+	// Verify also with PasswordBytes
+	cBytes := &Client{
+		Username:      "admin",
+		PasswordBytes: []byte(allSpecialCharsPw),
+	}
+	req2, err := http.NewRequest(http.MethodGet, "https://10.1.1.4/mgmt/tm/sys/ready", nil)
+	if err != nil {
+		t.Fatalf("http.NewRequest failed: %v", err)
+	}
+	cBytes.setAuth(req2)
+	authHdr2 := req2.Header.Get("Authorization")
+	decodedBytes2, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(authHdr2, "Basic "))
+	if err != nil {
+		t.Fatalf("failed to decode base64 auth header with PasswordBytes: %v", err)
+	}
+	if string(decodedBytes2) != expectedAuth {
+		t.Fatalf("decoded auth with PasswordBytes mismatch:\n got:  %q\n want: %q", string(decodedBytes2), expectedAuth)
+	}
+
+	// Verify NewClientWithOptions enforces password validation
+	_, err = NewClientWithOptions(ClientOptions{
+		Host:     "10.1.1.4",
+		Username: "admin",
+		Password: "invalid,password",
+	})
+	if err == nil {
+		t.Fatalf("expected NewClientWithOptions to reject password with comma")
+	}
+
+	_, err = NewClientWithOptions(ClientOptions{
+		Host:          "10.1.1.4",
+		Username:      "admin",
+		PasswordBytes: []byte("invalid,password"),
+	})
+	if err == nil {
+		t.Fatalf("expected NewClientWithOptions to reject passwordBytes with comma")
+	}
+
+	// Verify rejected passwords and ensure no secret leakage in error messages
+	tooLongPw := strings.Repeat("a", 256)
+	invalidTestCases := []struct {
+		name string
+		pw   string
+	}{
+		{"empty", ""},
+		{"too long", tooLongPw},
+		{"space", "abc def"},
+		{"leading space", " abc"},
+		{"trailing space", "abc "},
+		{"tab", "abc\tdef"},
+		{"newline", "abc\ndef"},
+		{"carriage return", "abc\rdef"},
+		{"null control char", "abc\x00def"},
+		{"del control char", "abc\x7fdef"},
+		{"comma", "abc,def"},
+		{"unsupported unicode", "abc\u00a9def"},
+	}
+
+	for _, tc := range invalidTestCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateAppliancePassword(tc.pw)
+			if err == nil {
+				t.Fatalf("expected error for invalid password %q, got nil", tc.name)
+			}
+			// CRITICAL: verify password or substring "abc" is never leaked in error
+			if tc.pw != "" && strings.Contains(err.Error(), "abc") {
+				t.Errorf("secret leaked in error message for case %q: %v", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestClientStringAndGoString(t *testing.T) {
+	var nilClient *Client
+	if nilClient.String() != "<nil>" {
+		t.Errorf("nil Client.String() = %q, want <nil>", nilClient.String())
+	}
+	if nilClient.GoString() != "<nil>" {
+		t.Errorf("nil Client.GoString() = %q, want <nil>", nilClient.GoString())
+	}
+
+	c := NewClient("10.1.1.4", 443, "admin", "supersecret")
+	if strings.Contains(c.String(), "supersecret") {
+		t.Errorf("Client.String() leaked password: %s", c.String())
+	}
+	if !strings.Contains(c.String(), "[REDACTED]") {
+		t.Errorf("Client.String() missing [REDACTED]: %s", c.String())
+	}
+	if c.GoString() != c.String() {
+		t.Errorf("GoString() != String()")
+	}
+
+	cEmpty := NewClient("10.1.1.4", 443, "admin", "")
+	if !strings.Contains(cEmpty.String(), "[EMPTY]") {
+		t.Errorf("Client.String() missing [EMPTY]: %s", cEmpty.String())
+	}
+}
+
+func TestQKViewTaskLifecycle(t *testing.T) {
+	queryCount := 0
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/mgmt/cm/autodeploy/qkview" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":"task-123","name":"test.qkview","status":"IN_PROGRESS"}`))
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/mgmt/cm/autodeploy/qkview/task-123" {
+			queryCount++
+			if queryCount == 1 {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"id":"task-123","status":"IN_PROGRESS"}`))
+			} else {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"id":"task-123","status":"SUCCEEDED"}`))
+			}
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	task, err := c.CreateQKViewTask(context.Background(), "test.qkview")
+	if err != nil {
+		t.Fatalf("CreateQKViewTask failed: %v", err)
+	}
+	if task.ID != "task-123" {
+		t.Errorf("got task ID %s, want task-123", task.ID)
+	}
+
+	taskQuery, err := c.QueryQKViewTask(context.Background(), "task-123")
+	if err != nil {
+		t.Fatalf("QueryQKViewTask failed: %v", err)
+	}
+	if taskQuery.Status != "IN_PROGRESS" {
+		t.Errorf("got status %s, want IN_PROGRESS", taskQuery.Status)
+	}
+
+	taskDone, err := c.WaitForQKViewTask(context.Background(), "task-123", 10*time.Millisecond, nil)
+	if err != nil {
+		t.Fatalf("WaitForQKViewTask failed: %v", err)
+	}
+	if taskDone.Status != "SUCCEEDED" {
+		t.Errorf("got status %s, want SUCCEEDED", taskDone.Status)
+	}
+}
+
+func TestGenerateAndDownloadQKView(t *testing.T) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/mgmt/tm/util/qkview" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"command":"run","status":"completed"}`))
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/mgmt/cm/autodeploy/qkview-downloads/") {
+			w.Header().Set("Content-Range", "bytes 0-11/12")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write([]byte("fake-qkview!"))
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/mgmt/cm/autodeploy/software-image-downloads/") {
+			w.Header().Set("Content-Range", "bytes 0-8/9")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write([]byte("fake-iso!"))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	fn, err := c.GenerateQKView(context.Background(), "test.qkview", true)
+	if err != nil {
+		t.Fatalf("GenerateQKView failed: %v", err)
+	}
+	if fn != "test.qkview" {
+		t.Errorf("got %s, want test.qkview", fn)
+	}
+
+	tmpDir := t.TempDir()
+	localQkview := filepath.Join(tmpDir, "test.qkview")
+	if err := c.DownloadQKView(context.Background(), "test.qkview", localQkview, nil); err != nil {
+		t.Fatalf("DownloadQKView failed: %v", err)
+	}
+	data, _ := os.ReadFile(localQkview)
+	if string(data) != "fake-qkview!" {
+		t.Errorf("got %s, want fake-qkview!", string(data))
+	}
+
+	localISO := filepath.Join(tmpDir, "image.iso")
+	if err := c.DownloadFile(context.Background(), "/shared/images/image.iso", localISO, nil); err != nil {
+		t.Fatalf("DownloadFile failed: %v", err)
+	}
+	isoData, _ := os.ReadFile(localISO)
+	if string(isoData) != "fake-iso!" {
+		t.Errorf("got %s, want fake-iso!", string(isoData))
+	}
+
+	localQkview2 := filepath.Join(tmpDir, "test2.qkview")
+	if err := c.DownloadFile(context.Background(), "/var/tmp/qkviews/test2.qkview", localQkview2, nil); err != nil {
+		t.Fatalf("DownloadFile qkview failed: %v", err)
+	}
+
+	localDirect := filepath.Join(tmpDir, "direct.iso")
+	if err := c.DownloadFile(context.Background(), "/mgmt/cm/autodeploy/software-image-downloads/direct.iso", localDirect, nil); err != nil {
+		t.Fatalf("DownloadFile direct mgmt failed: %v", err)
+	}
+}
+
+func TestAcquireAuthTokenAndDoWithAuth(t *testing.T) {
+	loginAttempts := 0
+	readyAttempts := 0
+
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mgmt/shared/authn/login" {
+			loginAttempts++
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"token": {"token": "bigiq-test-token-abcdef"}}`))
+			return
+		}
+		if r.URL.Path == "/mgmt/tm/sys/ready" {
+			readyAttempts++
+			token := r.Header.Get("X-F5-Auth-Token")
+			if token == "" {
+				w.Header().Set("WWW-Authenticate", `Token realm="REST Framework"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"code": 401, "message": "Basic auth disabled"}`))
+				return
+			}
+			if token != "bigiq-test-token-abcdef" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"kind": "tm:sys:ready"}`))
+			return
+		}
+		if r.URL.Path == "/mgmt/tm/sys/version" {
+			token := r.Header.Get("X-F5-Auth-Token")
+			if token != "bigiq-test-token-abcdef" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"entries": {"https://localhost/mgmt/tm/sys/version/0": {"nestedStats": {"entries": {"Product": {"description": "BIG-IQ"}}}}}}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	kind, err := c.CheckReadyWithKind(context.Background())
+	if err != nil {
+		t.Fatalf("CheckReadyWithKind failed: %v", err)
+	}
+	if kind != "BIG-IQ" {
+		t.Errorf("expected BIG-IQ, got %q", kind)
+	}
+	if loginAttempts != 1 {
+		t.Errorf("expected 1 login attempt, got %d", loginAttempts)
+	}
+	if readyAttempts != 2 {
+		t.Errorf("expected 2 ready attempts (1 unauth + 1 with token), got %d", readyAttempts)
+	}
+	if string(c.authToken) != "bigiq-test-token-abcdef" {
+		t.Errorf("expected auth token saved in client, got %s", string(c.authToken))
+	}
+
+	// Test Zero() clears token
+	c.Zero()
+	if len(c.authToken) != 0 {
+		t.Errorf("expected Zero() to clear authToken, got %d bytes", len(c.authToken))
+	}
+}
+
+func TestAcquireAuthTokenErrors(t *testing.T) {
+	// Case 1: HTTP error
+	s1 := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("invalid credentials"))
+	}))
+	defer s1.Close()
+
+	u1, _ := url.Parse(s1.URL)
+	port1, _ := strconv.Atoi(u1.Port())
+	c1 := NewClient(u1.Hostname(), port1, "admin", "secret")
+	c1.Scheme = "http"
+	c1.HTTPClient = s1.Client()
+	if err := c1.acquireAuthToken(context.Background()); err == nil {
+		t.Errorf("expected error for 401 login, got nil")
+	}
+
+	// Case 2: empty token
+	s2 := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"token": {"token": ""}}`))
+	}))
+	defer s2.Close()
+
+	u2, _ := url.Parse(s2.URL)
+	port2, _ := strconv.Atoi(u2.Port())
+	c2 := NewClient(u2.Hostname(), port2, "admin", "secret")
+	c2.Scheme = "http"
+	c2.HTTPClient = s2.Client()
+	if err := c2.acquireAuthToken(context.Background()); err == nil {
+		t.Errorf("expected error for empty token, got nil")
+	}
 }

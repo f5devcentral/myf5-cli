@@ -357,3 +357,22 @@ func TestCredentialsZero(t *testing.T) {
 		nilCreds.Zero() // Must not panic
 	})
 }
+
+func TestCredentialsGoString(t *testing.T) {
+	c := Credentials{
+		ClientID:     "test-client",
+		ClientSecret: "secret-123",
+		APIKey:       "key-456",
+		Proxy:        "http://proxy:8080",
+	}
+	gs := c.GoString()
+	if !strings.Contains(gs, "test-client") {
+		t.Errorf("GoString missing ClientID: %s", gs)
+	}
+	if strings.Contains(gs, "secret-123") || strings.Contains(gs, "key-456") {
+		t.Errorf("GoString leaked secret: %s", gs)
+	}
+	if gs != c.String() {
+		t.Errorf("GoString() = %q, want String() = %q", gs, c.String())
+	}
+}

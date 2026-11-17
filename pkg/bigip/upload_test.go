@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +25,7 @@ func TestUploadFile(t *testing.T) {
 	var uploadedBytes []byte
 	var receivedRanges []string
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/mgmt/shared/file-transfer/uploads/") {
 			crange := r.Header.Get("Content-Range")
 			receivedRanges = append(receivedRanges, crange)
@@ -46,6 +45,7 @@ func TestUploadFile(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, 0, "admin", "secret")
+	client.HTTPClient = server.Client()
 	var lastTransferred, lastTotal int64
 	progressCb := func(transferred, total int64) {
 		lastTransferred = transferred
@@ -85,7 +85,7 @@ func TestUploadFileErrors(t *testing.T) {
 	}
 
 	// Server returning 500 Internal Server Error
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte("disk full"))
 	}))
@@ -95,6 +95,7 @@ func TestUploadFileErrors(t *testing.T) {
 	_ = os.WriteFile(tmpFile, []byte("data"), 0600)
 
 	errorClient := NewClient(server.URL, 0, "admin", "secret")
+	errorClient.HTTPClient = server.Client()
 	_, err = errorClient.UploadFile(context.Background(), tmpFile, "", nil)
 	if err == nil {
 		t.Errorf("expected error on HTTP 500, got nil")
@@ -106,7 +107,7 @@ func TestUploadFileErrors(t *testing.T) {
 
 func TestCopyRemoteFile(t *testing.T) {
 	var receivedCommand string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/mgmt/tm/util/bash" && r.Method == http.MethodPost {
 			b, _ := io.ReadAll(r.Body)
 			receivedCommand = string(b)
@@ -119,6 +120,7 @@ func TestCopyRemoteFile(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, 0, "admin", "secret")
+	client.HTTPClient = server.Client()
 	destPath, err := client.CopyRemoteFile(context.Background(), "/var/config/rest/downloads/BIGIP-17.1.1.iso", "/shared/images")
 	if err != nil {
 		t.Fatalf("CopyRemoteFile failed: %v", err)
