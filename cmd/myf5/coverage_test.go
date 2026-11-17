@@ -2001,16 +2001,17 @@ func TestExecutePushToApplianceSuccess(t *testing.T) {
 	dialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
 		c1, c2 := net.Pipe()
 		go func() {
+			defer c2.Close()
 			req, err := http.ReadRequest(bufio.NewReader(c2))
 			if err != nil {
-				c2.Close()
 				return
 			}
 			rec := httptest.NewRecorder()
 			mockMux.ServeHTTP(rec, req)
+			_, _ = io.Copy(io.Discard, req.Body)
+			_ = req.Body.Close()
 			resp := rec.Result()
 			_ = resp.Write(c2)
-			c2.Close()
 		}()
 		return c1, nil
 	}
@@ -2132,16 +2133,17 @@ func TestHandleCasesWithMockServer(t *testing.T) {
 	dialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
 		c1, c2 := net.Pipe()
 		go func() {
+			defer c2.Close()
 			req, err := http.ReadRequest(bufio.NewReader(c2))
 			if err != nil {
-				c2.Close()
 				return
 			}
 			rec := httptest.NewRecorder()
 			mockMux.ServeHTTP(rec, req)
+			_, _ = io.Copy(io.Discard, req.Body)
+			_ = req.Body.Close()
 			resp := rec.Result()
 			_ = resp.Write(c2)
-			c2.Close()
 		}()
 		return c1, nil
 	}
@@ -2198,16 +2200,17 @@ func TestHandleIHealthWithMockServer(t *testing.T) {
 	dialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
 		c1, c2 := net.Pipe()
 		go func() {
+			defer c2.Close()
 			req, err := http.ReadRequest(bufio.NewReader(c2))
 			if err != nil {
-				c2.Close()
 				return
 			}
 			rec := httptest.NewRecorder()
 			mockMux.ServeHTTP(rec, req)
+			_, _ = io.Copy(io.Discard, req.Body)
+			_ = req.Body.Close()
 			resp := rec.Result()
 			_ = resp.Write(c2)
-			c2.Close()
 		}()
 		return c1, nil
 	}
