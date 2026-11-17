@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -993,6 +994,101 @@ func TestGenerateAndDownloadQKView(t *testing.T) {
 	localDirect := filepath.Join(tmpDir, "direct.iso")
 	if err := c.DownloadFile(context.Background(), "/mgmt/cm/autodeploy/software-image-downloads/direct.iso", localDirect, nil); err != nil {
 		t.Fatalf("DownloadFile direct mgmt failed: %v", err)
+	}
+}
+
+func TestDownloadFilePathRouting(t *testing.T) {
+	var requestCount atomic.Int32
+	var lastPath atomic.Pointer[string]
+
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount.Add(1)
+		p := r.URL.Path
+		lastPath.Store(&p)
+
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/mgmt/cm/autodeploy/qkview-downloads/") {
+			w.Header().Set("Content-Range", "bytes 0-11/12")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write([]byte("fake-qkview!"))
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/mgmt/cm/autodeploy/software-image-downloads/") {
+			w.Header().Set("Content-Range", "bytes 0-8/9")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write([]byte("fake-iso!"))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	tmpDir := t.TempDir()
+
+	// 1. Verify /var/tmp/other.qkview returns an error mentioning /var/tmp/qkviews/ and --method scp WITHOUT hitting the mock server
+	beforeCount := requestCount.Load()
+	err := c.DownloadFile(context.Background(), "/var/tmp/other.qkview", filepath.Join(tmpDir, "other.qkview"), nil)
+	if err == nil {
+		t.Fatal("expected error for /var/tmp/other.qkview, got nil")
+	}
+	if !strings.Contains(err.Error(), "/var/tmp/qkviews/") || !strings.Contains(err.Error(), "--method scp") {
+		t.Errorf("error %q does not mention '/var/tmp/qkviews/' and '--method scp'", err.Error())
+	}
+	if afterCount := requestCount.Load(); afterCount != beforeCount {
+		t.Errorf("expected 0 requests to server, got %d", afterCount-beforeCount)
+	}
+
+	// 2. Verify /shared/images/sub/image.iso is similarly rejected WITHOUT hitting the mock server
+	beforeCount = requestCount.Load()
+	err = c.DownloadFile(context.Background(), "/shared/images/sub/image.iso", filepath.Join(tmpDir, "sub.iso"), nil)
+	if err == nil {
+		t.Fatal("expected error for /shared/images/sub/image.iso, got nil")
+	}
+	if !strings.Contains(err.Error(), "/shared/images/") || !strings.Contains(err.Error(), "--method scp") {
+		t.Errorf("error %q does not mention '/shared/images/' and '--method scp'", err.Error())
+	}
+	if afterCount := requestCount.Load(); afterCount != beforeCount {
+		t.Errorf("expected 0 requests to server, got %d", afterCount-beforeCount)
+	}
+
+	// 3. Verify uppercase /var/tmp/qkviews/UPPER.QKVIEW routes to the right endpoint
+	err = c.DownloadFile(context.Background(), "/var/tmp/qkviews/UPPER.QKVIEW", filepath.Join(tmpDir, "UPPER.QKVIEW"), nil)
+	if err != nil {
+		t.Fatalf("DownloadFile /var/tmp/qkviews/UPPER.QKVIEW failed: %v", err)
+	}
+	if last := lastPath.Load(); last == nil || *last != "/mgmt/cm/autodeploy/qkview-downloads/UPPER.QKVIEW" {
+		t.Errorf("expected path /mgmt/cm/autodeploy/qkview-downloads/UPPER.QKVIEW, got %v", last)
+	}
+
+	// 4. Verify uppercase /shared/images/UPPER.ISO routes to the right endpoint
+	err = c.DownloadFile(context.Background(), "/shared/images/UPPER.ISO", filepath.Join(tmpDir, "UPPER.ISO"), nil)
+	if err != nil {
+		t.Fatalf("DownloadFile /shared/images/UPPER.ISO failed: %v", err)
+	}
+	if last := lastPath.Load(); last == nil || *last != "/mgmt/cm/autodeploy/software-image-downloads/UPPER.ISO" {
+		t.Errorf("expected path /mgmt/cm/autodeploy/software-image-downloads/UPPER.ISO, got %v", last)
+	}
+
+	// 5. Verify relative filenames route properly
+	err = c.DownloadFile(context.Background(), "rel.qkview", filepath.Join(tmpDir, "rel.qkview"), nil)
+	if err != nil {
+		t.Fatalf("DownloadFile rel.qkview failed: %v", err)
+	}
+	if last := lastPath.Load(); last == nil || *last != "/mgmt/cm/autodeploy/qkview-downloads/rel.qkview" {
+		t.Errorf("expected path /mgmt/cm/autodeploy/qkview-downloads/rel.qkview, got %v", last)
+	}
+
+	err = c.DownloadFile(context.Background(), "rel.iso", filepath.Join(tmpDir, "rel.iso"), nil)
+	if err != nil {
+		t.Fatalf("DownloadFile rel.iso failed: %v", err)
+	}
+	if last := lastPath.Load(); last == nil || *last != "/mgmt/cm/autodeploy/software-image-downloads/rel.iso" {
+		t.Errorf("expected path /mgmt/cm/autodeploy/software-image-downloads/rel.iso, got %v", last)
 	}
 }
 

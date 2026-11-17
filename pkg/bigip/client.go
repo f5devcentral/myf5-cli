@@ -824,6 +824,7 @@ func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath s
 // Downloads are strictly restricted to .qkview and .iso files.
 // For files in /shared/images/, it queries /mgmt/cm/autodeploy/software-image-downloads/.
 // For files in /var/tmp/qkviews/, it queries /mgmt/cm/autodeploy/qkview-downloads/.
+// Other absolute paths are rejected because iControl REST endpoints only serve those specific directories.
 func (c *Client) DownloadFile(ctx context.Context, remotePath, localPath string, progressCb func(transferred, total int64)) error {
 	cleanRemote := path.Clean(remotePath)
 	if strings.HasPrefix(remotePath, "/mgmt/") {
@@ -840,27 +841,26 @@ func (c *Client) DownloadFile(ctx context.Context, remotePath, localPath string,
 	}
 
 	baseFilename := path.Base(cleanRemote)
+	ext := strings.ToLower(path.Ext(baseFilename))
 
-	if strings.HasPrefix(cleanRemote, "/shared/images/") || strings.HasSuffix(baseFilename, ".iso") {
+	if strings.HasPrefix(cleanRemote, "/") {
+		if path.Dir(cleanRemote) == "/shared/images" && ext == ".iso" {
+			return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/software-image-downloads/%s", baseFilename), localPath, progressCb)
+		}
+		if path.Dir(cleanRemote) == "/var/tmp/qkviews" && ext == ".qkview" {
+			return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/qkview-downloads/%s", baseFilename), localPath, progressCb)
+		}
+		return fmt.Errorf("iControl REST download only supports .qkview files in /var/tmp/qkviews/ and .iso files in /shared/images/ (got %q); use --method scp for other paths", remotePath)
+	}
+
+	if ext == ".iso" {
 		return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/software-image-downloads/%s", baseFilename), localPath, progressCb)
 	}
-	if strings.HasPrefix(cleanRemote, "/var/tmp/qkviews/") || strings.HasSuffix(baseFilename, ".qkview") {
+	if ext == ".qkview" {
 		return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/qkview-downloads/%s", baseFilename), localPath, progressCb)
 	}
 
-	// Try software-image-downloads first
-	err := c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/software-image-downloads/%s", baseFilename), localPath, progressCb)
-	if err == nil {
-		return nil
-	}
-
-	// Try qkview-downloads next
-	err = c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/qkview-downloads/%s", baseFilename), localPath, progressCb)
-	if err == nil {
-		return nil
-	}
-
-	return fmt.Errorf("iControl REST download failed for %s: %w", remotePath, err)
+	return fmt.Errorf("iControl REST download failed for %s: unsupported extension %q", remotePath, ext)
 }
 
 // DeleteQKView removes the temporary QKView file from the BIG-IP appliance.
