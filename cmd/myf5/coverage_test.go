@@ -284,6 +284,22 @@ func TestHandleProxyCommand(t *testing.T) {
 	client.ClearGlobalProxy()
 }
 
+// TestVersionIsLinkerOverridable guards against Version being changed back to a const,
+// which would silently break release binary stamping via -ldflags "-X main.Version=<tag>".
+// If Version becomes a const, assigning to it here will fail to compile.
+func TestVersionIsLinkerOverridable(t *testing.T) {
+	origVersion := Version
+	t.Cleanup(func() {
+		Version = origVersion
+	})
+
+	Version = "9.9.9-test"
+	vStr := versionString()
+	if !strings.Contains(vStr, "9.9.9-test") {
+		t.Errorf("expected versionString() to contain %q, got %q", "9.9.9-test", vStr)
+	}
+}
+
 func TestDefaultDownloadsDir(t *testing.T) {
 	dir := getDefaultDownloadsDir()
 	if dir == "" {

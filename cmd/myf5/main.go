@@ -31,7 +31,8 @@ import (
 	"golang.org/x/term"
 )
 
-const Version = "1.1.0"
+// Version is the CLI release version, overridden during release builds via -ldflags "-X main.Version=<tag>".
+var Version = "1.1.0"
 
 const (
 	proxySetNote   = "Note: this only affects the current myf5 process (for example, an interactive session). For other commands, set MYF5_PROXY or pass --proxy <url> each time."
