@@ -134,3 +134,6 @@ testenv/
 *.tfstate.*
 *.tfvars
 *.tfvars.json
+
+# Local scratch space (build outputs, logs); used instead of system /tmp
+/tmp/
