@@ -71,11 +71,10 @@ In air-gapped data centers, DMZs, or secured corporate networks, direct Internet
    myf5 --proxy http://proxy.corp.internal:8080 downloads families
    ```
 
-2. **Process/Session Configuration (`myf5 proxy set`)**: Configures proxy for the current process or interactive session (to persist across commands, use `--proxy <url>` or set `MYF5_PROXY`).
+2. **Process/Session Configuration (`myf5 proxy set`)**: Configures proxy for the current process only (intended for `myf5 interactive`). To configure a proxy for commands across your shell session, set `MYF5_PROXY` or pass `--proxy <url>` with each command.
    ```bash
-   myf5 proxy set socks5://127.0.0.1:1080
+   export MYF5_PROXY=socks5://127.0.0.1:1080
    myf5 proxy show
-   myf5 proxy clear
    ```
 
 3. **Environment Variables**:

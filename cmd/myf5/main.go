@@ -33,6 +33,11 @@ import (
 
 const Version = "1.1.0"
 
+const (
+	proxySetNote   = "Note: this only affects the current myf5 process (for example, an interactive session). For other commands, set MYF5_PROXY or pass --proxy <url> each time."
+	proxyClearNote = "Note: this only affects the current myf5 process. To stop using a proxy for other commands, unset MYF5_PROXY and don't pass --proxy."
+)
+
 func versionString() string {
 	return fmt.Sprintf("myf5-cli version %s (Go %s / %s-%s)", Version, strings.TrimPrefix(runtime.Version(), "go"), runtime.GOOS, runtime.GOARCH)
 }
@@ -384,7 +389,7 @@ func handleProxyCommand(args []string) {
 	if args[0] == "clear" || args[0] == "unset" || args[0] == "off" {
 		client.ClearGlobalProxy()
 		fmt.Println("Global proxy cleared. Outbound connections will connect directly (unless environment proxy is active).")
-		fmt.Println("Note: this applies to the current myf5 process only (for example, an interactive session). To persist it, use --proxy <url> or set MYF5_PROXY.")
+		fmt.Println(proxyClearNote)
 		return
 	}
 	if args[0] == "set" && len(args) > 1 {
@@ -394,7 +399,7 @@ func handleProxyCommand(args []string) {
 			return
 		}
 		fmt.Printf("Global proxy set to %s\n", client.RedactProxyURL(args[1]))
-		fmt.Println("Note: this applies to the current myf5 process only (for example, an interactive session). To persist it, use --proxy <url> or set MYF5_PROXY.")
+		fmt.Println(proxySetNote)
 		return
 	}
 	if err := client.SetGlobalProxy(args[0]); err != nil {
@@ -403,7 +408,7 @@ func handleProxyCommand(args []string) {
 		return
 	}
 	fmt.Printf("Global proxy set to %s\n", client.RedactProxyURL(args[0]))
-	fmt.Println("Note: this applies to the current myf5 process only (for example, an interactive session). To persist it, use --proxy <url> or set MYF5_PROXY.")
+	fmt.Println(proxySetNote)
 }
 
 func printDoctorUsage() {

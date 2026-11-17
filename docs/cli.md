@@ -456,8 +456,8 @@ Manage outbound HTTP, HTTPS, and SOCKS5 proxy settings for routing API traffic t
 
 ```bash
 myf5 proxy show            # Display active egress proxy configuration
-myf5 proxy set <url>       # Configure proxy for current process/session (use --proxy or MYF5_PROXY to persist)
-myf5 proxy clear           # Clear proxy for current process/session
+myf5 proxy set <url>       # Proxy for the current process only (e.g. interactive mode); use MYF5_PROXY or --proxy for other commands
+myf5 proxy clear           # Clear the proxy for the current process only
 myf5 --proxy <url> <cmd>   # Specify proxy for a single command invocation
 ```
 
@@ -468,7 +468,7 @@ myf5 --proxy <url> <cmd>   # Specify proxy for a single command invocation
 - `socks5h://[user:pass@]host:port`: SOCKS5 proxy with remote DNS resolution on the proxy server.
 
 ### Environment Variable Fallback:
-If no `--proxy` flag or persistent configuration is found, `myf5` respects `MYF5_PROXY`, `F5_PROXY`, `ALL_PROXY`, `HTTPS_PROXY`, and `HTTP_PROXY`. Proxy bypass rules can be specified via `NO_PROXY`.
+If no `--proxy` flag is passed, `myf5` respects `MYF5_PROXY`, `F5_PROXY`, `ALL_PROXY`, `HTTPS_PROXY`, and `HTTP_PROXY`. Proxy bypass rules can be specified via `NO_PROXY`.
 
 ---
 

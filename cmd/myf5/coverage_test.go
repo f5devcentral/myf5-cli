@@ -190,6 +190,10 @@ func TestSuggestRemediationAndCheckErr(t *testing.T) {
 }
 
 func TestHandleProxyCommand(t *testing.T) {
+	origStdout := os.Stdout
+	t.Cleanup(func() {
+		os.Stdout = origStdout
+	})
 	origProxy := client.GetGlobalProxy()
 	defer func() {
 		if origProxy != nil {
@@ -199,6 +203,24 @@ func TestHandleProxyCommand(t *testing.T) {
 		}
 	}()
 
+	captureStdout := func(fn func()) string {
+		orig := os.Stdout
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("failed to create stdout pipe: %v", err)
+		}
+		os.Stdout = w
+		defer func() {
+			os.Stdout = orig
+		}()
+		fn()
+		w.Close()
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		r.Close()
+		return buf.String()
+	}
+
 	// 1. Status / show when none configured
 	client.ClearGlobalProxy()
 	handleProxyCommand([]string{})
@@ -206,17 +228,14 @@ func TestHandleProxyCommand(t *testing.T) {
 	handleProxyCommand([]string{"status"})
 
 	// 2. Set valid proxy
-	origStdout := os.Stdout
-	rStdout, wStdout, _ := os.Pipe()
-	os.Stdout = wStdout
-	handleProxyCommand([]string{"set", "http://proxy.corp.internal:8080"})
-	wStdout.Close()
-	os.Stdout = origStdout
-	var setBuf bytes.Buffer
-	_, _ = io.Copy(&setBuf, rStdout)
-	rStdout.Close()
-	if !strings.Contains(setBuf.String(), "MYF5_PROXY") {
-		t.Errorf("expected proxy set output to contain 'MYF5_PROXY', got %q", setBuf.String())
+	setOut := captureStdout(func() {
+		handleProxyCommand([]string{"set", "http://proxy.corp.internal:8080"})
+	})
+	if !strings.Contains(setOut, "MYF5_PROXY") {
+		t.Errorf("expected proxy set output to contain 'MYF5_PROXY', got %q", setOut)
+	}
+	if !strings.Contains(setOut, "--proxy <url>") {
+		t.Errorf("expected proxy set output to contain '--proxy <url>', got %q", setOut)
 	}
 	if p := client.GetGlobalProxy(); p == nil || !strings.Contains(p.String(), "8080") {
 		t.Fatalf("expected proxy to be set, got %v", p)
@@ -226,16 +245,11 @@ func TestHandleProxyCommand(t *testing.T) {
 	handleProxyCommand([]string{"status"})
 
 	// 3. Clear proxy
-	rStdout, wStdout, _ = os.Pipe()
-	os.Stdout = wStdout
-	handleProxyCommand([]string{"clear"})
-	wStdout.Close()
-	os.Stdout = origStdout
-	var clearBuf bytes.Buffer
-	_, _ = io.Copy(&clearBuf, rStdout)
-	rStdout.Close()
-	if !strings.Contains(clearBuf.String(), "MYF5_PROXY") {
-		t.Errorf("expected proxy clear output to contain 'MYF5_PROXY', got %q", clearBuf.String())
+	clearOut := captureStdout(func() {
+		handleProxyCommand([]string{"clear"})
+	})
+	if !strings.Contains(clearOut, "unset MYF5_PROXY") {
+		t.Errorf("expected proxy clear output to contain 'unset MYF5_PROXY', got %q", clearOut)
 	}
 	if p := client.GetGlobalProxy(); p != nil {
 		t.Errorf("expected proxy to be cleared, got %v", p)

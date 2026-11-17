@@ -44,6 +44,9 @@ func fileNameFromURL(raw string) string {
 			return "download.bin"
 		}
 	}
+	if !filepath.IsLocal(name) {
+		return "download.bin"
+	}
 	return name
 }
 
