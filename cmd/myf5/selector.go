@@ -204,6 +204,28 @@ func runInteractiveLoop(cfg SelectConfig, inFd, outFd int) (int, SelectItem, err
 		}
 	}
 
+	// ANSI style helpers honoring NO_COLOR and official F5 truecolor palette when supported
+	noColor := os.Getenv("NO_COLOR") != ""
+	colorTerm := strings.ToLower(os.Getenv("COLORTERM"))
+	trueColor := !noColor && (colorTerm == "truecolor" || colorTerm == "24bit")
+
+	sgrReset := "\033[0m"
+	sgrBold := "\033[1m"
+	sgrDim := "\033[2m"
+	sgrWarn := "\033[33m"
+	sgrWarnBold := "\033[1;33m"
+	sgrActive := "\033[1;36m"
+	sgrSuccess := "\033[1;32m"
+	if noColor {
+		sgrReset, sgrBold, sgrDim, sgrWarn, sgrWarnBold, sgrActive, sgrSuccess = "", "", "", "", "", "", ""
+	} else if trueColor {
+		// Official F5 Brand Palette: Tangerine (#F29A36), Surf (#009C93), Jade (#009639)
+		sgrWarn = "\033[38;2;242;154;54m"
+		sgrWarnBold = "\033[1;38;2;242;154;54m"
+		sgrActive = "\033[1;38;2;0;156;147m"
+		sgrSuccess = "\033[1;38;2;0;150;57m"
+	}
+
 	for {
 		clampScroll()
 
@@ -218,7 +240,7 @@ func runInteractiveLoop(cfg SelectConfig, inFd, outFd int) (int, SelectItem, err
 		// 1. Header / Title
 		if cfg.Title != "" {
 			titleText := truncateRunes(cfg.Title, termWidth-1)
-			fmt.Fprintf(cfg.Out, "\033[1m%s\033[0m\r\n", titleText)
+			fmt.Fprintf(cfg.Out, "%s%s%s\r\n", sgrBold, titleText, sgrReset)
 			currentLines++
 		}
 
@@ -226,33 +248,33 @@ func runInteractiveLoop(cfg SelectConfig, inFd, outFd int) (int, SelectItem, err
 		if filterMode {
 			hint := fmt.Sprintf("  [Filter: %s_] (%d/%d matches) - Esc to clear, Enter to select",
 				filterQuery, len(visible), len(cfg.Items))
-			fmt.Fprintf(cfg.Out, "\033[1;33m%s\033[0m\r\n", truncateRunes(hint, termWidth-1))
+			fmt.Fprintf(cfg.Out, "%s%s%s\r\n", sgrWarnBold, truncateRunes(hint, termWidth-1), sgrReset)
 			currentLines++
 		} else if filterQuery != "" {
 			hint := fmt.Sprintf("  [Filter: %s] (%d/%d matches) - '/' to edit, Esc to clear",
 				filterQuery, len(visible), len(cfg.Items))
-			fmt.Fprintf(cfg.Out, "\033[33m%s\033[0m\r\n", truncateRunes(hint, termWidth-1))
+			fmt.Fprintf(cfg.Out, "%s%s%s\r\n", sgrWarn, truncateRunes(hint, termWidth-1), sgrReset)
 			currentLines++
 		} else {
 			help := "  (Use ↑/↓ or j/k to navigate, Enter to select, '/' to filter, 'b' back, 'q' quit)"
 			if !cfg.AllowBack {
 				help = "  (Use ↑/↓ or j/k to navigate, Enter to select, '/' to filter, 'q' quit)"
 			}
-			fmt.Fprintf(cfg.Out, "\033[2m%s\033[0m\r\n", truncateRunes(help, termWidth-1))
+			fmt.Fprintf(cfg.Out, "%s%s%s\r\n", sgrDim, truncateRunes(help, termWidth-1), sgrReset)
 			currentLines++
 		}
 
 		// 3. Scroll Up Indicator
 		if topIndex > 0 {
 			upHint := fmt.Sprintf("    ▲ (%d more above)", topIndex)
-			fmt.Fprintf(cfg.Out, "\033[2m%s\033[0m\r\n", truncateRunes(upHint, termWidth-1))
+			fmt.Fprintf(cfg.Out, "%s%s%s\r\n", sgrDim, truncateRunes(upHint, termWidth-1), sgrReset)
 			currentLines++
 		}
 
 		// 4. Viewport Items
 		if len(visible) == 0 {
 			emptyHint := "    (No matching items)"
-			fmt.Fprintf(cfg.Out, "\033[33m%s\033[0m\r\n", truncateRunes(emptyHint, termWidth-1))
+			fmt.Fprintf(cfg.Out, "%s%s%s\r\n", sgrWarn, truncateRunes(emptyHint, termWidth-1), sgrReset)
 			currentLines++
 		} else {
 			end := topIndex + maxVisible
@@ -268,11 +290,11 @@ func runInteractiveLoop(cfg SelectConfig, inFd, outFd int) (int, SelectItem, err
 				}
 
 				if i == selectedIndex {
-					line := fmt.Sprintf("  \033[1;36m❯ %2d) %s%s\033[0m", itemNum, vi.item.Title, desc)
+					line := fmt.Sprintf("  %s❯ %2d) %s%s%s", sgrActive, itemNum, vi.item.Title, desc, sgrReset)
 					plainLen := utf8.RuneCountInString(fmt.Sprintf("  ❯ %2d) %s%s", itemNum, vi.item.Title, desc))
 					if plainLen > termWidth-1 {
 						truncatedTitle := truncateRunes(vi.item.Title+desc, termWidth-10)
-						line = fmt.Sprintf("  \033[1;36m❯ %2d) %s\033[0m", itemNum, truncatedTitle)
+						line = fmt.Sprintf("  %s❯ %2d) %s%s", sgrActive, itemNum, truncatedTitle, sgrReset)
 					}
 					fmt.Fprintf(cfg.Out, "%s\r\n", line)
 				} else {
@@ -291,14 +313,14 @@ func runInteractiveLoop(cfg SelectConfig, inFd, outFd int) (int, SelectItem, err
 		remainingBelow := len(visible) - (topIndex + maxVisible)
 		if remainingBelow > 0 {
 			downHint := fmt.Sprintf("    ▼ (%d more below)", remainingBelow)
-			fmt.Fprintf(cfg.Out, "\033[2m%s\033[0m\r\n", truncateRunes(downHint, termWidth-1))
+			fmt.Fprintf(cfg.Out, "%s%s%s\r\n", sgrDim, truncateRunes(downHint, termWidth-1), sgrReset)
 			currentLines++
 		}
 
 		// 6. Status line
 		if len(visible) > 0 {
 			status := fmt.Sprintf("  [Item %d of %d]", selectedIndex+1, len(visible))
-			fmt.Fprintf(cfg.Out, "\033[2m%s\033[0m\r\n", truncateRunes(status, termWidth-1))
+			fmt.Fprintf(cfg.Out, "%s%s%s\r\n", sgrDim, truncateRunes(status, termWidth-1), sgrReset)
 			currentLines++
 		}
 
@@ -324,7 +346,7 @@ func runInteractiveLoop(cfg SelectConfig, inFd, outFd int) (int, SelectItem, err
 				fmt.Fprintf(cfg.Out, "\033[%dA\033[0J", lastLineCount)
 			}
 			chosen := visible[selectedIndex]
-			fmt.Fprintf(cfg.Out, "\033[1;32m✓\033[0m \033[1mSelected:\033[0m %s\r\n", chosen.item.Title)
+			fmt.Fprintf(cfg.Out, "%s✓%s %sSelected:%s %s\r\n", sgrSuccess, sgrReset, sgrBold, sgrReset, chosen.item.Title)
 			return chosen.originalIndex, chosen.item, nil
 
 		case KeyUp:

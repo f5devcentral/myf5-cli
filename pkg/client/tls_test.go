@@ -9,9 +9,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"io"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -238,5 +241,152 @@ func TestLoadClientCertificate(t *testing.T) {
 	transport, ok := clientWithCert.Transport.(*http.Transport)
 	if !ok || len(transport.TLSClientConfig.Certificates) != 1 {
 		t.Errorf("expected transport to have 1 certificate configured")
+	}
+}
+
+func TestSecureTLSConfig_CustomCABundle(t *testing.T) {
+	// 1. Generate ephemeral Root CA
+	caPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed generating CA key: %v", err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(100),
+		Subject: pkix.Name{
+			Organization: []string{"F5 Test Corp Inspection CA"},
+			CommonName:   "F5 Test Root CA",
+		},
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caPriv.PublicKey, caPriv)
+	if err != nil {
+		t.Fatalf("failed creating CA cert: %v", err)
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatalf("failed parsing CA cert: %v", err)
+	}
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
+
+	// 2. Generate server leaf certificate signed by ephemeral Root CA for 127.0.0.1
+	srvPriv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed generating server key: %v", err)
+	}
+	srvTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(101),
+		Subject: pkix.Name{
+			Organization: []string{"F5 Test Server"},
+			CommonName:   "127.0.0.1",
+		},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:    []string{"localhost"},
+		NotBefore:   time.Now().Add(-1 * time.Hour),
+		NotAfter:    time.Now().Add(24 * time.Hour),
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	srvDER, err := x509.CreateCertificate(rand.Reader, srvTemplate, caCert, &srvPriv.PublicKey, caPriv)
+	if err != nil {
+		t.Fatalf("failed creating server cert: %v", err)
+	}
+	srvKeyBytes, err := x509.MarshalECPrivateKey(srvPriv)
+	if err != nil {
+		t.Fatalf("failed marshaling server key: %v", err)
+	}
+	srvTLSCert, err := tls.X509KeyPair(
+		pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvDER}),
+		pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: srvKeyBytes}),
+	)
+	if err != nil {
+		t.Fatalf("failed building server key pair: %v", err)
+	}
+
+	// 3. Launch in-memory TLS server backed by memListener/memDial
+	t.Setenv("NO_PROXY", "127.0.0.1,localhost")
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("trusted-via-custom-ca"))
+	}))
+	srv.Config.ErrorLog = log.New(io.Discard, "", 0)
+	srv.Listener = newMemListener()
+	srv.TLS = &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		MaxVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{srvTLSCert},
+	}
+	srv.StartTLS()
+	defer srv.Close()
+
+	tmpDir := t.TempDir()
+	caFile := filepath.Join(tmpDir, "corp-ca-bundle.pem")
+	if err := os.WriteFile(caFile, caPEM, 0600); err != nil {
+		t.Fatalf("failed writing CA bundle: %v", err)
+	}
+	emptyFile := filepath.Join(tmpDir, "empty.pem")
+	if err := os.WriteFile(emptyFile, nil, 0600); err != nil {
+		t.Fatalf("failed writing empty file: %v", err)
+	}
+	invalidFile := filepath.Join(tmpDir, "invalid.pem")
+	if err := os.WriteFile(invalidFile, []byte("not-a-valid-pem-certificate"), 0600); err != nil {
+		t.Fatalf("failed writing invalid file: %v", err)
+	}
+
+	// Case A: Without MYF5_CA_BUNDLE or SSL_CERT_FILE, verification must fail
+	t.Setenv("MYF5_CA_BUNDLE", "")
+	t.Setenv("SSL_CERT_FILE", "")
+	untrustedClient := NewSecureHTTPClient(500 * time.Millisecond)
+	if resp, err := untrustedClient.Get(srv.URL); err == nil {
+		resp.Body.Close()
+		t.Fatalf("expected TLS verification failure without custom CA bundle, but request succeeded")
+	}
+
+	// Case B: With MYF5_CA_BUNDLE pointing to ephemeral CA PEM, verification succeeds
+	t.Setenv("MYF5_CA_BUNDLE", caFile)
+	t.Setenv("SSL_CERT_FILE", "/nonexistent/ignored-when-myf5-ca-bundle-set.pem")
+	trustedByMyF5 := NewSecureHTTPClient(2 * time.Second)
+	resp, err := trustedByMyF5.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("expected TLS verification to succeed with MYF5_CA_BUNDLE, got: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected HTTP 200 with MYF5_CA_BUNDLE, got %d", resp.StatusCode)
+	}
+
+	// Case C: With SSL_CERT_FILE fallback when MYF5_CA_BUNDLE is unset
+	t.Setenv("MYF5_CA_BUNDLE", "")
+	t.Setenv("SSL_CERT_FILE", caFile)
+	trustedBySSLCertFile := NewSecureHTTPClient(2 * time.Second)
+	resp2, err := trustedBySSLCertFile.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("expected TLS verification to succeed with SSL_CERT_FILE, got: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("expected HTTP 200 with SSL_CERT_FILE, got %d", resp2.StatusCode)
+	}
+
+	// Case D: Graceful fallback when bundle path is missing, empty, or invalid PEM
+	for _, badPath := range []string{
+		filepath.Join(tmpDir, "missing.pem"),
+		emptyFile,
+		invalidFile,
+	} {
+		t.Setenv("MYF5_CA_BUNDLE", badPath)
+		t.Setenv("SSL_CERT_FILE", "")
+		cfg := SecureTLSConfig(false)
+		if cfg.RootCAs != nil {
+			t.Errorf("expected nil RootCAs fallback for invalid bundle %q, got non-nil", badPath)
+		}
+		fallbackClient := NewSecureHTTPClient(500 * time.Millisecond)
+		if r, err := fallbackClient.Get(srv.URL); err == nil {
+			r.Body.Close()
+			t.Errorf("expected untrusted server to fail TLS verification for invalid bundle %q", badPath)
+		}
 	}
 }

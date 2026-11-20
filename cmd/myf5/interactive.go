@@ -235,9 +235,10 @@ func completeLine(line string, pos int) (string, int, bool) {
 		switch cmd {
 		case "downloads", "download":
 			candidates = []string{
-				"get", "list", "lines", "versions", "containers", "files", "metadata",
-				"--proxy", "--output", "--profile", "--push-to", "--push-method", "--push-dest",
-				"--push-user", "--push-port", "--push-key", "--push-cert", "--push-cert-key",
+				"browse", "get", "families", "lines", "versions", "containers", "files",
+				"--proxy", "--output", "--profile", "--push", "--push-to", "--push-method", "--push-dest",
+				"--push-user", "--push-port", "--push-key", "--push-known-hosts", "--push-target",
+				"--push-cert", "--push-cert-key", "--apply-geoip", "--keep-extracted",
 			}
 		case "cases", "case":
 			candidates = []string{
@@ -251,29 +252,29 @@ func completeLine(line string, pos int) (string, int, bool) {
 		case "bigip":
 			candidates = []string{
 				"ready", "info", "serial", "qkview", "push", "download", "geoip",
-				"--proxy", "--method", "--user", "--port", "--dest", "-i", "--cert", "--cert-key",
-				"--apply-geoip", "--keep-extracted",
+				"--proxy", "--method", "--user", "--port", "--dest", "-i", "--known-hosts",
+				"--cert", "--cert-key", "--apply-geoip", "--keep-extracted",
 				"--json", "--keep-remote",
 			}
 		case "bigiq":
 			candidates = []string{
-				"ready", "info", "serial", "push", "download",
-				"--proxy", "--method", "--user", "--port", "--dest", "-i", "--cert", "--cert-key",
-				"--json",
+				"ready", "info", "serial", "qkview", "push", "download",
+				"--proxy", "--method", "--user", "--port", "--dest", "-i", "--known-hosts",
+				"--cert", "--cert-key", "--keep-remote", "--json",
 			}
 		case "push":
 			candidates = []string{
-				"--proxy", "--method", "--dest", "--target", "--user", "--port", "-i",
+				"--proxy", "--method", "--dest", "--target", "--user", "--port", "-i", "--known-hosts",
 				"--cert", "--cert-key", "--apply-geoip", "--keep-extracted", "--json",
 			}
 		case "pull", "fetch":
 			candidates = []string{
-				"--proxy", "-o", "--method", "--target", "--user", "--port", "-i",
+				"--proxy", "-o", "--method", "--target", "--user", "--port", "-i", "--known-hosts",
 				"--cert", "--cert-key",
 			}
 		case "geoip":
 			candidates = []string{
-				"--proxy", "--method", "--dest", "--user", "--port", "-i",
+				"--proxy", "--method", "--dest", "--user", "--port", "-i", "--known-hosts",
 				"--cert", "--cert-key", "--keep-extracted", "--json",
 			}
 		case "proxy":

@@ -48,10 +48,13 @@ fmt:
 	@echo "==> Running gofmt..."
 	gofmt -s -w .
 
-## vet: Run go vet static analysis
+## vet: Run go vet static analysis across host, Linux, Windows, and macOS
 vet:
 	@echo "==> Running go vet..."
 	go vet ./...
+	GOOS=linux go vet ./...
+	GOOS=windows go vet ./...
+	GOOS=darwin go vet ./...
 
 ## lint: Run golangci-lint
 lint:

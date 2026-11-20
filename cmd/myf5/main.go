@@ -276,6 +276,7 @@ USAGE:
     myf5 %s ready <host>
     myf5 %s info <host | file.qkview> [--json]
     myf5 %s serial <host | file.qkview> [--json]
+    myf5 %s qkview <host> [--dest <path>] [--keep-remote] [--method auto|icontrol|scp]
     myf5 %s push <host> <file> [--dest <path>] [--method auto|icontrol|scp]
     myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp]
 
@@ -283,11 +284,13 @@ OPTIONS:
     --user <username>       Appliance username (default: admin)
     --port <port>           Port override (default: 443 for REST, 22 for SCP)
     -i <key-path>           SSH private key file
+    --known-hosts <path>    OpenSSH known_hosts file for strict host-key verification
     --cert <cert-path>      TLS client certificate for mTLS
     --cert-key <key-path>   TLS client private key
     --method <method>       Transfer method: auto, icontrol, or scp
+    --keep-remote           Keep generated QKView file on appliance after download
     --json                  Output machine-readable JSON
-`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName)
+`, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName)
 	} else {
 		fmt.Printf(`myf5 %s - Manage BIG-IP TMOS Appliance
 
@@ -304,6 +307,7 @@ OPTIONS:
     --user <username>       Appliance username (default: admin)
     --port <port>           Port override (default: 443 for REST, 22 for SCP)
     -i <key-path>           SSH private key file
+    --known-hosts <path>    OpenSSH known_hosts file for strict host-key verification
     --cert <cert-path>      TLS client certificate for mTLS
     --cert-key <key-path>   TLS client private key
     --method <method>       Transfer method: auto, icontrol, or scp
@@ -330,6 +334,7 @@ OPTIONS:
     --user <username>       Appliance user (default: admin)
     --port <port>           Port override
     -i <key-path>           SSH private key path
+    --known-hosts <path>    OpenSSH known_hosts file for strict host-key verification
     --cert <cert-path>      TLS client certificate
     --cert-key <key-path>   TLS client private key`)
 }
@@ -347,6 +352,7 @@ OPTIONS:
     --user <username>       Appliance user (default: admin)
     --port <port>           Port override
     -i <key-path>           SSH private key path
+    --known-hosts <path>    OpenSSH known_hosts file for strict host-key verification
     --cert <cert-path>      TLS client certificate
     --cert-key <key-path>   TLS client private key`)
 }
@@ -442,7 +448,7 @@ COMMANDS:
     wizard       Launch interactive guided support case creation wizard
     ihealth      Upload and inspect QKView diagnostic bundles on iHealth
     bigip        Manage BIG-IP TMOS appliances (ready check, info, serial, QKView generation, push, download)
-    bigiq        Manage BIG-IQ appliances (ready check, info, serial, push, download)
+    bigiq        Manage BIG-IQ appliances (ready check, info, serial, QKView generation, push, download)
     push         Push software downloads or files to BIG-IP / BIG-IQ (auto failover)
     pull         Download files from BIG-IP / BIG-IQ (auto failover)
     geoip        Apply GeoIP database package to BIG-IP appliance (alias: bigip geoip)
@@ -543,6 +549,7 @@ func handleDownloads(ctx context.Context, args []string) {
 	pushUser := ""
 	pushPort := 0
 	pushKey := ""
+	pushKnownHosts := ""
 	pushTarget := "BIG-IP"
 	pushCert := ""
 	pushCertKey := ""
@@ -568,13 +575,15 @@ func handleDownloads(ctx context.Context, args []string) {
 			}
 		} else if strings.HasPrefix(arg, "--profile=") {
 			profileVal = strings.TrimPrefix(arg, "--profile=")
-		} else if arg == "--push" {
+		} else if arg == "--push" || arg == "--push-to" {
 			if i+1 < len(actionArgs) {
 				pushHost = actionArgs[i+1]
 				i++
 			}
 		} else if strings.HasPrefix(arg, "--push=") {
 			pushHost = strings.TrimPrefix(arg, "--push=")
+		} else if strings.HasPrefix(arg, "--push-to=") {
+			pushHost = strings.TrimPrefix(arg, "--push-to=")
 		} else if arg == "--push-method" {
 			if i+1 < len(actionArgs) {
 				pushMethod = actionArgs[i+1]
@@ -614,6 +623,15 @@ func handleDownloads(ctx context.Context, args []string) {
 			}
 		} else if strings.HasPrefix(arg, "--push-key=") {
 			pushKey = strings.TrimPrefix(arg, "--push-key=")
+		} else if arg == "--push-known-hosts" {
+			pushKnownHosts = requireFlagValue(actionArgs, i, arg)
+			i++
+		} else if strings.HasPrefix(arg, "--push-known-hosts=") {
+			pushKnownHosts = strings.TrimPrefix(arg, "--push-known-hosts=")
+			if pushKnownHosts == "" {
+				fmt.Fprintf(os.Stderr, "[ERROR] Flag --push-known-hosts requires a value\n")
+				exitFunc(1)
+			}
 		} else if arg == "--push-target" {
 			if i+1 < len(actionArgs) {
 				pushTarget = actionArgs[i+1]
@@ -644,6 +662,15 @@ func handleDownloads(ctx context.Context, args []string) {
 		} else {
 			remaining = append(remaining, arg)
 		}
+	}
+
+	if pushKnownHosts != "" {
+		cleanKH, err := bigip.ValidateCredentialFilePath(pushKnownHosts, "SSH known_hosts")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			exitFunc(1)
+		}
+		pushKnownHosts = cleanKH
 	}
 
 	// Helper to get authenticated client
@@ -855,7 +882,7 @@ func handleDownloads(ctx context.Context, args []string) {
 		bar.Finish(fmt.Sprintf("Download verified and complete: %s", outPath))
 		if pushHost != "" {
 			fmt.Printf("\n--- Automatic Appliance Push Requested ---\n")
-			executePushToAppliance(ctx, pushHost, outPath, pushMethod, pushDest, pushUser, pushPort, pushKey, pushTarget, pushCert, pushCertKey, pushApplyGeoIP, pushKeepExtracted, false)
+			executePushToApplianceWithKnownHosts(ctx, pushHost, outPath, pushMethod, pushDest, pushUser, pushPort, pushKey, pushKnownHosts, pushTarget, pushCert, pushCertKey, pushApplyGeoIP, pushKeepExtracted, false)
 		}
 
 	case "browse":
@@ -1433,17 +1460,26 @@ func handleCases(ctx context.Context, args []string) {
 		// person normally wants. Without --all there was no way to see a closed
 		// case at all, which looked identical to the tool failing to find it.
 		showClosed := false
+		outputJSON := false
 		for _, a := range args[1:] {
 			switch a {
 			case "--all", "-a":
 				showClosed = true
+			case "--json":
+				outputJSON = true
 			default:
-				fmt.Fprintf(os.Stderr, "Unknown flag %q\n\nUsage: myf5 cases list [--all]\n", a)
+				fmt.Fprintf(os.Stderr, "Unknown flag %q\n\nUsage: myf5 cases list [--all] [--json]\n", a)
 				exitFunc(1)
 			}
 		}
 		resp, err := client.ListCases(ctx, showClosed)
 		checkErr(ctx, err, "Failed to list cases")
+		if outputJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(resp)
+			break
+		}
 		if showClosed {
 			fmt.Println("MyF5 Support Cases (open and closed):")
 		} else {
@@ -1462,18 +1498,43 @@ func handleCases(ctx context.Context, args []string) {
 			}
 		}
 	case "metadata":
+		outputJSON := false
+		for _, a := range args[1:] {
+			switch a {
+			case "--json":
+				outputJSON = true
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown flag %q\n\nUsage: myf5 cases metadata [--json]\n", a)
+				exitFunc(1)
+			}
+		}
 		resp, err := client.GetMetadata(ctx)
 		checkErr(ctx, err, "Failed to get metadata")
+		if outputJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(resp)
+			break
+		}
 		fmt.Printf("Case Metadata Schema retrieved (%d root keys).\n", len(resp.Data))
 	case "comment":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "Usage: myf5 cases comment <case-number> [note]")
+		outputJSON := false
+		var cArgs []string
+		for _, a := range args[1:] {
+			if a == "--json" {
+				outputJSON = true
+				continue
+			}
+			cArgs = append(cArgs, a)
+		}
+		if len(cArgs) < 1 {
+			fmt.Fprintln(os.Stderr, "Usage: myf5 cases comment <case-number> [note] [--json]")
 			exitFunc(1)
 		}
-		caseNum := args[1]
+		caseNum := cArgs[0]
 		var note string
-		if len(args) >= 3 {
-			note = strings.Join(args[2:], " ")
+		if len(cArgs) >= 2 {
+			note = strings.Join(cArgs[1:], " ")
 		} else {
 			fmt.Printf("Enter comment notes for case %s:\n", caseNum)
 			reader := bufio.NewReader(os.Stdin)
@@ -1522,18 +1583,39 @@ func handleCases(ctx context.Context, args []string) {
 			fmt.Fprintf(os.Stderr, "[ERROR] Failed to add comment: %s\n", msg)
 			exitFunc(1)
 		}
+		if outputJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(resp)
+			break
+		}
 		if resp.Data.CaseNumber != "" {
 			fmt.Printf("Comment added to case %s (updated %s).\n", resp.Data.CaseNumber, resp.Data.UpdatedDate)
 		} else {
 			fmt.Println("Comment added successfully.")
 		}
 	case "get", "show", "detail":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "Usage: myf5 cases get <case-number>")
+		outputJSON := false
+		var gArgs []string
+		for _, a := range args[1:] {
+			if a == "--json" {
+				outputJSON = true
+				continue
+			}
+			gArgs = append(gArgs, a)
+		}
+		if len(gArgs) < 1 {
+			fmt.Fprintln(os.Stderr, "Usage: myf5 cases get <case-number> [--json]")
 			exitFunc(1)
 		}
-		detail, err := client.GetCase(ctx, args[1])
+		detail, err := client.GetCase(ctx, gArgs[0])
 		checkErr(ctx, err, "Failed to retrieve case")
+		if outputJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(detail)
+			break
+		}
 		printCaseDetail(detail)
 	case "create":
 		handleCaseCreate(ctx, client, args[1:])
@@ -1840,8 +1922,24 @@ func handleIHealth(ctx context.Context, args []string) {
 
 	switch action {
 	case "list":
+		outputJSON := false
+		for _, a := range args[1:] {
+			switch a {
+			case "--json":
+				outputJSON = true
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown flag %q\n\nUsage: myf5 ihealth list [--json]\n", a)
+				exitFunc(1)
+			}
+		}
 		summaries, err := client.ListQKViews(ctx)
 		checkErr(ctx, err, "Failed to list iHealth QKViews")
+		if outputJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(summaries)
+			break
+		}
 		if len(summaries) == 0 {
 			fmt.Println("No QKViews found.")
 			break
@@ -1867,18 +1965,27 @@ func handleIHealth(ctx context.Context, args []string) {
 			}
 		}
 	case "upload":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "Usage: myf5 ihealth upload <file.qkview> [case-number] [description]")
+		outputJSON := false
+		var uArgs []string
+		for _, a := range args[1:] {
+			if a == "--json" {
+				outputJSON = true
+				continue
+			}
+			uArgs = append(uArgs, a)
+		}
+		if len(uArgs) < 1 {
+			fmt.Fprintln(os.Stderr, "Usage: myf5 ihealth upload <file.qkview> [case-number] [description] [--json]")
 			exitFunc(1)
 		}
-		filePath := args[1]
+		filePath := uArgs[0]
 		caseNum := ""
-		if len(args) >= 3 {
-			caseNum = args[2]
+		if len(uArgs) >= 2 {
+			caseNum = uArgs[1]
 		}
 		desc := ""
-		if len(args) >= 4 {
-			desc = args[3]
+		if len(uArgs) >= 3 {
+			desc = uArgs[2]
 		}
 		fileStat, err := os.Stat(filePath)
 		if err != nil {
@@ -1903,6 +2010,12 @@ func handleIHealth(ctx context.Context, args []string) {
 			exitFunc(1)
 		}
 		bar.Finish(fmt.Sprintf("QKView uploaded. iHealth ID: %s (Status: %s)", resp.ID, resp.Status))
+		if outputJSON {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(resp)
+			break
+		}
 		if resp.ID != "" {
 			fmt.Printf("    https://ihealth.f5.com/qkview-analyzer/qv/%s\n", resp.ID)
 		}
@@ -1919,6 +2032,7 @@ type ApplianceCreds struct {
 	Cert       string
 	Key        string
 	Identity   string
+	KnownHosts string
 	TargetKind string
 }
 
@@ -1936,6 +2050,10 @@ func rejectSecretFlag(flagName string) {
 }
 
 func resolveApplianceCreds(host, targetKind, flagUser, flagCert, flagKey, flagIdentity string, isSCP bool) ApplianceCreds {
+	return resolveApplianceCredsWithKnownHosts(host, targetKind, flagUser, flagCert, flagKey, flagIdentity, "", isSCP)
+}
+
+func resolveApplianceCredsWithKnownHosts(host, targetKind, flagUser, flagCert, flagKey, flagIdentity, flagKnownHosts string, isSCP bool) ApplianceCreds {
 	isLocalFile := false
 	if fi, err := os.Stat(host); err == nil && fi.Mode().IsRegular() {
 		isLocalFile = true
@@ -1977,6 +2095,13 @@ func resolveApplianceCreds(host, targetKind, flagUser, flagCert, flagKey, flagId
 		if bigiqAllowed {
 			prefixes = append(prefixes, "BIGIQ")
 		}
+	} else if strings.EqualFold(targetKind, "BIG-IQ") || strings.EqualFold(targetKind, "bigiq") || strings.EqualFold(targetKind, "big-iq") {
+		if bigiqAllowed {
+			prefixes = append(prefixes, "BIGIQ")
+		}
+		if bigipAllowed {
+			prefixes = append(prefixes, "BIGIP")
+		}
 	} else {
 		if bigipAllowed {
 			prefixes = append(prefixes, "BIGIP")
@@ -1994,9 +2119,9 @@ func resolveApplianceCreds(host, targetKind, flagUser, flagCert, flagKey, flagId
 		} else {
 			targetKind = "auto"
 		}
-	} else if strings.EqualFold(targetKind, "bigiq") {
+	} else if strings.EqualFold(targetKind, "bigiq") || strings.EqualFold(targetKind, "big-iq") {
 		targetKind = "BIG-IQ"
-	} else if strings.EqualFold(targetKind, "bigip") {
+	} else if strings.EqualFold(targetKind, "bigip") || strings.EqualFold(targetKind, "big-ip") {
 		targetKind = "BIG-IP"
 	}
 
@@ -2078,6 +2203,23 @@ func resolveApplianceCreds(host, targetKind, flagUser, flagCert, flagKey, flagId
 		}
 	}
 
+	// SSH Known Hosts
+	if flagKnownHosts != "" {
+		creds.KnownHosts = flagKnownHosts
+	} else if kh := getEnv("_KNOWN_HOSTS"); kh != "" {
+		creds.KnownHosts = kh
+	} else if kh := os.Getenv("MYF5_SSH_KNOWN_HOSTS"); kh != "" {
+		creds.KnownHosts = kh
+	}
+	if creds.KnownHosts != "" {
+		cleanKH, err := bigip.ValidateCredentialFilePath(creds.KnownHosts, "SSH known_hosts")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			exitFunc(1)
+		}
+		creds.KnownHosts = cleanKH
+	}
+
 	return creds
 }
 
@@ -2104,6 +2246,7 @@ func handlePush(ctx context.Context, args []string) {
 	method := "auto"
 	destPath := ""
 	keyPath := ""
+	knownHostsPath := ""
 	targetKind := "auto"
 	certPath := ""
 	certKeyPath := ""
@@ -2154,6 +2297,15 @@ func handlePush(ctx context.Context, args []string) {
 			i++
 		} else if strings.HasPrefix(arg, "--identity=") {
 			keyPath = strings.TrimPrefix(arg, "--identity=")
+		} else if arg == "--known-hosts" {
+			knownHostsPath = requireFlagValue(args, i, arg)
+			i++
+		} else if strings.HasPrefix(arg, "--known-hosts=") {
+			knownHostsPath = strings.TrimPrefix(arg, "--known-hosts=")
+			if knownHostsPath == "" {
+				fmt.Fprintf(os.Stderr, "[ERROR] Flag --known-hosts requires a value\n")
+				exitFunc(1)
+			}
 		} else if arg == "--target" || arg == "-t" {
 			targ := requireFlagValue(args, i, arg)
 			if !strings.EqualFold(targ, "bigiq") && !strings.EqualFold(targ, "big-iq") && !strings.EqualFold(targ, "bigip") && !strings.EqualFold(targ, "big-ip") && !strings.EqualFold(targ, "auto") {
@@ -2195,6 +2347,15 @@ func handlePush(ctx context.Context, args []string) {
 		}
 	}
 
+	if knownHostsPath != "" {
+		cleanKH, err := bigip.ValidateCredentialFilePath(knownHostsPath, "SSH known_hosts")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			exitFunc(1)
+		}
+		knownHostsPath = cleanKH
+	}
+
 	if len(positional) < 2 {
 		printPushUsage()
 		exitFunc(1)
@@ -2207,9 +2368,9 @@ func handlePush(ctx context.Context, args []string) {
 	host := positional[0]
 	localFile := positional[1]
 
-	creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp" || method == "ssh")
+	creds := resolveApplianceCredsWithKnownHosts(host, targetKind, user, certPath, certKeyPath, keyPath, knownHostsPath, method == "scp" || method == "ssh")
 
-	executePushToAppliance(ctx, host, localFile, method, destPath, creds.User, port, creds.Identity, creds.TargetKind, creds.Cert, creds.Key, applyGeoIP, keepExtracted, jsonOutput)
+	executePushToApplianceWithKnownHosts(ctx, host, localFile, method, destPath, creds.User, port, creds.Identity, creds.KnownHosts, creds.TargetKind, creds.Cert, creds.Key, applyGeoIP, keepExtracted, jsonOutput)
 }
 
 func handlePull(ctx context.Context, args []string) {
@@ -2224,6 +2385,7 @@ func handlePull(ctx context.Context, args []string) {
 	method := "auto"
 	localDest := ""
 	keyPath := ""
+	knownHostsPath := ""
 	targetKind := "auto"
 	certPath := ""
 	certKeyPath := ""
@@ -2273,6 +2435,15 @@ func handlePull(ctx context.Context, args []string) {
 			i++
 		} else if strings.HasPrefix(arg, "--identity=") {
 			keyPath = strings.TrimPrefix(arg, "--identity=")
+		} else if arg == "--known-hosts" {
+			knownHostsPath = requireFlagValue(args, i, arg)
+			i++
+		} else if strings.HasPrefix(arg, "--known-hosts=") {
+			knownHostsPath = strings.TrimPrefix(arg, "--known-hosts=")
+			if knownHostsPath == "" {
+				fmt.Fprintf(os.Stderr, "[ERROR] Flag --known-hosts requires a value\n")
+				exitFunc(1)
+			}
 		} else if arg == "--target" || arg == "-t" {
 			targ := requireFlagValue(args, i, arg)
 			if !strings.EqualFold(targ, "bigiq") && !strings.EqualFold(targ, "big-iq") && !strings.EqualFold(targ, "bigip") && !strings.EqualFold(targ, "big-ip") && !strings.EqualFold(targ, "auto") {
@@ -2308,6 +2479,15 @@ func handlePull(ctx context.Context, args []string) {
 		}
 	}
 
+	if knownHostsPath != "" {
+		cleanKH, err := bigip.ValidateCredentialFilePath(knownHostsPath, "SSH known_hosts")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			exitFunc(1)
+		}
+		knownHostsPath = cleanKH
+	}
+
 	if len(positional) < 2 {
 		printPullUsage()
 		exitFunc(1)
@@ -2320,9 +2500,9 @@ func handlePull(ctx context.Context, args []string) {
 	host := positional[0]
 	remoteFile := positional[1]
 
-	creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp" || method == "ssh")
+	creds := resolveApplianceCredsWithKnownHosts(host, targetKind, user, certPath, certKeyPath, keyPath, knownHostsPath, method == "scp" || method == "ssh")
 
-	executeDownloadFromAppliance(ctx, host, remoteFile, localDest, method, creds.User, port, creds.Identity, creds.TargetKind, creds.Cert, creds.Key)
+	executeDownloadFromApplianceWithKnownHosts(ctx, host, remoteFile, localDest, method, creds.User, port, creds.Identity, creds.KnownHosts, creds.TargetKind, creds.Cert, creds.Key)
 }
 
 func detectApplianceKind(ctx context.Context, host string, port int, user, pw string, pwBytes []byte, certPath, certKeyPath, fallbackKind string) string {
@@ -2334,6 +2514,8 @@ func detectApplianceKind(ctx context.Context, host string, port int, user, pw st
 			Port:           port,
 			Username:       user,
 			Password:       pw,
+			PasswordBytes:  pwBytes,
+			TargetType:     fallbackKind,
 			SkipTLSVerify:  true,
 			ClientCertPath: certPath,
 			ClientKeyPath:  certKeyPath,
@@ -2346,10 +2528,10 @@ func detectApplianceKind(ctx context.Context, host string, port int, user, pw st
 			}
 		}
 	}
-	if strings.EqualFold(fallbackKind, "BIG-IQ") {
+	if strings.EqualFold(fallbackKind, "BIG-IQ") || strings.EqualFold(fallbackKind, "bigiq") {
 		return "BIG-IQ"
 	}
-	if strings.EqualFold(fallbackKind, "BIG-IP") {
+	if strings.EqualFold(fallbackKind, "BIG-IP") || strings.EqualFold(fallbackKind, "bigip") {
 		return "BIG-IP"
 	}
 	return "Appliance"
@@ -2383,6 +2565,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 	method := "auto"
 	destPath := ""
 	keyPath := ""
+	knownHostsPath := ""
 	certPath := ""
 	certKeyPath := ""
 	keepRemote := false
@@ -2435,6 +2618,15 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			i++
 		} else if strings.HasPrefix(arg, "--identity=") {
 			keyPath = strings.TrimPrefix(arg, "--identity=")
+		} else if arg == "--known-hosts" {
+			knownHostsPath = requireFlagValue(actionArgs, i, arg)
+			i++
+		} else if strings.HasPrefix(arg, "--known-hosts=") {
+			knownHostsPath = strings.TrimPrefix(arg, "--known-hosts=")
+			if knownHostsPath == "" {
+				fmt.Fprintf(os.Stderr, "[ERROR] Flag --known-hosts requires a value\n")
+				exitFunc(1)
+			}
 		} else if arg == "--cert" {
 			certPath = requireFlagValue(actionArgs, i, arg)
 			i++
@@ -2463,6 +2655,15 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		}
 	}
 
+	if knownHostsPath != "" {
+		cleanKH, err := bigip.ValidateCredentialFilePath(knownHostsPath, "SSH known_hosts")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			exitFunc(1)
+		}
+		knownHostsPath = cleanKH
+	}
+
 	method = strings.ToLower(strings.TrimSpace(method))
 	if method != "auto" && method != "icontrol" && method != "scp" && method != "ssh" {
 		fmt.Fprintf(os.Stderr, "[ERROR] Invalid method %q. Valid methods: 'auto', 'icontrol', 'scp'\n", method)
@@ -2480,7 +2681,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		}
 		host := positional[0]
 
-		creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp")
+		creds := resolveApplianceCredsWithKnownHosts(host, targetKind, user, certPath, certKeyPath, keyPath, knownHostsPath, method == "scp")
 		targetKind = creds.TargetKind
 
 		pw := creds.Password
@@ -2515,6 +2716,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			Username:       creds.User,
 			Password:       pw,
 			PasswordBytes:  pwBytes,
+			TargetType:     targetKind,
 			SkipTLSVerify:  true,
 			ClientCertPath: creds.Cert,
 			ClientKeyPath:  creds.Key,
@@ -2538,17 +2740,23 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			if targetKind == "auto" {
 				targetKind = "Appliance"
 			}
+			// A device that answers but is not ready is a failed check, not a
+			// successful one: CheckReadyWithKind reports that as ("", nil), so
+			// without an explicit non-zero exit the command would report
+			// NOT READY and still exit 0, and scripts gating on `myf5 ready`
+			// would treat an unready appliance as ready.
 			fmt.Printf("%s at %s is NOT READY.\n", targetKind, host)
+			exitFunc(1)
 		}
 
 	case "info", "system-info", "sysinfo":
 		if len(positional) != 1 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s info <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s info <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>] [--known-hosts <path>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
 			exitFunc(1)
 		}
 		target := positional[0]
-		creds := resolveApplianceCreds(target, targetKind, user, certPath, certKeyPath, keyPath, method == "scp")
-		info := getSystemInfoTarget(ctx, target, creds.TargetKind, creds.User, port, creds.Identity, method, creds.Cert, creds.Key)
+		creds := resolveApplianceCredsWithKnownHosts(target, targetKind, user, certPath, certKeyPath, keyPath, knownHostsPath, method == "scp")
+		info := getSystemInfoTargetWithKnownHosts(ctx, target, creds.TargetKind, creds.User, port, creds.Identity, creds.KnownHosts, method, creds.Cert, creds.Key)
 		if jsonOutput {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
@@ -2561,12 +2769,12 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	case "serial", "sn", "serialnumber":
 		if len(positional) != 1 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s serial <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s serial <host | file.qkview> [--json] [--method auto|icontrol|ssh] [--user <user>] [--port <port>] [-i <key>] [--known-hosts <path>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
 			exitFunc(1)
 		}
 		target := positional[0]
-		creds := resolveApplianceCreds(target, targetKind, user, certPath, certKeyPath, keyPath, method == "scp")
-		info := getSystemInfoTarget(ctx, target, creds.TargetKind, creds.User, port, creds.Identity, method, creds.Cert, creds.Key)
+		creds := resolveApplianceCredsWithKnownHosts(target, targetKind, user, certPath, certKeyPath, keyPath, knownHostsPath, method == "scp")
+		info := getSystemInfoTargetWithKnownHosts(ctx, target, creds.TargetKind, creds.User, port, creds.Identity, creds.KnownHosts, method, creds.Cert, creds.Key)
 		sn := info.PreferredSerialNumber()
 		if jsonOutput {
 			res := map[string]string{
@@ -2590,30 +2798,25 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 		}
 	case "push", "upload":
 		if len(positional) != 2 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--apply-geoip] [--keep-extracted] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--json]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s push <host> <file> [--method auto|icontrol|scp] [--dest <dest>] [--apply-geoip] [--keep-extracted] [--user <user>] [--port <port>] [-i <key>] [--known-hosts <path>] [--cert <cert>] [--cert-key <key>] [--json]\n", cmdName)
 			exitFunc(1)
 		}
 		host := positional[0]
 		localFile := positional[1]
-		creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp")
-		executePushToAppliance(ctx, host, localFile, method, destPath, creds.User, port, creds.Identity, creds.TargetKind, creds.Cert, creds.Key, applyGeoIP, keepExtracted, jsonOutput)
+		creds := resolveApplianceCredsWithKnownHosts(host, targetKind, user, certPath, certKeyPath, keyPath, knownHostsPath, method == "scp")
+		executePushToApplianceWithKnownHosts(ctx, host, localFile, method, destPath, creds.User, port, creds.Identity, creds.KnownHosts, creds.TargetKind, creds.Cert, creds.Key, applyGeoIP, keepExtracted, jsonOutput)
 
 	case "geoip":
 		if len(positional) != 2 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s geoip <host> <zip-path> [--method auto|icontrol|scp] [--dest <path>] [--keep-extracted] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--json]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s geoip <host> <zip-path> [--method auto|icontrol|scp] [--dest <path>] [--keep-extracted] [--user <user>] [--port <port>] [-i <key>] [--known-hosts <path>] [--cert <cert>] [--cert-key <key>] [--json]\n", cmdName)
 			exitFunc(1)
 		}
 		host := positional[0]
 		zipTarget := positional[1]
 
-		creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp")
+		creds := resolveApplianceCredsWithKnownHosts(host, targetKind, user, certPath, certKeyPath, keyPath, knownHostsPath, method == "scp")
 
 		if creds.TargetKind == "auto" {
-			// Note: ApplyGeoIP will error out if it detects BIG-IQ, but we can do a quick check
-			// We can leave TargetKind as is; we will pass it.
-			// Let's pass "BIG-IP" if it's auto to bypass initial blocks in legacy logic,
-			// ApplyGeoIP will handle actual check. But ApplyGeoIP in geoip.go takes TargetType.
-			// We will just let ApplyGeoIP do its thing, or detect it.
 			if targetKind == "BIG-IQ" {
 				fmt.Fprintf(os.Stderr, "[ERROR] GeoIP database updates are only supported on BIG-IP appliances.\n")
 				exitFunc(1)
@@ -2625,7 +2828,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 		if fi, err := os.Stat(zipTarget); err == nil && !fi.IsDir() {
 			// Local file: push it to appliance and apply
-			executePushToAppliance(ctx, host, zipTarget, method, destPath, creds.User, port, creds.Identity, creds.TargetKind, creds.Cert, creds.Key, true, keepExtracted, jsonOutput)
+			executePushToApplianceWithKnownHosts(ctx, host, zipTarget, method, destPath, creds.User, port, creds.Identity, creds.KnownHosts, creds.TargetKind, creds.Cert, creds.Key, true, keepExtracted, jsonOutput)
 		} else {
 			// Remote file on appliance: apply directly
 			if err := bigip.ValidateRemoteAppliancePath(zipTarget); err != nil {
@@ -2668,6 +2871,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 				Password:       pw,
 				PasswordBytes:  pwBytes,
 				IdentityFile:   creds.Identity,
+				KnownHostsPath: creds.KnownHosts,
 				ClientCertPath: creds.Cert,
 				ClientKeyPath:  creds.Key,
 				Method:         bigip.TransferMethod(method),
@@ -2716,22 +2920,22 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 
 	case "download", "pull", "fetch":
 		if len(positional) != 2 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s download <host> <remote-file> [-o <dest>] [--method auto|icontrol|scp] [--user <user>] [--port <port>] [-i <key>] [--known-hosts <path>] [--cert <cert>] [--cert-key <key>]\n", cmdName)
 			exitFunc(1)
 		}
 		host := positional[0]
 		remoteFile := positional[1]
-		creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp")
-		executeDownloadFromAppliance(ctx, host, remoteFile, destPath, method, creds.User, port, creds.Identity, creds.TargetKind, creds.Cert, creds.Key)
+		creds := resolveApplianceCredsWithKnownHosts(host, targetKind, user, certPath, certKeyPath, keyPath, knownHostsPath, method == "scp")
+		executeDownloadFromApplianceWithKnownHosts(ctx, host, remoteFile, destPath, method, creds.User, port, creds.Identity, creds.KnownHosts, creds.TargetKind, creds.Cert, creds.Key)
 
 	case "qkview":
 		if len(positional) != 1 {
-			fmt.Fprintf(os.Stderr, "Usage: myf5 %s qkview <host> [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--cert <cert>] [--cert-key <key>] [--keep-remote]\n", cmdName)
+			fmt.Fprintf(os.Stderr, "Usage: myf5 %s qkview <host> [--method auto|icontrol|scp] [--dest <path>] [--user <user>] [--port <port>] [-i <key>] [--known-hosts <path>] [--cert <cert>] [--cert-key <key>] [--keep-remote]\n", cmdName)
 			exitFunc(1)
 		}
 		host := positional[0]
 
-		creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp" || method == "ssh")
+		creds := resolveApplianceCredsWithKnownHosts(host, targetKind, user, certPath, certKeyPath, keyPath, knownHostsPath, method == "scp" || method == "ssh")
 		targetKind = creds.TargetKind
 
 		pw := creds.Password
@@ -2785,6 +2989,7 @@ func handleAppliance(ctx context.Context, targetKind string, args []string) {
 			PasswordBytes:  pwBytes,
 			Port:           port,
 			IdentityFile:   creds.Identity,
+			KnownHostsPath: creds.KnownHosts,
 			ClientCertPath: creds.Cert,
 			ClientKeyPath:  creds.Key,
 			Timeout:        30 * time.Second,
@@ -2879,6 +3084,10 @@ func hasDefaultSSHAuth() bool {
 }
 
 func getSystemInfoTarget(ctx context.Context, target, targetKind, user string, port int, keyPath, method, certPath, certKeyPath string) *bigip.SystemInfo {
+	return getSystemInfoTargetWithKnownHosts(ctx, target, targetKind, user, port, keyPath, "", method, certPath, certKeyPath)
+}
+
+func getSystemInfoTargetWithKnownHosts(ctx context.Context, target, targetKind, user string, port int, keyPath, knownHostsPath, method, certPath, certKeyPath string) *bigip.SystemInfo {
 	if fi, err := os.Stat(target); err == nil && !fi.IsDir() {
 		info, err := bigip.InspectQKView(target)
 		checkErr(ctx, err, fmt.Sprintf("Failed to inspect QKView %s", target))
@@ -2890,11 +3099,12 @@ func getSystemInfoTarget(ctx context.Context, target, targetKind, user string, p
 	}
 
 	host := target
-	creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp" || method == "ssh")
+	creds := resolveApplianceCredsWithKnownHosts(host, targetKind, user, certPath, certKeyPath, keyPath, knownHostsPath, method == "scp" || method == "ssh")
 	user = creds.User
 	certPath = creds.Cert
 	certKeyPath = creds.Key
 	keyPath = creds.Identity
+	knownHostsPath = creds.KnownHosts
 	targetKind = creds.TargetKind
 
 	pw := creds.Password
@@ -2925,21 +3135,26 @@ func getSystemInfoTarget(ctx context.Context, target, targetKind, user string, p
 		pwBytes = []byte(pw)
 	}
 
-	info, err := resolveApplianceSystemInfo(ctx, host, port, user, pw, pwBytes, keyPath, method, targetKind, certPath, certKeyPath)
+	info, err := resolveApplianceSystemInfoWithKnownHosts(ctx, host, port, user, pw, pwBytes, keyPath, knownHostsPath, method, targetKind, certPath, certKeyPath)
 	checkErr(ctx, err, fmt.Sprintf("Failed to retrieve system info from %s", host))
 	return info
 }
 
 func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user, pw string, pwBytes []byte, keyPath, method, targetKind, certPath, certKeyPath string) (*bigip.SystemInfo, error) {
+	return resolveApplianceSystemInfoWithKnownHosts(ctx, host, port, user, pw, pwBytes, keyPath, "", method, targetKind, certPath, certKeyPath)
+}
+
+func resolveApplianceSystemInfoWithKnownHosts(ctx context.Context, host string, port int, user, pw string, pwBytes []byte, keyPath, knownHostsPath, method, targetKind, certPath, certKeyPath string) (*bigip.SystemInfo, error) {
 	if method == "scp" || method == "ssh" {
 		opts := bigip.SCPOptions{
-			Host:          host,
-			Port:          port,
-			Username:      user,
-			Password:      pw,
-			PasswordBytes: pwBytes,
-			KeyPath:       keyPath,
-			Timeout:       30 * time.Second,
+			Host:           host,
+			Port:           port,
+			Username:       user,
+			Password:       pw,
+			PasswordBytes:  pwBytes,
+			KeyPath:        keyPath,
+			KnownHostsPath: knownHostsPath,
+			Timeout:        30 * time.Second,
 		}
 		defer opts.Zero()
 		return bigip.GetSystemInfoSSH(ctx, opts)
@@ -2951,6 +3166,7 @@ func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user
 		Username:       user,
 		Password:       pw,
 		PasswordBytes:  pwBytes,
+		TargetType:     targetKind,
 		SkipTLSVerify:  true,
 		ClientCertPath: certPath,
 		ClientKeyPath:  certKeyPath,
@@ -2977,13 +3193,14 @@ func resolveApplianceSystemInfo(ctx context.Context, host string, port int, user
 			sshPort = port
 		}
 		opts := bigip.SCPOptions{
-			Host:          host,
-			Port:          sshPort,
-			Username:      user,
-			Password:      pw,
-			PasswordBytes: pwBytes,
-			KeyPath:       keyPath,
-			Timeout:       30 * time.Second,
+			Host:           host,
+			Port:           sshPort,
+			Username:       user,
+			Password:       pw,
+			PasswordBytes:  pwBytes,
+			KeyPath:        keyPath,
+			KnownHostsPath: knownHostsPath,
+			Timeout:        30 * time.Second,
 		}
 		defer opts.Zero()
 		sshInfo, sshErr := bigip.GetSystemInfoSSH(ctx, opts)
@@ -3003,6 +3220,18 @@ func executePushToAppliance(
 	host, localPath, method, destPath, user string,
 	port int,
 	keyPath, targetKind, certPath, certKeyPath string,
+	applyGeoIP bool,
+	keepExtracted bool,
+	jsonOutput bool,
+) {
+	executePushToApplianceWithKnownHosts(ctx, host, localPath, method, destPath, user, port, keyPath, "", targetKind, certPath, certKeyPath, applyGeoIP, keepExtracted, jsonOutput)
+}
+
+func executePushToApplianceWithKnownHosts(
+	ctx context.Context,
+	host, localPath, method, destPath, user string,
+	port int,
+	keyPath, knownHostsPath, targetKind, certPath, certKeyPath string,
 	applyGeoIP bool,
 	keepExtracted bool,
 	jsonOutput bool,
@@ -3040,11 +3269,12 @@ func executePushToAppliance(
 	fileSize := stat.Size()
 	baseName := filepath.Base(localPath)
 
-	creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp")
+	creds := resolveApplianceCredsWithKnownHosts(host, targetKind, user, certPath, certKeyPath, keyPath, knownHostsPath, method == "scp")
 	user = creds.User
 	certPath = creds.Cert
 	certKeyPath = creds.Key
 	keyPath = creds.Identity
+	knownHostsPath = creds.KnownHosts
 	targetKind = creds.TargetKind
 	pw := creds.Password
 
@@ -3090,6 +3320,7 @@ func executePushToAppliance(
 		PasswordBytes:  pwBytes,
 		Port:           port,
 		IdentityFile:   keyPath,
+		KnownHostsPath: knownHostsPath,
 		ClientCertPath: certPath,
 		ClientKeyPath:  certKeyPath,
 		DestDir:        destPath,
@@ -3187,10 +3418,12 @@ func executePushToAppliance(
 		Password:       pw,
 		PasswordBytes:  geoPwBytes,
 		IdentityFile:   keyPath,
+		KnownHostsPath: knownHostsPath,
 		ClientCertPath: certPath,
 		ClientKeyPath:  certKeyPath,
 		Method:         bigip.TransferMethod(method),
 		KeepExtracted:  keepExtracted,
+		TargetType:     targetKind,
 	}
 	defer geoOpts.Zero()
 
@@ -3240,6 +3473,15 @@ func executeDownloadFromAppliance(
 	port int,
 	keyPath, targetKind, certPath, certKeyPath string,
 ) {
+	executeDownloadFromApplianceWithKnownHosts(ctx, host, remotePath, localDest, method, user, port, keyPath, "", targetKind, certPath, certKeyPath)
+}
+
+func executeDownloadFromApplianceWithKnownHosts(
+	ctx context.Context,
+	host, remotePath, localDest, method, user string,
+	port int,
+	keyPath, knownHostsPath, targetKind, certPath, certKeyPath string,
+) {
 	if targetKind == "" {
 		targetKind = "BIG-IP"
 	}
@@ -3268,11 +3510,12 @@ func executeDownloadFromAppliance(
 		localDest = filepath.Join(getDefaultDownloadsDir(), base)
 	}
 
-	creds := resolveApplianceCreds(host, targetKind, user, certPath, certKeyPath, keyPath, method == "scp")
+	creds := resolveApplianceCredsWithKnownHosts(host, targetKind, user, certPath, certKeyPath, keyPath, knownHostsPath, method == "scp")
 	user = creds.User
 	certPath = creds.Cert
 	certKeyPath = creds.Key
 	keyPath = creds.Identity
+	knownHostsPath = creds.KnownHosts
 	targetKind = creds.TargetKind
 	pw := creds.Password
 
@@ -3314,6 +3557,7 @@ func executeDownloadFromAppliance(
 		PasswordBytes:  pwBytes,
 		Port:           port,
 		IdentityFile:   keyPath,
+		KnownHostsPath: knownHostsPath,
 		ClientCertPath: certPath,
 		ClientKeyPath:  certKeyPath,
 		Timeout:        30 * time.Second,

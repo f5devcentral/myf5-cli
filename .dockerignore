@@ -1,0 +1,51 @@
+# Git metadata and local build/scratch directories
+.git
+.gitignore
+/bin/
+/dist/
+/release-binaries/
+/tmp/
+testenv/
+
+# Credentials, keys, and local environment files
+.aws/
+.ssh/
+.env
+.env*
+*.env
+*.env*
+*.key
+*.pem
+*.p12
+*.pfx
+*.ppk
+*.pkcs8
+*.jks
+*.keystore
+*credentials*
+!*.go
+
+# Terraform state & plans
+.terraform/
+*.tfstate*
+*.tfvars*
+tfplan
+*.tfplan
+
+# Diagnostics & large appliance archives
+*.qkview
+*.ucs
+*.scf
+*.iso
+*.ova
+*.qcow2*
+
+# IDE & AI workspaces
+.vscode/
+.idea/
+.zed/
+.claude*
+.cursor*
+.gemini*
+.antigravity*
+.codex*

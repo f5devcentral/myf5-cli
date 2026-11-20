@@ -1,32 +1,33 @@
 # Appliance Transfer Guide: BIG-IP & BIG-IQ Dual Push, Pull, and Automatic Failover Engine
 
-The `myf5` appliance transfer engine enables direct, wire-speed bidirectional streaming of software images, engineering hotfixes, diagnostic QKViews, configuration files, and GeoDB packages between local systems and **F5 BIG-IP TMOS** or **BIG-IQ Centralized Management** appliances.
+The `myf5` appliance transfer engine enables direct, wire-speed bidirectional streaming of software images (`.iso`), engineering hotfixes, diagnostic QKViews (`.qkview`), and GeoDB packages between local systems and **F5 BIG-IP TMOS** (`myf5 bigip`) or **BIG-IQ Centralized Management** (`myf5 bigiq`) appliances.
 
-By embedding both **iControl REST chunked transfer** and **native Go SCP over SSH** with an **automatic seamless failover engine**, `myf5` guarantees file transfers succeed even when one transport protocol is blocked, misconfigured, or restricted by firewall policies.
+By embedding both **iControl REST chunked transfer** and **verified native Go SCP over SSH** with an **automatic seamless failover engine**, `myf5` guarantees file transfers succeed even when one transport protocol is blocked, misconfigured, or restricted by firewall policies.
 
 ---
 
 ## Architectural Overview & Automatic Failover Engine
 
-`myf5` provides two independent transport mechanisms for both pushing (uploading) and pulling (downloading) files:
+`myf5` provides first-class parity across `myf5 bigip <ready|info|serial|qkview|push|pull|download>` (plus `geoip`) and `myf5 bigiq <ready|info|serial|qkview|push|pull|download>`, as well as unified top-level commands (`myf5 ready`, `myf5 info`, `myf5 serial`, `myf5 qkview`, `myf5 push`, `myf5 pull`, `myf5 geoip`) accepting `--target auto|bigip|bigiq` (`"BIG-IQ"`, `"big-iq"`, `"bigiq"`, `"BIG-IP"`, `"big-ip"`, `"bigip"`, or `"auto"`).
 
 1. **Automatic Failover Mode** (Default: `--method auto`)
-   - **Upload (`push`)**: Attempts iControl REST first when password authentication is available. If the REST API endpoint fails, times out, or returns an HTTP error, `myf5` displays a `[FAILOVER]` alert and immediately re-executes the upload via native Go SCP over SSH. Conversely, if an SSH key is explicitly provided, SCP is attempted first with automatic REST fallback.
-   - **Download (`pull` / `download`)**: Evaluates the requested remote path. For files located in `/shared/images/` or `/var/tmp/qkviews/` (such as ISO software images or QKViews), `myf5` attempts chunked iControl REST download first. If the file is not found via REST (HTTP 404) or REST is unavailable, it immediately falls back to native Go SCP. For arbitrary Linux filesystem paths (e.g., `/config/bigip.conf`), it attempts SCP first, falling back to REST bash staging.
-   - **Diagnostic QKView Downloads**: `myf5 bigip qkview <host>` leverages automatic failover so that if the appliance's TMOS autodeploy download endpoint is disabled or missing, the generated QKView archive (`/var/tmp/qkviews/<filename>`) is downloaded via SCP without user intervention.
+   - **Upload (`push`)**: Streams `512 KiB` (`DefaultUploadChunkSize`) `Content-Range` chunks to `/mgmt/shared/file-transfer/uploads/<filename>` (or `/mgmt/cm/autodeploy/software-image-uploads/<filename>` for `.iso` images on BIG-IQ), promotes via `/mgmt/tm/util/bash`, and automatically fails over (or routes directly when `--target bigiq` targets non-ISO paths like `/var/tmp`) to verified `64 KiB` SCP when `webd` blocks `/mgmt/tm/util/bash` (`403 Forbidden`) or REST fails. Conversely, if an SSH key is explicitly provided (`-i`), SCP is attempted first with automatic REST fallback.
+   - **Download (`pull` / `download`)**: Validates that the remote path is an `.iso` or `.qkview` inside `/shared/images`, `/var/config/rest/downloads`, `/var/tmp`, or `/shared/tmp` (`ValidateApplianceDownloadPath`). Downloads via `1 MiB` HTTP `Range` chunks (or single-response `200 OK` on BIG-IQ `/mgmt/shared/file-transfer/downloads/`), and automatically falls back to verified `64 KiB` SCP if REST returns 404 or is unavailable.
+   - **Diagnostic QKView Generation & Downloads (`qkview`)**: On BIG-IP, calls `/mgmt/tm/util/qkview` (`-s0 -f /var/tmp/qkviews/<filename>`) or `/mgmt/cm/autodeploy/qkview` and downloads via REST with SCP fallback. On BIG-IQ, when REST `/mgmt/tm/util/qkview` or `/mgmt/tm/util/bash` is restricted, automatically routes directly to SSH/SCP (`/var/tmp` QKView generation and SCP retrieval).
 
 2. **iControl REST Chunked Transfer** (`--method icontrol`)
    - Operates over HTTPS (port 443 or custom management port).
-   - **Upload**: Breaks payloads into 512 KB chunks transferred sequentially to `/mgmt/shared/file-transfer/uploads/<filename>`. Stages uploads in `/var/config/rest/downloads/<filename>` on the appliance, and automatically promotes files to the requested destination (e.g., `/shared/images/` or `/shared/GeoIP/`) using `/mgmt/tm/util/bash`.
-   - **Download**: Streams files via HTTP range requests from `/mgmt/cm/autodeploy/software-image-downloads/` or `/mgmt/cm/autodeploy/qkview-downloads/` directly to local disk.
+   - **BIG-IP & BIG-IQ Authentication**: BIG-IP uses HTTP Basic Auth or token auth; BIG-IQ uses token authentication via `POST /mgmt/shared/authn/login` with `{"username":"...","password":"..."}` (omitting `loginProviderName` per BIG-IQ REST API schema, with automatic fallback if required), refreshes tokens within 5 minutes of expiry via `POST /mgmt/shared/authn/exchange`, and stops immediately after 1 failed login attempt (`loginFailedErr`) to prevent appliance account lockout.
+   - **Upload**: Breaks payloads into `512 KiB` (`524,288` bytes, `DefaultUploadChunkSize`) chunks transferred sequentially to `/mgmt/shared/file-transfer/uploads/<filename>` (staging in `/var/config/rest/downloads/<filename>` and promoting via `/mgmt/tm/util/bash`) or `/mgmt/cm/autodeploy/software-image-uploads/<filename>` for `.iso` images on BIG-IQ.
+   - **Download**: Streams `.iso` and `.qkview` files in `1 MiB` HTTP `Range` chunks from `/mgmt/cm/autodeploy/software-image-downloads/`, `/mgmt/cm/autodeploy/qkview-downloads/`, or `/mgmt/shared/file-transfer/downloads/` (supporting single-response `200 OK` on BIG-IQ).
    - Ideal when SSH access is restricted by firewall policies, or when working through HTTPS reverse proxies and cloud access environments (e.g., F5 Unified Demonstration Framework / UDF).
 
 3. **Native Go SCP over SSH** (`--method scp`)
    - Operates over SSH (port 22 or custom port).
    - Implements both remote SCP sink (receive/upload) and SCP source (transmit/download) protocols directly in pure Go (`golang.org/x/crypto/ssh`), requiring zero external OpenSSH binaries.
-   - Streams payloads directly to and from arbitrary appliance filesystem locations in a single network pass.
-   - Supports SSH key authentication, SSH agent forwarding (`SSH_AUTH_SOCK`), and password / keyboard-interactive (PAM / TACACS+ / RADIUS) authentication.
-   - Ideal for multi-gigabyte transfers in datacenter LANs and high-speed management networks.
+   - Verifies OpenSSH `known_hosts` host keys prior to sending credentials (`--known-hosts`, `--push-known-hosts`, `BIGIP_KNOWN_HOSTS`, `BIGIQ_KNOWN_HOSTS`, `MYF5_SSH_KNOWN_HOSTS`, `MYF5_STRICT_HOST_KEY_CHECKING=1`).
+   - Streams payloads in `64 KiB` buffers (`65,536` bytes) in a single network pass.
+   - Supports SSH key authentication (`-i`, encrypted keys via `SSH_AUTH_SOCK` `ssh-agent`) and password / keyboard-interactive (PAM / TACACS+ / RADIUS) authentication.
 
 ### Architecture Comparison Matrix
 
@@ -38,10 +39,10 @@ By embedding both **iControl REST chunked transfer** and **native Go SCP over SS
 | **External Dependencies** | Zero | Zero (Pure Go `net/http`) | Zero (Pure Go `golang.org/x/crypto/ssh`) |
 | **Network Path Compatibility** | All environments (Firewall resilient) | Web proxies, Cloud proxies, F5 UDF | Direct L3 / SSH bastions |
 | **Shell Access Requirement** | Any role / shell (Adaptive fallback) | User with API access (independent of login shell) | User with Advanced Shell (`bash`) access or targeting `/var/tmp` |
-| **Chunk / Buffer Size** | 512 KB REST / 64 KB SCP | 512 KB (`Content-Range` chunking) | 64 KB streaming buffer |
-| **Upload Destination** | Direct write or `/shared/images` | `/var/config/rest/downloads` (promoted) | Direct destination write via `scp -t` |
-| **Download Source** | Any TMOS path (adaptive) | Autodeploy stores (`software-image-downloads`) | Any valid appliance file path via `scp -f` |
-| **Authentication Methods** | Password, SSH Key, SSH Agent | HTTP Basic Auth (admin user & password) | SSH Key, SSH Agent, Password, PAM |
+| **Chunk / Buffer Size** | `512 KiB` upload / `1 MiB` download REST; `64 KiB` SCP | `512 KiB` upload (`Content-Range`) / `1 MiB` download (`Range`) | `64 KiB` streaming buffer |
+| **Upload Destination** | Direct write or `/shared/images` | `/var/config/rest/downloads` (promoted) or BIG-IQ `software-image-uploads` | Direct destination write via `scp -t` |
+| **Download Source** | Validated `.iso` / `.qkview` paths | Autodeploy / `file-transfer/downloads` | Validated `.iso` / `.qkview` paths via `scp -f` |
+| **Authentication Methods** | Password, Token, mTLS, SSH Key, SSH Agent | Basic Auth / BIG-IQ Token (`/mgmt/shared/authn/login`), mTLS | SSH Key, SSH Agent (`SSH_AUTH_SOCK`), Password, PAM |
 | **Appliance Compatibility** | BIG-IP TMOS (v13+), BIG-IQ (v7+) | BIG-IP TMOS (v13+), BIG-IQ (v7+) | BIG-IP TMOS (v13+) or BIG-IQ (v7+) |
 
 ---
@@ -83,14 +84,14 @@ sequenceDiagram
     participant Sink as Remote scp sink process (scp -t /shared/images)
     participant Target as /shared/images/BIGIP-17.1.1.iso
 
-    Client->>SSH: TCP Connect & SSH Handshake (Keys / Agent / Password)
+    Client->>SSH: TCP Connect & SSH Handshake (known_hosts check + Keys / Agent / Password)
     SSH-->>Client: Authentication Accepted
     Client->>SSH: Request Exec "scp -t /shared/images"
     SSH->>Sink: Fork & Exec scp sink
     Sink-->>Client: 0x00 (Ready Acknowledgement)
     Client->>Sink: Protocol Header: "C0644 2516582400 BIGIP-17.1.1.iso\n"
     Sink-->>Client: 0x00 (Header Acknowledgement)
-    loop 64 KB Streaming Buffer
+    loop 64 KiB Streaming Buffer
         Client->>Sink: Stream raw file bytes
         Sink->>Target: Write directly to filesystem
     end
@@ -101,14 +102,23 @@ sequenceDiagram
 
 ---
 
-## Authentication & Zero-Secret Security Architecture
+## Authentication, `known_hosts` Verification, TLS & Zero-Secret Security
 
-Security is enforced at the core of `myf5`. Plaintext secrets (`--password`, `--client-secret`) are **never** accepted via command-line flags. Attempting to supply credentials on the command line triggers an immediate termination with exit code `2`.
+### Two-Tier Zero-Secret CLI Policy
+Plaintext secrets are **never** accepted via command-line flags:
+- **Tier 1 (`pkg/auth.CheckNoCLISecrets` on `os.Args[1:]`, Exit Code `2` before command dispatch)**: Blocks all 22 global secret flags (`--password`, `-password`, `--pw`, `-pw`, `--client-secret`, `-client-secret`, `--clientsecret`, `-clientsecret`, `--secret`, `-secret`, `--token`, `-token`, `--access-token`, `-access-token`, `--api-key`, `-api-key`, `--apikey`, `-apikey`, `--auth-token`, `-auth-token`, `--key`, `-key`).
+- **Tier 2 (`cmd/myf5.rejectSecretFlag`, Exit Code `1` in appliance subcommand flag parsers)**: Blocks `--pass`, `-P`, and `--ssh-passphrase`.
+- **Encrypted SSH Keys**: Private keys passed via `-i` / `--identity` (or `--push-key`) never prompt for a passphrase on the command line; encrypted SSH private keys are supported via `SSH_AUTH_SOCK` (`ssh-agent`).
 
-This policy ensures that appliance credentials never leak into:
-- System process tables (`ps aux`, `/proc/$PID/cmdline`) visible to unprivileged users on multi-user jump boxes.
-- Persistent shell histories (`~/.bash_history`, `~/.zsh_history`).
-- Operating system telemetry and centralized security audit logs (Falco, auditd, Sysmon).
+### Pre-Authentication SSH `known_hosts` Verification
+- **CLI Flags**: `--known-hosts <path>` (on `info`, `serial`, `qkview`, `push`, `pull`, `geoip`, and `bigip`/`bigiq` subcommands) and `--push-known-hosts <path>` (on `downloads get --push`).
+- **Environment Variables**: `BIGIP_KNOWN_HOSTS`, `BIGIQ_KNOWN_HOSTS`, `MYF5_SSH_KNOWN_HOSTS`.
+- **Strict Mode (`MYF5_STRICT_HOST_KEY_CHECKING=1` / `true` / `yes`)**: Enforces strict OpenSSH `known_hosts` verification before sending credentials—rejecting unknown, mismatched, and `@revoked` host keys.
+- **Default Mode**: Checks `~/.ssh/known_hosts` if present and rejects any key mismatch or `@revoked` marker before credentials are sent, while allowing unknown ephemeral lab hosts if no entry matches.
+
+### Appliance TLS & Custom Root CA Bundles
+- Appliance iControl REST clients default to `SkipTLSVerify: true` for self-signed management certificates unless `MYF5_STRICT_APPLIANCE_TLS=1` (`true`/`yes`) is set, or mTLS (`--cert` / `--cert-key`, `BIGIP_CERT` / `BIGIP_KEY`, `BIGIQ_CERT` / `BIGIQ_KEY`) is used.
+- `MYF5_CA_BUNDLE` and `SSL_CERT_FILE` load a custom PEM root CA bundle (e.g., corporate TLS inspection CA or private lab CA) into `pkg/client.SecureTLSConfig` across macOS, Linux, and Windows.
 
 ### Credential Resolution Hierarchy
 
@@ -116,13 +126,13 @@ This policy ensures that appliance credentials never leak into:
 
 ```
 1. Environment Variables:
-   - BIG-IP: BIGIP_PASSWORD / BIGIP_USER
-   - BIG-IQ: BIGIQ_PASSWORD / BIGIQ_USER (falls back to BIGIP_*)
+   - BIG-IP: BIGIP_PASSWORD / BIGIP_USER (optional host lock: BIGIP_HOST)
+   - BIG-IQ: BIGIQ_PASSWORD / BIGIQ_USER (falls back to BIGIP_*; optional host lock: BIGIQ_HOST)
      │ (If not set)
      ▼
-2. SSH Key / Agent (SCP method only):
-   - Explicit flag: -i, --identity <path>
-   - SSH Agent: $SSH_AUTH_SOCK
+2. SSH Key / Agent (SCP method):
+   - Explicit flag: -i, --identity <path> (or --push-key <path>, BIGIP_SSH_KEY, BIGIQ_SSH_KEY, SSH_KEY_PATH)
+   - SSH Agent: $SSH_AUTH_SOCK (supports encrypted private keys)
    - Default Identity Files: ~/.ssh/id_ed25519, ~/.ssh/id_rsa, ~/.ssh/id_ecdsa
      │ (If not available)
      ▼
@@ -139,10 +149,12 @@ For automated scripts and continuous delivery runners, export the appropriate en
 # For BIG-IP appliances
 export BIGIP_USER="admin"
 export BIGIP_PASSWORD="YourSecureAppliancePassword"
+export BIGIP_KNOWN_HOSTS="$HOME/.ssh/known_hosts"
 
 # For BIG-IQ Centralized Management
 export BIGIQ_USER="admin"
 export BIGIQ_PASSWORD="YourSecureAppliancePassword"
+export BIGIQ_KNOWN_HOSTS="$HOME/.ssh/known_hosts"
 ```
 
 ---
@@ -163,7 +175,8 @@ myf5 bigip push 192.0.2.10 /var/tmp/BIGIP-17.1.1-0.0.6.iso \
 #### Option B: Push via Native Go SCP (Defaults to `/shared/images` automatically for ISOs)
 ```bash
 myf5 bigip push 192.0.2.10 /var/tmp/BIGIP-17.1.1-0.0.6.iso \
-    --method scp
+    --method scp \
+    --known-hosts ~/.ssh/known_hosts
 ```
 
 #### Verifying the Staged Software Image
@@ -181,10 +194,11 @@ tmsh list sys software image BIGIP-17.1.1-0.0.6.iso
 Hotfix ISO files are uploaded directly to `/shared/images` alongside base images.
 
 ```bash
-# Push an engineering hotfix via native SCP using a specific SSH key
+# Push an engineering hotfix via native SCP using a specific SSH key and known_hosts
 myf5 bigip push 192.0.2.10 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso \
     --method scp \
-    --identity ~/.ssh/f5_deploy_ed25519
+    --identity ~/.ssh/f5_deploy_ed25519 \
+    --known-hosts ~/.ssh/known_hosts
 ```
 
 #### Verifying the Staged Hotfix
@@ -195,23 +209,23 @@ tmsh list sys software hotfix Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso
 
 ---
 
-### 3. Pushing an Updated GeoDB Archive & Applying Geolocation Updates
+### 3. Pushing an Updated GeoDB Archive & Applying Geolocation Updates (BIG-IP Only)
 
 BIG-IP Application Security Manager (ASM / Advanced WAF), Advanced Firewall Manager (AFM), Access Policy Manager (APM), and DNS/GTM utilize IP geolocation databases supplied by **Digital Envoy** (NetAcuity Edge and Pulse variants, AskF5 K11176 / K78974041).
 
-Active databases reside on the appliance filesystem under `/shared/GeoIP/` (and `/shared/GeoIP/v2/`).
+Active databases reside on the BIG-IP appliance filesystem under `/shared/GeoIP/` (and `/shared/GeoIP/v2/`). **Note:** `myf5 geoip` (and `--apply-geoip`) is **BIG-IP only** and is rejected on BIG-IQ because BIG-IQ Centralized Management does not host TMM GeoIP tables.
 
 #### Automated One-Step Push and Activation (Recommended)
-`myf5` provides native automation that stages the archive, unpacks the internal `.rpm` files, executes `geoip_update_data -f` for each package, and triggers `tmsh load sys geoip` across TMOS:
+`myf5` stages the `.zip` archive to `/shared/tmp` (or `/var/tmp`), unpacks the internal `.rpm` files into `/shared/GeoIP` via `rpm2cpio | cpio -idmv` (and `geoip_update_data -f`), and executes `tmsh load sys geoip` across TMOS (per K11176):
 
 ```bash
 # Push and automatically apply GeoIP updates in a single command:
-myf5 bigip push 192.0.2.10 /var/tmp/ip-geolocation-default.zip --apply-geoip
+myf5 bigip push 192.0.2.10 /var/tmp/ip-geolocation-default.zip --apply-geoip --json
 
 # Or use the dedicated GeoIP command:
-myf5 bigip geoip 192.0.2.10 /var/tmp/ip-geolocation-default.zip
+myf5 bigip geoip 192.0.2.10 /var/tmp/ip-geolocation-default.zip --json
 # Top-level alias:
-myf5 geoip 192.0.2.10 /var/tmp/ip-geolocation-default.zip
+myf5 geoip 192.0.2.10 /var/tmp/ip-geolocation-default.zip --json
 ```
 
 #### Manual Staging and TMOS Execution (Alternative)
@@ -260,15 +274,22 @@ rm -rf /shared/tmp/geoip_update /var/tmp/ip-geolocation-default.zip
 
 ---
 
-### 4. Pushing to BIG-IQ Central Software Repository
+### 4. BIG-IQ Centralized Management Operations & Repository Transfers
 
 BIG-IQ Centralized Management stores managed software images and hotfixes in its centralized software repository (`/shared/images`), allowing administrators to orchestrate upgrades across fleets of BIG-IP devices from a single console.
 
-#### Check BIG-IQ Management Plane Readiness
+- **Token Authentication & Lockout Protection**: Authenticates via `POST /mgmt/shared/authn/login` with `{"username":"...","password":"..."}` (omitting `loginProviderName` per BIG-IQ REST API schema, with automatic fallback if required), refreshes tokens within 5 minutes of expiry via `POST /mgmt/shared/authn/exchange`, and stops immediately after 1 failed login attempt (`loginFailedErr`) to prevent appliance account lockout.
+- **Readiness Probes**: `myf5 bigiq ready <host>` (or `myf5 ready <host>`) exits `0` when `READY` and `1` when `NOT READY` or on error; on BIG-IQ, when `/mgmt/tm/sys/ready` returns `403`/`404`, it probes `/mgmt/shared/echo`, `/mgmt/cm/system/machineid-resolver`, and `/mgmt/shared/failover-state`.
+- **System Info & Serial (`info` / `serial`)**: Supports both live BIG-IQ hosts and offline `.qkview` archives (`pkg/bigip.InspectQKView`). On live BIG-IQ hosts, `GetSystemInfo` queries `/mgmt/shared/identified-devices/config/device-info` and `/mgmt/shared/resolver/device-groups/cm-shared-all-big-iqs/devices`, keeping hardware `ChassisSerialNumber` (`serialNumber`) distinct from UUID `machineId`.
+- **Upload Routing (`push`)**: Streams `512 KiB` `Content-Range` chunks to `/mgmt/cm/autodeploy/software-image-uploads/<filename>` for `.iso` images on BIG-IQ (or `/mgmt/shared/file-transfer/uploads/<filename>`), and automatically fails over (or routes directly when `--target bigiq` targets non-ISO paths like `/var/tmp`) to verified `64 KiB` SCP when `webd` blocks `/mgmt/tm/util/bash` (`403 Forbidden`).
+
+#### Check BIG-IQ Management Plane Readiness, Info & Serial
 ```bash
 myf5 bigiq ready 192.0.2.50 --user admin
+myf5 bigiq info 192.0.2.50 --user admin --json
+myf5 bigiq serial 192.0.2.50 --user admin --json
 ```
-*Output:*
+*Output (`ready`):*
 ```
 BIG-IQ appliance at 192.0.2.50 is READY (HTTP 200).
 ```
@@ -278,7 +299,8 @@ BIG-IQ appliance at 192.0.2.50 is READY (HTTP 200).
 # Push directly via BIG-IQ specific command
 myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1-0.0.6.iso \
     --method scp \
-    --dest /shared/images
+    --dest /shared/images \
+    --known-hosts ~/.ssh/known_hosts
 
 # Or use the unified push command
 myf5 push 192.0.2.50 /var/tmp/BIGIP-17.1.1-0.0.6.iso \
@@ -291,48 +313,54 @@ myf5 push 192.0.2.50 /var/tmp/BIGIP-17.1.1-0.0.6.iso \
 
 ### 5. Downloading Files from Appliances (`pull` / `download` with Automatic Failover)
 
-`myf5` supports bidirectional file transfer. Files can be fetched from any BIG-IP or BIG-IQ appliance using `myf5 bigip download`, `myf5 bigiq download`, or the top-level `myf5 pull`:
+`myf5` supports bidirectional file transfer for `.iso` and `.qkview` artifacts using `myf5 bigip download`, `myf5 bigip pull`, `myf5 bigiq download`, `myf5 bigiq pull`, or the top-level `myf5 pull`:
+
+- **Strict Path Validation (`ValidateApplianceDownloadPath`)**: Validates that `<remote-path>` is an `.iso` or `.qkview` inside `/shared/images`, `/var/config/rest/downloads`, `/var/tmp`, or `/shared/tmp`.
+- **Chunked & Single-Response REST Streaming**: Downloads via `1 MiB` HTTP `Range` chunks (or single-response `200 OK` on BIG-IQ `/mgmt/shared/file-transfer/downloads/`).
+- **Verified SCP Fallback**: Automatically falls back to verified `64 KiB` SCP if REST returns 404 or is unavailable.
 
 ```bash
-# Download a software image from /shared/images/ (attempts REST first, auto-fails over to SCP)
+# Download a software image from /shared/images/ (attempts 1 MiB REST Range chunks, auto-fails over to SCP)
 myf5 bigip download 10.1.1.4 /shared/images/BIGIP-17.1.1-0.0.6.iso -o ./BIGIP-17.1.1.iso
 
-# Download a system configuration file via native SCP
-myf5 bigip download 10.1.1.4 /config/bigip.conf -o ./bigip.conf --method scp
+# Download a diagnostic QKView via native SCP with known_hosts verification
+myf5 bigip download 10.1.1.4 /var/tmp/qkviews/support.qkview -o ./support.qkview --method scp --known-hosts ~/.ssh/known_hosts
 
 # Unified pull command with specific SSH identity key
-myf5 pull 10.1.1.4 /var/log/ltm -o ./ltm.log -i ~/.ssh/id_ed25519
+myf5 pull 10.1.1.4 /var/tmp/qkviews/support.qkview -o ./support.qkview -i ~/.ssh/id_ed25519 --known-hosts ~/.ssh/known_hosts
 
 # Download from BIG-IQ central repository
 myf5 bigiq download 192.0.2.50 /shared/images/BIGIP-17.1.1-0.0.6.iso -o ./BIGIP-17.1.1.iso
+myf5 bigiq pull 192.0.2.50 /shared/images/BIGIP-17.1.1-0.0.6.iso -o ./BIGIP-17.1.1.iso
 ```
-
-#### Automatic Download Failover Mechanics
-When `--method auto` is used:
-1. `myf5` determines whether the file is an autodeploy artifact (under `/shared/images/` or `/var/tmp/qkviews/`).
-2. If so, it initiates a streaming download via iControl REST.
-3. If the REST API endpoint responds with HTTP 404 (file not staged in autodeploy) or returns a connection error, `myf5` alerts the operator with `[FAILOVER]` and immediately establishes a native Go SCP session, downloading the file directly from the appliance filesystem.
 
 ---
 
-### 6. Resilient Diagnostic QKView Generation and Download
+### 6. Resilient Diagnostic QKView Generation and Download (`bigip qkview` & `bigiq qkview`)
 
-Generating a complete QKView diagnostic archive is critical for troubleshooting with F5 Technical Support. `myf5` runs a complete non-truncating (`-s0`) QKView generation on the appliance and retrieves it:
+Generating a complete QKView diagnostic archive is critical for troubleshooting with F5 Technical Support. `myf5` runs a complete non-truncating (`-s0`) QKView generation on BIG-IP or BIG-IQ and retrieves it:
 
 ```bash
-myf5 bigip qkview 10.1.1.4 --user admin
+# Generate and download QKView from BIG-IP
+myf5 bigip qkview 10.1.1.4 --user admin --known-hosts ~/.ssh/known_hosts
+
+# Generate and download QKView from BIG-IQ
+myf5 bigiq qkview 192.0.2.50 --user admin --known-hosts ~/.ssh/known_hosts
+
+# Or via top-level shortcut
+myf5 qkview 10.1.1.4 --user admin
 ```
 
-1. **Remote Generation**: Calls `/mgmt/tm/util/qkview` with arguments `-s0 -f /var/tmp/qkviews/<filename>` (or initiates an asynchronous task via `/mgmt/cm/autodeploy/qkview`) with live spinner reporting until TMOS finishes compiling the diagnostic bundle.
-2. **Resilient Download**: Attempts chunked REST download from `/mgmt/cm/autodeploy/qkview-downloads/<filename>`.
-3. **Automatic Failover**: If TMOS autodeploy download is unavailable or returns 404, `myf5` automatically switches to native Go SCP, transferring `/var/tmp/qkviews/<filename>` without aborting the workflow.
+1. **Remote Generation**: On BIG-IP, calls `/mgmt/tm/util/qkview` with arguments `-s0 -f /var/tmp/qkviews/<filename>` (or initiates an asynchronous task via `/mgmt/cm/autodeploy/qkview`) with live spinner reporting. On BIG-IQ, when REST `/mgmt/tm/util/qkview` or `/mgmt/tm/util/bash` is restricted, routes directly to SSH/SCP (`/var/tmp` QKView generation and SCP retrieval).
+2. **Resilient Download**: Attempts `1 MiB` chunked REST download from `/mgmt/cm/autodeploy/qkview-downloads/<filename>`, falling back automatically to verified `64 KiB` SCP.
+3. **Remote Cleanup**: Removes the temporary QKView file on the appliance after verified download unless `--keep-remote` is specified.
 
 ---
 
 ## End-to-End "Download & Push in One Step"
 
 The `myf5 downloads get` command features native post-download push flags. When `--push <host>` is supplied, `myf5`:
-1. Streams the software image from the authoritative MyF5 CDN mirror to local disk with constant memory footprint (< 10 MB RAM).
+1. Streams the software image from the authoritative MyF5 AWS CloudFront (`*.cloudfront.net`) signed CDN mirror to local disk with constant memory footprint (< 10 MB RAM).
 2. Computes the SHA-256 digest on the fly via `io.TeeReader`.
 3. Verifies the downloaded file's SHA-256 hash against the official catalog digest.
 4. **Only upon successful verification**, immediately begins pushing the validated image directly to the target BIG-IP or BIG-IQ appliance.
@@ -348,17 +376,18 @@ myf5 downloads get "BIG-IP" "big-ip_v17.x" "17.1.1" \
     -o /var/tmp/BIGIP-17.1.1.iso \
     --push 10.1.1.4 \
     --push-method icontrol \
-    --push-dest /shared/images
+    --push-dest /shared/images \
+    --push-known-hosts ~/.ssh/known_hosts
 ```
 
-#### Automated GeoDB Weekly Download & Appliance Update
+#### Automated GeoDB Weekly Download & BIG-IP Appliance Update
 ```bash
 myf5 downloads get "BIG-IP" "big-ip_v17.x" "17.1.1" \
     "GeoLocationUpdates" "ip-geolocation-default.zip" \
     -o /var/tmp/ip-geolocation-default.zip \
     --push 10.1.1.4 \
-    --push-method scp \
-    --push-dest /shared/GeoIP
+    --apply-geoip \
+    --push-known-hosts ~/.ssh/known_hosts
 ```
 
 #### Download and Push to BIG-IQ Central Repository
@@ -368,7 +397,8 @@ myf5 downloads get "BIG-IP" "big-ip_v17.x" "17.1.1" \
     --push bigiq.lab.internal \
     --push-target bigiq \
     --push-method scp \
-    --push-dest /shared/images
+    --push-dest /shared/images \
+    --push-known-hosts ~/.ssh/known_hosts
 ```
 
 ---
@@ -379,13 +409,16 @@ myf5 downloads get "BIG-IP" "big-ip_v17.x" "17.1.1" \
 
 F5 iControl REST handles file transfers via a multipart/chunked endpoint managed by the TMOS `reststatemachine` daemon:
 
-- **Target Endpoint**: `POST /mgmt/shared/file-transfer/uploads/<filename>`
-- **Chunk Size**: `524,288` bytes (512 KB), defined as `DefaultUploadChunkSize`.
+- **Target Endpoints**:
+  - `POST /mgmt/shared/file-transfer/uploads/<filename>` (BIG-IP & BIG-IQ general staging)
+  - `POST /mgmt/cm/autodeploy/software-image-uploads/<filename>` (BIG-IQ `.iso` software repository uploads)
+- **Upload Chunk Size**: `524,288` bytes (`512 KiB`), defined as `DefaultUploadChunkSize`.
+- **Download Chunk Size**: `1,048,576` bytes (`1 MiB`) HTTP `Range` chunks (or single-response `200 OK` on BIG-IQ `/mgmt/shared/file-transfer/downloads/`).
 - **Headers**:
   ```http
   POST /mgmt/shared/file-transfer/uploads/BIGIP-17.1.1.iso HTTP/1.1
   Host: 10.1.1.4
-  Authorization: Basic YWRtaW46UGFzc3dvcmQ=
+  Authorization: Basic <REDACTED_BASE64>
   Content-Type: application/octet-stream
   Content-Range: 0-524287/2516582400
   User-Agent: myf5-cli-go/1.0.0
@@ -397,8 +430,8 @@ $$\text{Start} = k \times 524288$$
 $$\text{End} = \min(\text{Start} + N - 1, S - 1)$$
 $$\text{Content-Range} = \text{Start}-\text{End}/S$$
 
-#### Remote File Promotion Mechanism
-When `--dest` is specified, `myf5` issues a post-upload REST request to the TMOS bash execution utility:
+#### Remote File Promotion & BIG-IQ `webd` Failover
+When `--dest` is specified on `/mgmt/shared/file-transfer/uploads/`, `myf5` issues a post-upload REST request to `/mgmt/tm/util/bash`:
 - **Endpoint**: `POST /mgmt/tm/util/bash`
 - **Request Body**:
   ```json
@@ -407,18 +440,14 @@ When `--dest` is specified, `myf5` issues a post-upload REST request to the TMOS
     "utilCmdArgs": "-c 'cp -f /var/config/rest/downloads/<filename> <destDir>/<filename>'"
   }
   ```
-If appliance bash execution is disabled by TMOS role-based access controls (RBAC), the file remains safely staged in `/var/config/rest/downloads/<filename>`.
+On BIG-IQ, `webd` blocks `/mgmt/tm/util/bash` with `403 Forbidden`; `myf5` automatically fails over (or routes directly when `--target bigiq` targets non-ISO paths like `/var/tmp`) to verified `64 KiB` SCP.
 
-### 2. Native Go SCP Sink Protocol Mechanics
+### 2. Native Go SCP Sink & Source Protocol Mechanics
 
-Rather than spawning an external OpenSSH subprocess (`/usr/bin/scp`), `myf5` drives the SCP sink protocol natively using Go's `golang.org/x/crypto/ssh` library.
+Rather than spawning an external OpenSSH subprocess (`/usr/bin/scp`), `myf5` drives the SCP sink (`scp -t`) and source (`scp -f`) protocols natively using Go's `golang.org/x/crypto/ssh` library with pre-authentication `known_hosts` verification.
 
 #### Protocol Sequence Details:
-1. **Execution Request**: The SSH client initiates an interactive channel and executes:
-   ```
-   scp -t <destDir>
-   ```
-   The remote appliance starts `scp` in sink (receive) mode targeting `<destDir>`.
+1. **Execution Request**: The SSH client verifies the appliance host key against `known_hosts` before sending credentials, initiates an interactive channel, and executes `scp -t <destDir>` (upload) or `scp -f <remotePath>` (download).
 2. **Initial Handshake**: The remote process sends an acknowledgement byte `0x00`. `myf5` validates this byte before transmitting payload headers.
 3. **File Metadata Header**: `myf5` formats a POSIX file mode control line:
    ```
@@ -426,7 +455,7 @@ Rather than spawning an external OpenSSH subprocess (`/usr/bin/scp`), `myf5` dri
    ```
    *Example*: `C0644 2516582400 BIGIP-17.1.1.iso\n`
 4. **Header Ack**: The appliance responds with `0x00` confirming the filesystem has allocated the file descriptor.
-5. **Byte Streaming**: File content is read in 64 KB buffers (`65,536` bytes) and written directly to the SSH session `StdinPipe`. Progress is continuously reported via terminal progress bars.
+5. **Byte Streaming**: File content is streamed in `64 KiB` buffers (`65,536` bytes) over the SSH channel. Progress is continuously reported via terminal progress bars.
 6. **EOF & Completion Handshake**: Upon reading local `io.EOF`, `myf5` sends a trailing null byte (`0x00`). The appliance flushes its disk buffers, closes the file, and responds with a final `0x00` completion acknowledgement.
 
 #### Appliance Destination Path Heuristics

@@ -394,3 +394,44 @@ func TestInteractiveLoop_BackAndQuit(t *testing.T) {
 		t.Errorf("expected ErrSelectQuit, got %v", errQuit)
 	}
 }
+
+func TestInteractiveLoop_NoColorAndTrueColor(t *testing.T) {
+	items := []SelectItem{
+		{ID: "1", Title: "Alpha"},
+		{ID: "2", Title: "Beta"},
+	}
+
+	// 1. NO_COLOR=1 suppresses SGR color escape sequences
+	t.Setenv("NO_COLOR", "1")
+	t.Setenv("COLORTERM", "truecolor")
+	var outNoColor bytes.Buffer
+	_, _, err := runInteractiveLoop(SelectConfig{
+		Title: "Plain Menu",
+		Items: items,
+		In:    bytes.NewReader([]byte{'\r'}),
+		Out:   &outNoColor,
+	}, 0, 0)
+	if err != nil {
+		t.Fatalf("unexpected error under NO_COLOR: %v", err)
+	}
+	if strings.Contains(outNoColor.String(), "\033[38;2;") || strings.Contains(outNoColor.String(), "\033[1;36m") {
+		t.Errorf("expected NO_COLOR to suppress SGR color codes, got %q", outNoColor.String())
+	}
+
+	// 2. COLORTERM=truecolor with NO_COLOR unset uses official F5 Surf (#009C93) & Jade (#009639) RGB SGR
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("COLORTERM", "truecolor")
+	var outTrueColor bytes.Buffer
+	_, _, err = runInteractiveLoop(SelectConfig{
+		Title: "Truecolor Menu",
+		Items: items,
+		In:    bytes.NewReader([]byte{'\r'}),
+		Out:   &outTrueColor,
+	}, 0, 0)
+	if err != nil {
+		t.Fatalf("unexpected error under truecolor: %v", err)
+	}
+	if !strings.Contains(outTrueColor.String(), "\033[1;38;2;0;156;147m") || !strings.Contains(outTrueColor.String(), "\033[1;38;2;0;150;57m") {
+		t.Errorf("expected official F5 Surf and Jade truecolor SGR codes, got %q", outTrueColor.String())
+	}
+}

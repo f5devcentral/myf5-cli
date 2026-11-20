@@ -30,20 +30,22 @@ const (
 
 // TransferOptions configures connection, authentication, and destination parameters for appliance file transfers.
 type TransferOptions struct {
-	TargetType         string         // "bigip" or "bigiq" (default: "bigip")
-	Method             TransferMethod // "auto", "icontrol", "scp" (default: "auto")
-	Username           string         // Username for appliance authentication
-	Password           string         // Password for appliance authentication
-	PasswordBytes      []byte         // Mutable byte buffer for password (cleared on Zero)
-	Port               int            // Port override (0 for default: 443 for REST, 22 for SCP)
-	IdentityFile       string         // SSH private key file path for public key authentication
-	SSHPassphrase      string         // Passphrase for encrypted private key
-	SSHPassphraseBytes []byte         // Mutable byte buffer for SSH passphrase (cleared on Zero)
-	DestDir            string         // Remote destination directory for upload (default: "/shared/images")
-	ClientCertPath     string         // Path to TLS client certificate file (PEM) for mTLS
-	ClientKeyPath      string         // Path to TLS client certificate private key file (PEM)
-	Timeout            time.Duration  // Connection timeout
-	HTTPClient         *http.Client   // Custom HTTP client (used for in-memory testing or custom transports)
+	TargetType            string         // "BIG-IP" or "BIG-IQ" (default: "BIG-IP")
+	Method                TransferMethod // "auto", "icontrol", "scp" (default: "auto")
+	Username              string         // Username for appliance authentication
+	Password              string         // Password for appliance authentication
+	PasswordBytes         []byte         // Mutable byte buffer for password (cleared on Zero)
+	Port                  int            // Port override (0 for default: 443 for REST, 22 for SCP)
+	IdentityFile          string         // SSH private key file path for public key authentication
+	SSHPassphrase         string         // Passphrase for encrypted private key
+	SSHPassphraseBytes    []byte         // Mutable byte buffer for SSH passphrase (cleared on Zero)
+	KnownHostsPath        string         // Optional OpenSSH known_hosts path for strict SSH host-key verification
+	InsecureIgnoreHostKey bool           // Explicitly bypass SSH host-key verification
+	DestDir               string         // Remote destination directory for upload (default: "/shared/images")
+	ClientCertPath        string         // Path to TLS client certificate file (PEM) for mTLS
+	ClientKeyPath         string         // Path to TLS client certificate private key file (PEM)
+	Timeout               time.Duration  // Connection timeout
+	HTTPClient            *http.Client   // Custom HTTP client (used for in-memory testing or custom transports)
 }
 
 // Zero scrubs sensitive password and passphrase bytes and clears string fields from memory.
@@ -101,9 +103,14 @@ func PushFileWithFailover(
 		return destPath, MethodSCP, nil
 
 	case MethodAuto:
-		// Determine which method to try first based on available credentials.
-		// If an SSH identity key is provided or no password / client cert was given, try SCP first.
-		trySCPFirst := opts.IdentityFile != "" || (opts.Password == "" && opts.ClientCertPath == "" && os.Getenv("BIGIP_PASSWORD") == "" && os.Getenv("BIGIQ_PASSWORD") == "")
+		cleanDest := path.Clean(destDir)
+		isBigIQ := isBigIQTarget(opts.TargetType)
+		hasRestAuth := opts.Password != "" || len(opts.PasswordBytes) > 0 || opts.ClientCertPath != "" || os.Getenv("BIGIP_PASSWORD") != "" || os.Getenv("BIGIQ_PASSWORD") != ""
+		// On BIG-IQ, webd blocks /mgmt/tm/util/bash (HTTP 403), so REST can only write to /shared/images and /var/config/rest/downloads.
+		bigIQUnsupportedRestDest := isBigIQ && cleanDest != "/shared/images" && cleanDest != "/var/config/rest/downloads"
+
+		// Determine which method to try first based on available credentials and BIG-IQ path capabilities.
+		trySCPFirst := opts.IdentityFile != "" || !hasRestAuth || bigIQUnsupportedRestDest
 
 		if trySCPFirst {
 			destPath, scpErr := pushViaSCP(ctx, host, localFile, destDir, opts, progressCb)
@@ -186,9 +193,12 @@ func DownloadFileWithFailover(
 
 	case MethodAuto:
 		// If an explicit SSH identity key (-i) was provided, prefer SCP first.
-		// Otherwise, try iControl REST first when REST credentials (password/cert) are available.
+		// Otherwise, try iControl REST first when REST credentials (password/cert) are available,
+		// except for BIG-IQ /var/tmp/qkviews downloads where BIG-IQ lacks qkview-downloads over REST.
 		hasRestAuth := opts.Password != "" || len(opts.PasswordBytes) > 0 || opts.ClientCertPath != "" || os.Getenv("BIGIP_PASSWORD") != "" || os.Getenv("BIGIQ_PASSWORD") != ""
-		tryRestFirst := opts.IdentityFile == "" && hasRestAuth
+		cleanRemote := path.Clean(remotePath)
+		bigIQQKViewDownload := isBigIQTarget(opts.TargetType) && (path.Dir(cleanRemote) == "/var/tmp/qkviews" || (!strings.HasPrefix(cleanRemote, "/") && strings.EqualFold(path.Ext(cleanRemote), ".qkview")))
+		tryRestFirst := opts.IdentityFile == "" && hasRestAuth && !bigIQQKViewDownload
 
 		if tryRestFirst {
 			savedPath, restErr := downloadViaIControl(ctx, host, remotePath, localDest, opts, progressCb)
@@ -256,6 +266,7 @@ func newClientFromOptions(host string, opts TransferOptions, defaultPort int) *C
 		Username:       user,
 		Password:       opts.Password,
 		PasswordBytes:  pwBytes,
+		TargetType:     opts.TargetType,
 		SkipTLSVerify:  true,
 		ClientCertPath: opts.ClientCertPath,
 		ClientKeyPath:  opts.ClientKeyPath,
@@ -266,6 +277,7 @@ func newClientFromOptions(host string, opts TransferOptions, defaultPort int) *C
 		return c
 	}
 	c = NewClient(host, port, user, opts.Password)
+	c.TargetType = normalizeTargetType(opts.TargetType)
 	if opts.HTTPClient != nil {
 		c.HTTPClient = opts.HTTPClient
 	} else if opts.Timeout > 0 {
@@ -283,15 +295,48 @@ func pushViaIControl(
 	client := newClientFromOptions(host, opts, 443)
 	defer client.Zero()
 
+	cleanDest := path.Clean(destDir)
+	if isBigIQTarget(opts.TargetType) {
+		if cleanDest == "/var/config/rest/downloads" {
+			return client.UploadFile(ctx, localFile, "", progressCb)
+		}
+		if cleanDest == "/shared/images" {
+			uploaded, err := client.UploadSoftwareImage(ctx, localFile, "", progressCb)
+			if err == nil {
+				return uploaded, nil
+			}
+			// If a test mock server only implements /mgmt/shared/file-transfer/uploads/, fall back cleanly.
+			if !strings.Contains(err.Error(), "HTTP 404") {
+				return "", err
+			}
+			remoteUploaded, upErr := client.UploadFile(ctx, localFile, "", progressCb)
+			if upErr != nil {
+				return "", err
+			}
+			promotedPath, copyErr := client.CopyRemoteFile(ctx, remoteUploaded, cleanDest)
+			if copyErr != nil {
+				return remoteUploaded, fmt.Errorf("uploaded to %s but promotion to %s failed: %w", remoteUploaded, cleanDest, copyErr)
+			}
+			return promotedPath, nil
+		}
+		return "", fmt.Errorf("BIG-IQ iControl REST upload only supports --dest /shared/images (via /mgmt/cm/autodeploy/software-image-uploads) or --dest /var/config/rest/downloads (via /mgmt/shared/file-transfer/uploads) because BIG-IQ webd blocks /mgmt/tm/util/bash (got --dest %q); use --method scp for other paths", destDir)
+	}
+
 	remoteUploaded, err := client.UploadFile(ctx, localFile, "", progressCb)
 	if err != nil {
 		return "", err
 	}
 
-	cleanDest := path.Clean(destDir)
 	if cleanDest != "/var/config/rest/downloads" && cleanDest != "/var/config/rest/downloads/" {
 		promotedPath, copyErr := client.CopyRemoteFile(ctx, remoteUploaded, cleanDest)
 		if copyErr != nil {
+			// If /mgmt/tm/util/bash is disabled (e.g. BIG-IP Appliance Mode) when uploading an ISO to /shared/images,
+			// fall back directly to /mgmt/cm/autodeploy/software-image-uploads/<filename>.
+			if cleanDest == "/shared/images" && strings.EqualFold(filepath.Ext(localFile), ".iso") {
+				if directISO, isoErr := client.UploadSoftwareImage(ctx, localFile, "", progressCb); isoErr == nil {
+					return directISO, nil
+				}
+			}
 			return remoteUploaded, fmt.Errorf("uploaded to %s but promotion to %s failed: %w", remoteUploaded, cleanDest, copyErr)
 		}
 		return promotedPath, nil
@@ -312,15 +357,17 @@ func newSCPOptions(host string, opts TransferOptions) SCPOptions {
 		copy(passBytes, opts.SSHPassphraseBytes)
 	}
 	return SCPOptions{
-		Host:            host,
-		Port:            opts.Port,
-		Username:        opts.Username,
-		Password:        opts.Password,
-		PasswordBytes:   pwBytes,
-		KeyPath:         opts.IdentityFile,
-		Passphrase:      opts.SSHPassphrase,
-		PassphraseBytes: passBytes,
-		Timeout:         opts.Timeout,
+		Host:                  host,
+		Port:                  opts.Port,
+		Username:              opts.Username,
+		Password:              opts.Password,
+		PasswordBytes:         pwBytes,
+		KeyPath:               opts.IdentityFile,
+		Passphrase:            opts.SSHPassphrase,
+		PassphraseBytes:       passBytes,
+		KnownHostsPath:        opts.KnownHostsPath,
+		InsecureIgnoreHostKey: opts.InsecureIgnoreHostKey,
+		Timeout:               opts.Timeout,
 	}
 }
 
@@ -407,8 +454,10 @@ func GenerateQKViewWithFailover(
 		return filename, MethodSCP, nil
 
 	case MethodAuto:
-		// If password or client certificate is provided and no key, try iControl REST first
-		tryRestFirst := opts.IdentityFile == "" && (opts.Password != "" || len(opts.PasswordBytes) > 0 || opts.ClientCertPath != "" || os.Getenv("BIGIP_PASSWORD") != "")
+		// BIG-IQ does not expose /mgmt/cm/autodeploy/qkview or /mgmt/tm/util/qkview and its webd
+		// blocks /mgmt/tm/util/bash (HTTP 403), so prefer SSH first when TargetType is BIG-IQ.
+		hasRestAuth := opts.Password != "" || len(opts.PasswordBytes) > 0 || opts.ClientCertPath != "" || os.Getenv("BIGIP_PASSWORD") != "" || os.Getenv("BIGIQ_PASSWORD") != ""
+		tryRestFirst := opts.IdentityFile == "" && hasRestAuth && !isBigIQTarget(opts.TargetType)
 
 		if tryRestFirst {
 			client := newClientFromOptions(host, opts, 443)
@@ -467,7 +516,16 @@ func GenerateQKViewWithFailover(
 // DeleteQKViewWithFailover deletes a generated QKView archive on the appliance via REST or SSH.
 func DeleteQKViewWithFailover(ctx context.Context, host, remoteFilename string, opts TransferOptions) error {
 	method := opts.Method
-	if method == MethodIControl || (method == MethodAuto && opts.IdentityFile == "" && (opts.Password != "" || len(opts.PasswordBytes) > 0 || opts.ClientCertPath != "")) {
+	if method == "" {
+		method = MethodAuto
+	}
+	hasRestAuth := opts.Password != "" || len(opts.PasswordBytes) > 0 || opts.ClientCertPath != "" || os.Getenv("BIGIP_PASSWORD") != "" || os.Getenv("BIGIQ_PASSWORD") != ""
+	if method == MethodIControl {
+		client := newClientFromOptions(host, opts, 443)
+		defer client.Zero()
+		return client.DeleteQKView(ctx, remoteFilename)
+	}
+	if method == MethodAuto && !isBigIQTarget(opts.TargetType) && opts.IdentityFile == "" && hasRestAuth {
 		client := newClientFromOptions(host, opts, 443)
 		defer client.Zero()
 		if err := client.DeleteQKView(ctx, remoteFilename); err == nil {

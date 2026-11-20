@@ -20,6 +20,9 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
+
+	"myf5-cli/pkg/client"
 )
 
 func TestCleanSSHHost(t *testing.T) {
@@ -70,6 +73,8 @@ func TestCheckAck(t *testing.T) {
 
 func TestBuildSSHClientConfig(t *testing.T) {
 	// No auth should return error
+	t.Setenv("MYF5_STRICT_HOST_KEY_CHECKING", "")
+	t.Setenv("MYF5_SSH_KNOWN_HOSTS", "")
 	_, err := BuildSSHClientConfig(SCPOptions{
 		Host:     "127.0.0.1",
 		Username: "admin",
@@ -151,6 +156,8 @@ func TestBuildSSHClientConfig(t *testing.T) {
 }
 
 func TestSCPUploadMockServer(t *testing.T) {
+	t.Setenv("MYF5_STRICT_HOST_KEY_CHECKING", "")
+	t.Setenv("MYF5_SSH_KNOWN_HOSTS", "")
 	// 1. Generate SSH server host key
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -311,6 +318,8 @@ func TestSCPUploadMockServer(t *testing.T) {
 }
 
 func TestSCPDownloadMockServer(t *testing.T) {
+	t.Setenv("MYF5_STRICT_HOST_KEY_CHECKING", "")
+	t.Setenv("MYF5_SSH_KNOWN_HOSTS", "")
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("failed generating ed25519 key: %v", err)
@@ -546,6 +555,8 @@ func TestQKViewSSHTmshFallback(t *testing.T) {
 		Password: "secret",
 		Timeout:  5 * time.Second,
 	}
+	t.Setenv("MYF5_STRICT_HOST_KEY_CHECKING", "")
+	t.Setenv("MYF5_SSH_KNOWN_HOSTS", "")
 
 	gotFile, err := GenerateQKViewSSH(t.Context(), opts, "test_tmsh.qkview", false, nil)
 	if err != nil {
@@ -564,5 +575,213 @@ func TestQKViewSSHTmshFallback(t *testing.T) {
 	mu.Unlock()
 	if count != 4 {
 		t.Fatalf("expected 4 SSH exec invocations (2 direct + 2 tmsh fallbacks), got %d", count)
+	}
+}
+
+func TestBuildSSHClientConfig_KnownHostsVerification(t *testing.T) {
+	t.Setenv("MYF5_INSECURE_IGNORE_HOST_KEY", "")
+	t.Setenv("MYF5_STRICT_HOST_KEY_CHECKING", "")
+	t.Setenv("MYF5_SSH_KNOWN_HOSTS", "")
+
+	_, goodPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goodSigner, err := ssh.NewSignerFromKey(goodPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, roguePriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rogueSigner, err := ssh.NewSignerFromKey(roguePriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var passwordSentMu sync.Mutex
+	passwordSent := false
+
+	serverConfig := &ssh.ServerConfig{
+		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+			passwordSentMu.Lock()
+			passwordSent = true
+			passwordSentMu.Unlock()
+			if c.User() == "admin" && string(pass) == "secret" {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("rejected")
+		},
+	}
+	serverConfig.AddHostKey(goodSigner)
+
+	listener, port := newPipeSSHServer()
+	defer listener.Close()
+
+	go func() {
+		for {
+			nConn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				sshConn, chans, reqs, err := ssh.NewServerConn(c, serverConfig)
+				if err != nil {
+					return
+				}
+				defer sshConn.Close()
+				go ssh.DiscardRequests(reqs)
+				for ch := range chans {
+					_ = ch.Reject(ssh.UnknownChannelType, "handshake test only")
+				}
+			}(nConn)
+		}
+	}()
+
+	tmpDir := t.TempDir()
+	hostEntry := knownhosts.Normalize(fmt.Sprintf("127.0.0.1:%d", port))
+
+	goodKH := filepath.Join(tmpDir, "known_hosts_good")
+	if err := os.WriteFile(goodKH, []byte(knownhosts.Line([]string{hostEntry}, goodSigner.PublicKey())+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	mismatchKH := filepath.Join(tmpDir, "known_hosts_mismatch")
+	if err := os.WriteFile(mismatchKH, []byte(knownhosts.Line([]string{hostEntry}, rogueSigner.PublicKey())+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	unknownKH := filepath.Join(tmpDir, "known_hosts_other")
+	if err := os.WriteFile(unknownKH, []byte(knownhosts.Line([]string{"192.0.2.99"}, goodSigner.PublicKey())+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	dialSSHTest := func(opts SCPOptions) (*ssh.Client, error) {
+		cfg, err := BuildSSHClientConfig(opts)
+		if err != nil {
+			return nil, err
+		}
+		target := net.JoinHostPort(opts.Host, strconv.Itoa(opts.Port))
+		rawConn, err := client.DialProxy(context.Background(), "tcp", target, nil)
+		if err != nil {
+			return nil, err
+		}
+		c, chans, reqs, err := ssh.NewClientConn(rawConn, target, cfg)
+		if err != nil {
+			_ = rawConn.Close()
+			return nil, err
+		}
+		return ssh.NewClient(c, chans, reqs), nil
+	}
+
+	// 1. Matching host key succeeds and authenticates
+	clientGood, err := dialSSHTest(SCPOptions{
+		Host:           "127.0.0.1",
+		Port:           port,
+		Username:       "admin",
+		Password:       "secret",
+		KnownHostsPath: goodKH,
+		Timeout:        5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("expected SSH connection to succeed with matching known_hosts key, got: %v", err)
+	}
+	_ = clientGood.Close()
+
+	// 2. Mismatched host key is rejected BEFORE password authentication is ever transmitted
+	passwordSentMu.Lock()
+	passwordSent = false
+	passwordSentMu.Unlock()
+
+	_, err = dialSSHTest(SCPOptions{
+		Host:           "127.0.0.1",
+		Port:           port,
+		Username:       "admin",
+		Password:       "secret",
+		KnownHostsPath: mismatchKH,
+		Timeout:        5 * time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "SSH host-key verification failed") {
+		t.Fatalf("expected SSH host-key verification failure for mismatched key, got: %v", err)
+	}
+	passwordSentMu.Lock()
+	leakedOnMismatch := passwordSent
+	passwordSentMu.Unlock()
+	if leakedOnMismatch {
+		t.Fatalf("SECURITY BUG: password was transmitted to SSH server despite host-key mismatch!")
+	}
+
+	// 3. Unknown host key is rejected when KnownHostsPath or MYF5_STRICT_HOST_KEY_CHECKING=1 is set
+	passwordSentMu.Lock()
+	passwordSent = false
+	passwordSentMu.Unlock()
+
+	t.Setenv("MYF5_STRICT_HOST_KEY_CHECKING", "1")
+	t.Setenv("MYF5_SSH_KNOWN_HOSTS", unknownKH)
+	_, err = dialSSHTest(SCPOptions{
+		Host:     "127.0.0.1",
+		Port:     port,
+		Username: "admin",
+		Password: "secret",
+		Timeout:  5 * time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "SSH host-key verification failed") {
+		t.Fatalf("expected strict mode to reject unknown host key, got: %v", err)
+	}
+	passwordSentMu.Lock()
+	leakedOnUnknown := passwordSent
+	passwordSentMu.Unlock()
+	if leakedOnUnknown {
+		t.Fatalf("SECURITY BUG: password was transmitted to SSH server despite unknown host key in strict mode!")
+	}
+
+	// 4. Default ~/.ssh/known_hosts rejects recorded non-loopback key mismatch while allowing unrecorded lab host
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("USERPROFILE", fakeHome)
+	t.Setenv("MYF5_STRICT_HOST_KEY_CHECKING", "")
+	t.Setenv("MYF5_SSH_KNOWN_HOSTS", "")
+
+	// Strict mode without any known_hosts file must fail fast in BuildSSHClientConfig
+	t.Setenv("MYF5_STRICT_HOST_KEY_CHECKING", "1")
+	if _, strictErr := BuildSSHClientConfig(SCPOptions{
+		Host:     "198.51.100.42",
+		Username: "admin",
+		Password: "secret",
+	}); strictErr == nil {
+		t.Errorf("expected error when MYF5_STRICT_HOST_KEY_CHECKING=1 and no known_hosts file exists")
+	}
+	t.Setenv("MYF5_STRICT_HOST_KEY_CHECKING", "")
+
+	dotSSH := filepath.Join(fakeHome, ".ssh")
+	if err := os.MkdirAll(dotSSH, 0700); err != nil {
+		t.Fatal(err)
+	}
+	defaultKH := filepath.Join(dotSSH, "known_hosts")
+	if err := os.WriteFile(defaultKH, []byte(knownhosts.Line([]string{"198.51.100.42"}, goodSigner.PublicKey())+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgDefault, err := BuildSSHClientConfig(SCPOptions{
+		Host:     "198.51.100.42",
+		Username: "admin",
+		Password: "secret",
+	})
+	if err != nil {
+		t.Fatalf("BuildSSHClientConfig with default ~/.ssh/known_hosts failed: %v", err)
+	}
+	remote42 := &net.TCPAddr{IP: net.ParseIP("198.51.100.42"), Port: 22}
+	if err := cfgDefault.HostKeyCallback("198.51.100.42:22", remote42, rogueSigner.PublicKey()); err == nil || !strings.Contains(err.Error(), "SSH host-key mismatch") {
+		t.Errorf("expected default ~/.ssh/known_hosts to reject mismatched key on 198.51.100.42, got: %v", err)
+	}
+	if err := cfgDefault.HostKeyCallback("198.51.100.42:22", remote42, goodSigner.PublicKey()); err != nil {
+		t.Errorf("expected default ~/.ssh/known_hosts to accept matching key on 198.51.100.42, got: %v", err)
+	}
+	remoteUnrecorded := &net.TCPAddr{IP: net.ParseIP("198.51.100.99"), Port: 22}
+	if err := cfgDefault.HostKeyCallback("198.51.100.99:22", remoteUnrecorded, rogueSigner.PublicKey()); err != nil {
+		t.Errorf("expected unrecorded lab host 198.51.100.99 to be accepted when strict mode is off, got: %v", err)
 	}
 }

@@ -2042,6 +2042,37 @@ func TestRunStep1AutoDetectionOptions(t *testing.T) {
 	if opts1.SerialNumber != "test-serial-999" {
 		t.Errorf("expected SerialNumber=test-serial-999, got %q", opts1.SerialNumber)
 	}
+	if opts1.ProductFamily != "BIG-IP" {
+		t.Errorf("expected ProductFamily=BIG-IP, got %q", opts1.ProductFamily)
+	}
+
+	// Option 1 with BIG-IQ QKView archive: must detect ProductFamily="BIG-IQ" and Product="BIG-IQ Centralized Management"
+	bigiqQkviewFile := filepath.Join(t.TempDir(), "bigiq.qkview")
+	{
+		var buf bytes.Buffer
+		gw := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gw)
+		for name, content := range map[string]string{
+			"VERSION":              "Product: BIG-IQ\nVersion: 8.4.0\nBuild: 0.0.1\nEdition: Final\n",
+			"config/bigip.license": "Registration Key : IQ-REG-KEY-123\nSerial Number : iq-serial-777\n",
+		} {
+			_ = tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: int64(len(content))})
+			_, _ = tw.Write([]byte(content))
+		}
+		_ = tw.Close()
+		_ = gw.Close()
+		_ = os.WriteFile(bigiqQkviewFile, buf.Bytes(), 0600)
+	}
+	var outIQ bytes.Buffer
+	inIQ := bufio.NewReader(strings.NewReader("1\n" + bigiqQkviewFile + "\nadmin\n"))
+	optsIQ := &CaseWizardOptions{}
+	stepIQ, err := runStep1AutoDetection(ctx, inIQ, &outIQ, optsIQ)
+	if err != nil || stepIQ != 2 {
+		t.Errorf("unexpected BIG-IQ step1 result: step=%d err=%v", stepIQ, err)
+	}
+	if optsIQ.ProductFamily != "BIG-IQ" || optsIQ.Product != "BIG-IQ Centralized Management" || optsIQ.SerialNumber != "iq-serial-777" {
+		t.Errorf("expected BIG-IQ family/product/serial, got %+v", optsIQ)
+	}
 
 	// Option 2: local qkview (with empty or invalid path)
 	var out bytes.Buffer
@@ -2164,6 +2195,82 @@ func TestExecutePushToApplianceSuccess(t *testing.T) {
 
 	// 2. Success with json
 	executePushToAppliance(ctx, "http://127.0.0.1", tmpFile, "icontrol", "/shared/images", "admin", 80, "", "BIG-IP", "", "", false, false, true)
+}
+
+// TestApplianceReadyExitCode drives `handleAppliance` end to end against a
+// mock appliance to pin the exit code of the `ready` command, which scripts
+// and CI gates key on.
+//
+// The unready case is a regression test: CheckReadyWithKind reports a device
+// that answers but is not ready as ("", nil) — empty kind, nil error — so the
+// command used to print NOT READY and still exit 0, and a shell gate of the
+// form `myf5 bigip ready host && deploy` would proceed against an appliance
+// that was not ready. The lab matrix caught this as "exit 0 but the device
+// reports NOT READY".
+func TestApplianceReadyExitCode(t *testing.T) {
+	newDialer := func(mux *http.ServeMux) func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c1, c2 := net.Pipe()
+			go func() {
+				defer c2.Close()
+				req, err := http.ReadRequest(bufio.NewReader(c2))
+				if err != nil {
+					return
+				}
+				rec := httptest.NewRecorder()
+				mux.ServeHTTP(rec, req)
+				_, _ = io.Copy(io.Discard, req.Body)
+				_ = req.Body.Close()
+				resp := rec.Result()
+				_ = resp.Write(c2)
+			}()
+			return c1, nil
+		}
+	}
+
+	t.Setenv("BIGIP_PASSWORD", "secret")
+	ctx := context.Background()
+
+	// Unready: neither the BIG-IP readiness route nor the BIG-IQ echo
+	// fallback reports availability, so no appliance kind is established.
+	unreadyMux := http.NewServeMux()
+	unreadyMux.HandleFunc("/mgmt/tm/sys/ready", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	unreadyMux.HandleFunc("/mgmt/shared/echo", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	client.SetDialContext(newDialer(unreadyMux))
+	code, exited := runWithExitCapture(func() {
+		handleAppliance(ctx, "bigip", []string{"ready", "http://127.0.0.1", "--port", "80"})
+	})
+	client.SetDialContext(nil)
+
+	if !exited || code != 1 {
+		t.Errorf("expected exit 1 for an unready appliance, got code=%d exited=%v", code, exited)
+	}
+
+	// Ready: the appliance answers the readiness route, so the command must
+	// still succeed and must not exit non-zero.
+	readyMux := http.NewServeMux()
+	readyMux.HandleFunc("/mgmt/tm/sys/ready", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"kind": "tm:sys:ready"}`))
+	})
+	readyMux.HandleFunc("/mgmt/tm/sys/version", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	client.SetDialContext(newDialer(readyMux))
+	code, exited = runWithExitCapture(func() {
+		handleAppliance(ctx, "bigip", []string{"ready", "http://127.0.0.1", "--port", "80"})
+	})
+	client.SetDialContext(nil)
+
+	if exited {
+		t.Errorf("expected no exit for a ready appliance, got code=%d", code)
+	}
 }
 
 func TestHandleCasesUsageAndErrors(t *testing.T) {
@@ -2294,18 +2401,23 @@ func TestHandleCasesWithMockServer(t *testing.T) {
 
 	// 1. handleCases list (open cases)
 	handleCases(ctx, []string{"list"})
+	handleCases(ctx, []string{"list", "--json"})
 
 	// 2. handleCases list --all (open & closed)
 	handleCases(ctx, []string{"list", "--all"})
+	handleCases(ctx, []string{"list", "--all", "--json"})
 
 	// 3. handleCases metadata
 	handleCases(ctx, []string{"metadata"})
+	handleCases(ctx, []string{"metadata", "--json"})
 
 	// 4. handleCases get
 	handleCases(ctx, []string{"get", "C-12345"})
+	handleCases(ctx, []string{"get", "C-12345", "--json"})
 
 	// 5. handleCases comment
 	handleCases(ctx, []string{"comment", "C-12345", "test comment note"})
+	handleCases(ctx, []string{"comment", "C-12345", "test comment note", "--json"})
 }
 
 func TestHandleIHealthWithMockServer(t *testing.T) {
@@ -2361,6 +2473,7 @@ func TestHandleIHealthWithMockServer(t *testing.T) {
 
 	// 1. handleIHealth list
 	handleIHealth(ctx, []string{"list"})
+	handleIHealth(ctx, []string{"list", "--json"})
 
 	// 2. handleIHealth upload with no args -> exit 1
 	code, exited := runWithExitCapture(func() {
@@ -2382,6 +2495,7 @@ func TestHandleIHealthWithMockServer(t *testing.T) {
 	tmpQkview := filepath.Join(t.TempDir(), "test.qkview")
 	_ = os.WriteFile(tmpQkview, []byte("fake-qkview"), 0600)
 	handleIHealth(ctx, []string{"upload", tmpQkview, "C-12345", "test description"})
+	handleIHealth(ctx, []string{"upload", tmpQkview, "C-12345", "test description", "--json"})
 
 	// 5. handleIHealth unknown action -> exit 1
 	code, exited = runWithExitCapture(func() {
@@ -2389,5 +2503,173 @@ func TestHandleIHealthWithMockServer(t *testing.T) {
 	})
 	if !exited || code != 1 {
 		t.Errorf("expected exit 1 on unknown action, got %d", code)
+	}
+}
+
+func TestResolveApplianceCreds_BIGIQPrecedenceAndKnownHosts(t *testing.T) {
+	tmpDir := t.TempDir()
+	khBigIP := filepath.Join(tmpDir, "kh_bigip")
+	khBigIQ := filepath.Join(tmpDir, "kh_bigiq")
+	khFlag := filepath.Join(tmpDir, "kh_flag")
+	emptyKH := filepath.Join(tmpDir, "kh_empty")
+	for _, p := range []string{khBigIP, khBigIQ, khFlag} {
+		if err := os.WriteFile(p, []byte("10.1.1.5 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(emptyKH, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("BIGIP_HOST", "")
+	t.Setenv("BIGIQ_HOST", "")
+	t.Setenv("BIGIP_USER", "bigip-admin")
+	t.Setenv("BIGIP_PASSWORD", "BigipSecret123")
+	t.Setenv("BIGIP_KNOWN_HOSTS", khBigIP)
+	t.Setenv("BIGIQ_USER", "bigiq-admin")
+	t.Setenv("BIGIQ_PASSWORD", "BigiqSecret456")
+	t.Setenv("BIGIQ_KNOWN_HOSTS", khBigIQ)
+
+	// 1. When targetKind is BIG-IQ, BIGIQ_* must take precedence over BIGIP_*
+	iqCreds := resolveApplianceCreds("10.1.1.5", "BIG-IQ", "", "", "", "", false)
+	if iqCreds.TargetKind != "BIG-IQ" {
+		t.Errorf("expected TargetKind BIG-IQ, got %q", iqCreds.TargetKind)
+	}
+	if iqCreds.User != "bigiq-admin" || iqCreds.Password != "BigiqSecret456" {
+		t.Errorf("expected BIGIQ_* credentials to win for BIG-IQ target, got user=%q pw=%q", iqCreds.User, iqCreds.Password)
+	}
+	if iqCreds.KnownHosts != khBigIQ {
+		t.Errorf("expected BIGIQ_KNOWN_HOSTS %q, got %q", khBigIQ, iqCreds.KnownHosts)
+	}
+
+	// 1b. Lowercase hyphenated "big-iq" and unhyphenated "bigiq" both normalize to "BIG-IQ"
+	for _, alias := range []string{"bigiq", "big-iq"} {
+		c := resolveApplianceCreds("10.1.1.5", alias, "", "", "", "", false)
+		if c.TargetKind != "BIG-IQ" || c.User != "bigiq-admin" {
+			t.Errorf("expected alias %q to normalize to BIG-IQ with bigiq-admin, got %+v", alias, c)
+		}
+	}
+
+	// 2. When targetKind is BIG-IP, BIGIP_* must take precedence over BIGIQ_*
+	ipCreds := resolveApplianceCreds("10.1.1.4", "BIG-IP", "", "", "", "", false)
+	if ipCreds.User != "bigip-admin" || ipCreds.Password != "BigipSecret123" || ipCreds.KnownHosts != khBigIP {
+		t.Errorf("expected BIGIP_* credentials to win for BIG-IP target, got %+v", ipCreds)
+	}
+
+	// 3. Explicit --known-hosts flag overrides env KnownHosts
+	overrideCreds := resolveApplianceCredsWithKnownHosts("10.1.1.5", "BIG-IQ", "", "", "", "", khFlag, false)
+	if overrideCreds.KnownHosts != khFlag {
+		t.Errorf("expected flag known_hosts %q to override env, got %q", khFlag, overrideCreds.KnownHosts)
+	}
+
+	// 4. Invalid env MYF5_SSH_KNOWN_HOSTS or empty known_hosts file exits 1
+	t.Setenv("BIGIP_KNOWN_HOSTS", "")
+	t.Setenv("BIGIQ_KNOWN_HOSTS", "")
+	t.Setenv("MYF5_SSH_KNOWN_HOSTS", filepath.Join(tmpDir, "missing_kh"))
+	code, exited := runWithExitCapture(func() {
+		resolveApplianceCreds("10.1.1.5", "BIG-IQ", "", "", "", "", false)
+	})
+	if !exited || code != 1 {
+		t.Errorf("expected exit 1 for nonexistent MYF5_SSH_KNOWN_HOSTS, got code=%d exited=%v", code, exited)
+	}
+
+	t.Setenv("MYF5_SSH_KNOWN_HOSTS", emptyKH)
+	code, exited = runWithExitCapture(func() {
+		resolveApplianceCreds("10.1.1.5", "BIG-IQ", "", "", "", "", false)
+	})
+	if !exited || code != 1 {
+		t.Errorf("expected exit 1 for empty known_hosts file, got code=%d exited=%v", code, exited)
+	}
+}
+
+func TestHandleAppliance_BIGIQReadyAndKnownHostsFlags(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	localISO := filepath.Join(tmpDir, "sample.iso")
+	if err := os.WriteFile(localISO, []byte("iso-data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. --known-hosts validation errors on handlePush, handlePull, handleAppliance
+	for _, fn := range []func(){
+		func() {
+			handlePush(ctx, []string{"10.1.1.4", localISO, "--known-hosts", filepath.Join(tmpDir, "missing")})
+		},
+		func() { handlePush(ctx, []string{"10.1.1.4", localISO, "--known-hosts="}) },
+		func() {
+			handlePull(ctx, []string{"10.1.1.4", "/shared/images/a.iso", "--known-hosts", filepath.Join(tmpDir, "missing")})
+		},
+		func() { handlePull(ctx, []string{"10.1.1.4", "/shared/images/a.iso", "--known-hosts="}) },
+		func() {
+			handleAppliance(ctx, "bigiq", []string{"info", "10.1.1.5", "--known-hosts", filepath.Join(tmpDir, "missing")})
+		},
+		func() { handleAppliance(ctx, "bigiq", []string{"info", "10.1.1.5", "--known-hosts="}) },
+		func() {
+			handleDownloads(ctx, []string{"get", "BIG-IP", "17.1", "17.1.1", "ISO", "a.iso", "--push", "10.1.1.5", "--push-known-hosts", filepath.Join(tmpDir, "missing")})
+		},
+		func() {
+			handleDownloads(ctx, []string{"get", "BIG-IP", "17.1", "17.1.1", "ISO", "a.iso", "--push", "10.1.1.5", "--push-known-hosts="})
+		},
+	} {
+		code, exited := runWithExitCapture(fn)
+		if !exited || code != 1 {
+			t.Errorf("expected exit 1 for invalid --known-hosts flag, got code=%d exited=%v", code, exited)
+		}
+	}
+
+	// 2. End-to-end `myf5 bigiq ready` wires TargetType: "BIG-IQ" (token login without loginProviderName + machineid-resolver fallback)
+	t.Setenv("BIGIP_PASSWORD", "WrongBigipPassword")
+	t.Setenv("BIGIQ_PASSWORD", "CorrectBigiqPass123")
+	t.Setenv("MYF5_SSH_KNOWN_HOSTS", "")
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/mgmt/shared/authn/login", func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "loginProviderName") || !strings.Contains(string(body), "CorrectBigiqPass123") {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":{"token":"iq-cli-tok"}}`))
+	})
+	mux.HandleFunc("/mgmt/tm/sys/ready", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
+	mux.HandleFunc("/mgmt/shared/echo", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
+	mux.HandleFunc("/mgmt/cm/system/machineid-resolver", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-F5-Auth-Token") != "iq-cli-tok" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"items":[]}`))
+	})
+
+	client.SetDialContext(func(ctx context.Context, network, addr string) (net.Conn, error) {
+		c1, c2 := net.Pipe()
+		go func() {
+			defer c2.Close()
+			req, err := http.ReadRequest(bufio.NewReader(c2))
+			if err != nil {
+				return
+			}
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			_, _ = io.Copy(io.Discard, req.Body)
+			_ = req.Body.Close()
+			resp := rec.Result()
+			_ = resp.Write(c2)
+		}()
+		return c1, nil
+	})
+	defer client.SetDialContext(nil)
+
+	code, exited := runWithExitCapture(func() {
+		handleAppliance(ctx, "bigiq", []string{"ready", "http://127.0.0.1", "--port", "80"})
+	})
+	if exited {
+		t.Errorf("expected `myf5 bigiq ready` to succeed without exiting non-zero, got code=%d", code)
 	}
 }

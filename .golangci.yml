@@ -57,3 +57,5 @@ issues:
   exclude-dirs:
     - dist
     - bin
+    - tmp
+    - testenv

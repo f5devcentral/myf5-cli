@@ -3,9 +3,11 @@ bin/
 dist/
 release-binaries/
 /myf5
+/myf5-*
 /myf5.exe
 /cmd/myf5/myf5
 /cmd/myf5/myf5.exe
+*.exe
 __debug_bin*
 *.bundle
 sbom.json
@@ -13,13 +15,24 @@ sbom.json
 *.spdx.json
 *.cdx.json
 checksums.txt
+SHA256SUMS
+BUILDINFO
+*.md5
+*.sha256
+*.sha512
+*.sig
 
 # F5 Diagnostics & Downloaded Images
 *.qkview
+*.QKVIEW
 *.ucs
+*.UCS
 *.scf
+*.SCF
 *.iso
+*.ISO
 *.img
+*.im
 *.ova
 *.ovf
 *.qcow2
@@ -32,8 +45,19 @@ checksums.txt
 *.tar
 *.tar.*
 *.zip
+*.ZIP
+*.gz
+*.xz
+*.bz2
+*.zst
+*.7z
 *.rpm
+*.deb
+*.apk
+download.bin
+*.bin
 *.part
+*.partial
 *.tmp
 
 # Test and coverage artifacts
@@ -57,44 +81,77 @@ go.work.sum
 # Credentials and secrets
 .env
 .env*
+*.env
+*.env.*
 .myf5
 .myf5*
+.aws/
+.ssh/
+.netrc
+_netrc
 *.key
 *.pem
-id_ed25519*
-id_rsa*
-id_ecdsa*
-*id_rsa*
-*id_ed25519*
-*id_ecdsa*
-*_rsa
-*_ed25519
-*_ecdsa
+*.pkcs8
 *.p12
 *.pfx
 *.ppk
-*.env
+*.jks
+*.keystore
+id_ed25519*
+id_rsa*
+id_ecdsa*
+id_dsa*
+*_id_rsa*
+*_id_ed25519*
+*_id_ecdsa*
+*_id_dsa*
+*_rsa
+*_ed25519
+*_ecdsa
+*_dsa
+known_hosts
+known_hosts.*
+known_hosts~
+.f5_credentials
+.f5_credentials*
+f5/credentials
 .f5api_credentials
-*.f5api_credentials*
-*f5api_credentials*
+.f5api_credentials*
+*.f5api_credentials
+*.f5api_credentials.*
 .ihealth_credentials
-*ihealth_credentials*
+.ihealth_credentials*
+*.ihealth_credentials
+*.ihealth_credentials.*
 *credentials*.ini
 *credentials*.json
+secrets.json
+*secret*.json
+case_inputs*.json
 
 # OS and IDE files
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 .idea/
 .vscode/
+.zed/
 .devcontainer/
 *.swp
 *.swo
+*.swn
 *~
 scratch/
 
 # Local scratch documentation & OpenAPI specifications
 internal_docs/
 openapi*.json
+openapi*.yaml
+openapi*.yml
 docs/*INTERNAL*
 docs/*_NOTICES_*.txt
 docs/*.eml
@@ -119,21 +176,36 @@ _agent/
 .antigravity*
 .gemini/
 .gemini*
+.codex/
+.codex*
 .github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
 CLAUDE.md
 GEMINI.md
 AGENTS.md
+AGENTS.override.md
 AGENT.md
+CODEX.md
+*.local.md
 .mcp.json
 
 # Local test & Terraform environments
 testenv/
 .terraform/
 .terraform.lock.hcl
+.terraformrc
+terraform.rc
 *.tfstate
 *.tfstate.*
 *.tfvars
 *.tfvars.json
+tfplan
+*.tfplan
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
 
 # Local scratch space (build outputs, logs); used instead of system /tmp
 /tmp/

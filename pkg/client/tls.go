@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
@@ -13,10 +14,35 @@ import (
 	"time"
 )
 
+// loadCustomRootCAs appends PEM certificates from MYF5_CA_BUNDLE or SSL_CERT_FILE
+// onto the system certificate pool (crucial on macOS and Windows where Go's
+// crypto/x509 ignores SSL_CERT_FILE when corporate TLS inspection is active).
+func loadCustomRootCAs() *x509.CertPool {
+	caPath := strings.TrimSpace(os.Getenv("MYF5_CA_BUNDLE"))
+	if caPath == "" {
+		caPath = strings.TrimSpace(os.Getenv("SSL_CERT_FILE"))
+	}
+	if caPath == "" {
+		return nil
+	}
+	pemBytes, err := os.ReadFile(caPath)
+	if err != nil || len(pemBytes) == 0 {
+		return nil
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		pool = x509.NewCertPool()
+	}
+	if !pool.AppendCertsFromPEM(pemBytes) {
+		return nil
+	}
+	return pool
+}
+
 // SecureTLSConfig returns a tls.Config enforcing TLS 1.2+ with modern PFS/AEAD ciphers
 // and Post-Quantum Cryptography (PQC) hybrid key encapsulation mechanisms prioritized.
 func SecureTLSConfig(insecureSkipVerify bool) *tls.Config {
-	return &tls.Config{
+	cfg := &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: insecureSkipVerify, // #nosec G402 -- isolated to lab appliances when explicitly set
 		CipherSuites: []uint16{
@@ -39,6 +65,12 @@ func SecureTLSConfig(insecureSkipVerify bool) *tls.Config {
 			tls.CurveP384,
 		},
 	}
+	if !insecureSkipVerify {
+		if rootCAs := loadCustomRootCAs(); rootCAs != nil {
+			cfg.RootCAs = rootCAs
+		}
+	}
+	return cfg
 }
 
 // NewProductionTransport returns a hardened http.Transport with explicit phase timeouts and proxy support.

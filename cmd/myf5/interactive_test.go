@@ -94,6 +94,16 @@ func TestCompleteLine(t *testing.T) {
 		t.Errorf("expected completeLine('proxy sh') -> ('proxy show ', 11, true), got (%q, %d, %v)", line, pos, ok)
 	}
 
+	// BIG-IQ qkview and --known-hosts flag completion
+	line, pos, ok = completeLine("bigiq qkv", 9)
+	if !ok || line != "bigiq qkview " || pos != 13 {
+		t.Errorf("expected completeLine('bigiq qkv') -> ('bigiq qkview ', 13, true), got (%q, %d, %v)", line, pos, ok)
+	}
+	line, pos, ok = completeLine("push --known-h", 14)
+	if !ok || line != "push --known-hosts " || pos != 19 {
+		t.Errorf("expected completeLine('push --known-h') -> ('push --known-hosts ', 19, true), got (%q, %d, %v)", line, pos, ok)
+	}
+
 	// Longest common prefix match
 	line, pos, ok = completeLine("bigi", 4)
 	if !ok || line != "bigi" || pos != 4 {

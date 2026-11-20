@@ -13,16 +13,18 @@ A high-performance, memory-safe, zero-dependency Go CLI and client library for *
 
 - **Memory-Safe & Statically Compiled**: Compiles to a single static binary with zero external runtime dependencies (`CGO_ENABLED=0`).
 - **Wire-Speed Multi-GB Streaming**: Streams 2.5 GB – 10+ GB BIG-IP ISOs, OVAs, and qcow2 images directly to disk using `io.TeeReader` with simultaneous SHA-256 verification and minimal RAM footprint (< 10 MB).
-- **Direct Appliance Push & Pull Engine**: Transfers software ISOs, engineering hotfixes, diagnostic QKViews, and configuration files directly between local systems and BIG-IP / BIG-IQ appliances with **automatic seamless failover** between **iControl REST chunked transfer** (HTTPS) and **native Go SCP streaming** (SSH).
-- **End-to-End Download & Deploy**: Downloads an image from MyF5, cryptographically verifies its SHA-256 checksum, and immediately pushes it to target appliances in a single atomic pipeline (`myf5 downloads get ... --push <host>`).
-- **Automated GeoIP Deployment Engine**: Downloads, stages, unpacks, installs, and reloads MaxMind/Digital Envoy GeoIP databases into BIG-IP TMOS in a single atomic pipeline (`myf5 geoip` or `myf5 downloads get ... --apply-geoip`).
-- **Outbound Corporate & Lab Proxy Support**: Universal support for HTTP, HTTPS, SOCKS5, and SOCKS5h proxies via `--proxy` or standard environment variables (`ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`). Includes diagnostic probe command `myf5 proxy`.
-- **Interactive Case Creation Wizard**: Step-by-step TUI wizard (`myf5 wizard`) with automatic serial and version discovery from live appliances or `.qkview` files, interactive multiline text buffer with undo (`Ctrl+Z`), and dry-run safety gates.
+- **Direct Appliance Push & Pull Engine**: First-class parity across **BIG-IP TMOS** (`myf5 bigip`) and **BIG-IQ Centralized Management** (`myf5 bigiq`), plus unified top-level commands (`ready`, `info`, `serial`, `qkview`, `push`, `pull`, `geoip`) with `--target auto|bigip|bigiq` and **automatic seamless failover** between **iControl REST chunked transfer** (`512 KiB` upload / `1 MiB` download chunks over HTTPS) and **verified native Go SCP streaming** (`64 KiB` chunks over SSH).
+- **End-to-End Download & Deploy**: Downloads an image from MyF5 (delivered via signed AWS CloudFront `*.cloudfront.net` CDN URLs), cryptographically verifies its SHA-256 checksum, and immediately pushes it to target appliances in a single atomic pipeline (`myf5 downloads get ... --push <host>`).
+- **Automated GeoIP Deployment Engine (BIG-IP Only)**: Downloads, stages to `/shared/tmp`, unpacks `.rpm` packages into `/shared/GeoIP` via `rpm2cpio | cpio -idmv`, installs, and reloads MaxMind/Digital Envoy GeoIP databases via `tmsh load sys geoip` (per K11176) in a single atomic pipeline (`myf5 geoip` or `myf5 downloads get ... --apply-geoip`). Automatically rejected on BIG-IQ.
+- **Outbound Corporate & Lab Proxy Support**: Universal support for HTTP, HTTPS, SOCKS5, and SOCKS5h proxies via `--proxy` or standard environment variables (`ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`). Includes proxy configuration command `myf5 proxy` and connectivity probe `myf5 doctor`.
+- **Interactive Case Creation Wizard**: Step-by-step TUI wizard (`myf5 wizard`) and CLI flags (`--from-appliance`, `--from-device`, `--from-bigip`, `--from-bigiq`) with automatic serial and version discovery from live BIG-IP / BIG-IQ appliances or offline `.qkview` files, interactive multiline text buffer (`:u`/`:undo`, `:p`/`:show`, `:e`/`:edit`, `:b`/`:back`), and dry-run safety gates.
+- **Machine-Readable `--json` Output**: Structured JSON output across `cases` (`list`, `get`, `comment`, `metadata`), `ihealth` (`list`, `upload`), `info` (`myf5 info`, `myf5 bigip info`, `myf5 bigiq info`), `serial` (`myf5 serial`, `myf5 bigip serial`, `myf5 bigiq serial`), `push` (`myf5 push`, `myf5 bigip push`, `myf5 bigiq push`), and `geoip` (`myf5 geoip`, `myf5 bigip geoip`).
 - **Signal Handling & Interruption Safety**: Comprehensive trap for `SIGINT` (Ctrl+C) and `SIGTERM` across all commands; ensures partial `.part` downloads are pruned, active SSH channels and TCP sockets are closed gracefully, and no orphaned processes linger.
 - **MyF5 Downloads API Client**: Targets `api.software.downloads.f5.com` over the `/v1/downloads-management/v1/...` gateway route with automatic fallback and HTTP 429 rate-limit backoff.
-- **Strict Zero-Secret CLI Security**: Rejects plaintext secret arguments (`--password`, `--client-secret`) with exit code `2` to protect against process table (`ps aux`) and shell history leaks.
-- **Multiple Credential Formats**: Automatically discovers credentials in `F5_CLIENT_ID` / `F5_CLIENT_SECRET` environment variables or `~/.f5api_credentials` (both `KEY=VALUE` and `[profile]` INI formats).
-- **Interactive Console & REPL**: Menu-driven terminal TUI for catalog exploration (`myf5 downloads browse`) and interactive CLI shell (`myf5 interactive`).
+- **Two-Tier Zero-Secret CLI Security**: Tier 1 (`pkg/auth.CheckNoCLISecrets` on `os.Args[1:]`) blocks all 22 global secret flags with exit code `2` before command dispatch; Tier 2 (`cmd/myf5.rejectSecretFlag`) blocks `--pass`, `-P`, and `--ssh-passphrase` with exit code `1` in appliance flag parsers.
+- **SSH `known_hosts` & TLS Hardening**: Pre-authentication OpenSSH `known_hosts` verification (`--known-hosts`, `--push-known-hosts`, `BIGIP_KNOWN_HOSTS`, `BIGIQ_KNOWN_HOSTS`, `MYF5_SSH_KNOWN_HOSTS`, `MYF5_STRICT_HOST_KEY_CHECKING=1`), PQC hybrid TLS 1.2–1.3 (`X25519MLKEM768`), strict appliance TLS (`MYF5_STRICT_APPLIANCE_TLS=1`), and custom root CA bundle loading (`MYF5_CA_BUNDLE`, `SSL_CERT_FILE`).
+- **Multiple Credential Formats**: Automatically discovers credentials in `F5_CLIENT_ID` / `F5_CLIENT_SECRET` (and dedicated `IHEALTH_CLIENT_ID` / `IHEALTH_CLIENT_SECRET`) environment variables or `~/.f5api_credentials` (both `KEY=VALUE` and `[profile]` INI formats).
+- **Interactive Console & REPL**: Menu-driven terminal TUI for catalog exploration (`myf5 downloads browse`) and interactive CLI shell (`myf5 interactive`), with `NO_COLOR` support for disabling ANSI color sequences.
 - **Universal Appliance Connectivity**: Seamlessly supports standard LAN management IPs (`10.1.1.4`), custom management ports (`:8443`), and cloud/UDF access proxies (`https://*.access.udf.f5.com`).
 
 ---
@@ -61,6 +63,7 @@ myf5-cli/
 │   ├── CODEOWNERS              # Repository ownership mappings
 │   └── pull_request_template.md
 ├── docs/
+│   ├── how-it-works.html       # Interactive architecture, protocol, and CLI visual reference
 │   ├── cli.md                  # Comprehensive CLI reference manual
 │   ├── appliance_push.md       # Appliance software deployment, hotfix, and GeoDB push guide
 │   ├── downloads.md            # Downloads catalog taxonomy, GeoDB automation & direct push
@@ -129,30 +132,43 @@ client_secret = prod_oauth2_client_secret
 
 ### 2. Environment Variables (Recommended for CI/CD)
 ```bash
-# Cloud API credentials
+# MyF5 Cloud API credentials (audience=api://ciam-api-myf5, scope=myf5_scope)
 export F5_CLIENT_ID="your_oauth2_client_id"
 export F5_CLIENT_SECRET="your_oauth2_client_secret"
+export F5_API_KEY="optional_api_usage_key_override"
 
-# Appliance credentials
+# Dedicated iHealth API credentials (audience=api://ciam-api-ihealth, empty scope per K000130498)
+export IHEALTH_CLIENT_ID="your_ihealth_client_id"
+export IHEALTH_CLIENT_SECRET="your_ihealth_client_secret"
+
+# Appliance credentials & host pinning
 export BIGIP_USER="admin"
 export BIGIP_PASSWORD="YourAppliancePassword"
 export BIGIQ_USER="admin"
 export BIGIQ_PASSWORD="YourAppliancePassword"
+
+# Optional SSH host-key & TLS verification controls
+export MYF5_SSH_KNOWN_HOSTS="$HOME/.ssh/known_hosts"
+export MYF5_STRICT_HOST_KEY_CHECKING=1
+export MYF5_STRICT_APPLIANCE_TLS=1
+export MYF5_CA_BUNDLE="/path/to/custom-ca-bundle.pem"
 ```
 
 ---
 
 ## CLI Usage Guide
 
+> **Machine-Readable JSON Output (`--json`):** Structured JSON output is supported across `cases` (`list`, `get`, `comment`, `metadata`), `ihealth` (`list`, `upload`), `info` (`myf5 info`, `myf5 bigip info`, `myf5 bigiq info`), `serial` (`myf5 serial`, `myf5 bigip serial`, `myf5 bigiq serial`), `push` (`myf5 push`, `myf5 bigip push`, `myf5 bigiq push`), and `geoip` (`myf5 geoip`, `myf5 bigip geoip`).
+
 ### 1. Diagnostic Doctor
-Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud endpoints:
+Verify API credentials, DNS resolution, and TCP port 443 egress to all 8 F5 Cloud endpoints:
 ```bash
 ./bin/myf5 doctor
 ```
 
 ### 2. MyF5 Software Downloads & Catalog
 ```bash
-# Interactive menu browser
+# Interactive menu browser (set NO_COLOR=1 to disable ANSI color output)
 ./bin/myf5 downloads browse
 
 # List available product families
@@ -164,42 +180,50 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
 # List release versions and containers
 ./bin/myf5 downloads versions BIG-IP big-ip_v17.x
 
+# List container categories for a version
+./bin/myf5 downloads containers BIG-IP big-ip_v17.x 17.1.1
+
 # List downloadable files for a version
 ./bin/myf5 downloads files BIG-IP big-ip_v17.x 17.1.1
 
 # Download software image with wire-speed streaming and live progress bar
 ./bin/myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 "Virtual Edition" BIGIP-17.1.1-0.0.6.ALL.qcow2.tar.gz -o /var/tmp/bigip.qcow2.tar.gz
 
-# Download and push directly to BIG-IP appliance in one step
+# Download and push directly to BIG-IP or BIG-IQ appliance in one step
 ./bin/myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 "Base Software & ISO Releases" BIGIP-17.1.1-0.0.6.iso \
     -o /var/tmp/BIGIP-17.1.1.iso \
     --push 10.1.1.4 \
+    --push-target bigip \
     --push-method icontrol \
-    --push-dest /shared/images
+    --push-dest /shared/images \
+    --push-known-hosts ~/.ssh/known_hosts
 ```
 
 ### 3. MyF5 Support Cases
 ```bash
-# List open cases (add --all to include closed ones)
+# List open cases (add --all to include closed ones, --json for machine-readable output)
 ./bin/myf5 cases list
-./bin/myf5 cases list --all
+./bin/myf5 cases list --all --json
 
 # Retrieve case creation schema metadata (products, versions, priorities, timezones)
-./bin/myf5 cases metadata
+./bin/myf5 cases metadata --json
 
 # Show one case in full, including contacts and the email thread
 ./bin/myf5 cases get 01234567
+./bin/myf5 cases get 01234567 --json
 
-# Add a note or comment to a case (supports interactive multiline editor with Ctrl+Z undo)
+# Add a note or comment to a case (supports interactive multiline editor with :u/:undo, :p/:show, :e/:edit)
 # Case numbers are 8 digits, no prefix - exactly as MyF5 displays them.
-./bin/myf5 cases comment 01234567 "Investigating packet captures."
+./bin/myf5 cases comment 01234567 "Investigating packet captures." --json
 # Or launch multiline buffer:
 ./bin/myf5 cases comment 01234567
 
 # Open a case. The API requires an entitlement identifier validated against F5
-# support records: BIG-IP and hardware families use --serial; NGINX and Aspen Mesh
+# support records: BIG-IP, BIG-IQ, and hardware families use --serial; NGINX and Aspen Mesh
 # use --subscription. (To open a case without an entitlement identifier, use the
 # MyF5 web portal; see docs/cli.md for details.)
+# Supports --from-appliance, --from-device, --from-bigip, and --from-bigiq to auto-populate
+# product family, product, version, serial, and hostname from a live device or .qkview.
 # Use --dry-run first to check the payload without calling the API.
 ./bin/myf5 cases create --family BIG-IP --product "BIG-IP LTM" \
   --version 17.5.1 --serial ABC1234 \
@@ -208,9 +232,16 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
   --email you@example.com \
   --timezone "(GMT -5:00) US/Eastern - Eastern Standard Time"
 
+# Or auto-populate from a live BIG-IP / BIG-IQ or local .qkview file:
+./bin/myf5 cases create --from-appliance 10.1.1.4 \
+  --subject "SSL handshake failures" --description "Details here." \
+  --priority "4 - General Assistance" --reason "General Problem" \
+  --email you@example.com \
+  --timezone "(GMT -5:00) US/Eastern - Eastern Standard Time" --dry-run
+
 # Alternatively, launch the interactive step-by-step case creation wizard.
-# Supports auto-detecting serials/versions from live BIG-IPs or .qkview files,
-# auto-detects your system timezone, multiline buffer with Ctrl+Z undo, and dry-run safety gates:
+# Step 1 auto-detects both BIG-IP and BIG-IQ (ProductFamily: "BIG-IQ",
+# Product: "BIG-IQ Centralized Management") from live appliances or .qkview files:
 ./bin/myf5 cases wizard
 # Or top-level shortcut:
 ./bin/myf5 wizard
@@ -220,90 +251,110 @@ Verify API credentials, DNS resolution, and TCP port 443 egress to all F5 Cloud 
 ```bash
 # List previously uploaded QKViews
 ./bin/myf5 ihealth list
+./bin/myf5 ihealth list --json
 
 # Upload a local QKView bundle to iHealth, optionally attaching it to a case
-./bin/myf5 ihealth upload /path/to/appliance.qkview "01234567" "Initial triage bundle"
+./bin/myf5 ihealth upload /path/to/appliance.qkview "01234567" "Initial triage bundle" --json
 ```
 
 ### 5. BIG-IP Appliance Management & Image Transfer (Auto Failover)
-Works with local management IPs, lab appliances, or cloud/UDF external access proxies with automatic failover between iControl REST and SCP.
+Works with local management IPs, lab appliances, or cloud/UDF external access proxies with automatic failover between iControl REST (`512 KiB` upload / `1 MiB` download chunks) and verified `64 KiB` SCP.
 
 ```bash
-# Check TMOS readiness (via local IP)
+# Check TMOS readiness (exits 0 when READY, 1 when NOT READY or on error)
 ./bin/myf5 bigip ready 10.1.1.4
 
 # Check TMOS readiness (via UDF or Cloud Access Proxy)
 ./bin/myf5 bigip ready https://00000000-0000-0000-0000-000000000000.access.udf.f5.com/
 
-# Inspect appliance version, edition, and build details
-./bin/myf5 bigip info 10.1.1.4 --user admin
+# Inspect appliance version, edition, build, and serial (supports live host or offline .qkview)
+./bin/myf5 bigip info 10.1.1.4 --user admin --json
+./bin/myf5 bigip info /var/tmp/support.qkview --json
 
-# Retrieve chassis/system serial number (useful for case creation)
-./bin/myf5 bigip serial 10.1.1.4 --user admin
+# Retrieve chassis/system serial number (supports live host or offline .qkview)
+./bin/myf5 bigip serial 10.1.1.4 --user admin --json
 
 # Trigger full, non-truncating QKView generation (-s0) with resilient download
-./bin/myf5 bigip qkview 10.1.1.4 --user admin
+./bin/myf5 bigip qkview 10.1.1.4 --user admin --known-hosts ~/.ssh/known_hosts
 
 # Push software ISO to BIG-IP /shared/images with automatic failover (default)
-./bin/myf5 bigip push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --dest /shared/images
+./bin/myf5 bigip push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --dest /shared/images --json
 
-# Push engineering hotfix via native Go SCP over SSH
-./bin/myf5 bigip push 10.1.1.4 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso --method scp -i ~/.ssh/f5_key
+# Push engineering hotfix via native Go SCP over SSH with known_hosts verification
+./bin/myf5 bigip push 10.1.1.4 /var/tmp/Hotfix-BIGIP-17.1.1.1.0.0.2-ENG.iso --method scp -i ~/.ssh/f5_key --known-hosts ~/.ssh/known_hosts
 
-# Download software image from BIG-IP appliance
+# Pull/download software image or QKView from BIG-IP appliance
 ./bin/myf5 bigip download 10.1.1.4 /shared/images/BIGIP-17.1.1.iso -o ./BIGIP-17.1.1.iso
+./bin/myf5 bigip pull 10.1.1.4 /var/tmp/qkviews/support.qkview -o ./support.qkview
 
-# Push and activate GeoIP database archive in one step
-./bin/myf5 bigip push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --apply-geoip
+# Push and activate GeoIP database archive in one step (BIG-IP only)
+./bin/myf5 bigip push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --apply-geoip --json
 # Or invoke direct GeoIP installer
-./bin/myf5 bigip geoip 10.1.1.4 /var/tmp/ip-geolocation-default.zip
+./bin/myf5 bigip geoip 10.1.1.4 /var/tmp/ip-geolocation-default.zip --json
 ```
 
 ### 6. BIG-IQ Centralized Management & Image Transfer
+First-class parity with `myf5 bigip` across `ready`, `info`, `serial`, `qkview`, `push`, `pull`, and `download`:
+- **Token Authentication**: Authenticates via `POST /mgmt/shared/authn/login` with `{"username":"...","password":"..."}` (omitting `loginProviderName` per BIG-IQ REST API schema, with automatic fallback if required), refreshes tokens within 5 minutes of expiry via `POST /mgmt/shared/authn/exchange`, and stops immediately after 1 failed login attempt (`loginFailedErr`) to prevent appliance account lockout.
+- **Readiness Probes**: When `/mgmt/tm/sys/ready` returns `403`/`404` on BIG-IQ, `ready` automatically probes `/mgmt/shared/echo`, `/mgmt/cm/system/machineid-resolver`, and `/mgmt/shared/failover-state` (exiting `0` when `READY` and `1` when `NOT READY` or on error).
+- **System Info & Serial**: Queries `/mgmt/shared/identified-devices/config/device-info` and `/mgmt/shared/resolver/device-groups/cm-shared-all-big-iqs/devices`, keeping hardware `ChassisSerialNumber` (`serialNumber`) distinct from UUID `machineId`.
+- **Upload, Download & QKView**: Streams `.iso` images to `/mgmt/cm/autodeploy/software-image-uploads/<filename>`, fails over (or routes directly for non-ISO paths like `/var/tmp`) to verified `64 KiB` SCP when `webd` blocks `/mgmt/tm/util/bash` (`403 Forbidden`), supports single-response `200 OK` and `1 MiB` HTTP `Range` downloads from `/mgmt/shared/file-transfer/downloads/`, and routes `qkview` directly to SSH/SCP (`/var/tmp`) when REST QKView endpoints are restricted.
+
 ```bash
-# Check BIG-IQ management plane readiness
+# Check BIG-IQ management plane readiness (exits 0 when READY, 1 when NOT READY)
 ./bin/myf5 bigiq ready 192.0.2.50
 
-# Inspect BIG-IQ system version, edition, and build details
-./bin/myf5 bigiq info 192.0.2.50 --user admin
+# Inspect BIG-IQ system version, edition, build, and serial (live host or offline .qkview)
+./bin/myf5 bigiq info 192.0.2.50 --user admin --json
 
-# Retrieve BIG-IQ chassis/system serial number
-./bin/myf5 bigiq serial 192.0.2.50 --user admin
+# Retrieve BIG-IQ chassis/system serial number (live host or offline .qkview)
+./bin/myf5 bigiq serial 192.0.2.50 --user admin --json
+
+# Generate and retrieve diagnostic QKView from BIG-IQ
+./bin/myf5 bigiq qkview 192.0.2.50 --user admin --known-hosts ~/.ssh/known_hosts
 
 # Push software ISO to BIG-IQ central repository (auto failover)
-./bin/myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --dest /shared/images
+./bin/myf5 bigiq push 192.0.2.50 /var/tmp/BIGIP-17.1.1.iso --dest /shared/images --json
 
-# Download file from BIG-IQ repository
+# Pull/download software ISO or QKView from BIG-IQ repository
+./bin/myf5 bigiq pull 192.0.2.50 /shared/images/BIGIP-17.1.1.iso -o ./BIGIP-17.1.1.iso
 ./bin/myf5 bigiq download 192.0.2.50 /shared/images/BIGIP-17.1.1.iso -o ./BIGIP-17.1.1.iso
 ```
 
-### 7. Unified Appliance Push & Pull (Auto Failover)
+### 7. Unified Appliance Commands (`ready`, `info`, `serial`, `qkview`, `push`, `pull`)
+Top-level appliance commands automatically detect or accept `--target auto|bigip|bigiq` (accepting `"BIG-IQ"`, `"big-iq"`, `"bigiq"`, `"BIG-IP"`, `"big-ip"`, `"bigip"`, or `"auto"`):
 ```bash
-# Push file to any appliance with target selection and auto failover
-./bin/myf5 push 10.1.1.4 /var/tmp/ip-geolocation-default.zip --target bigip --dest /var/tmp
+# Top-level readiness, info, serial, and QKView shortcuts
+./bin/myf5 ready 10.1.1.4
+./bin/myf5 info 10.1.1.4 --json
+./bin/myf5 serial 10.1.1.4 --json
+./bin/myf5 qkview 10.1.1.4
 
-# Pull file from any appliance with auto failover
-./bin/myf5 pull 10.1.1.4 /var/log/ltm -o ./ltm.log --method scp -u root -i ~/.ssh/id_ed25519
+# Push file to any appliance with target selection and auto failover
+./bin/myf5 push 10.1.1.4 /var/tmp/BIGIP-17.1.1.iso --target bigip --dest /shared/images --known-hosts ~/.ssh/known_hosts
+
+# Pull .iso or .qkview from /shared/images, /var/config/rest/downloads, /var/tmp, or /shared/tmp
+./bin/myf5 pull 10.1.1.4 /var/tmp/qkviews/support.qkview -o ./support.qkview --target auto -i ~/.ssh/id_ed25519 --known-hosts ~/.ssh/known_hosts
 ```
 
-### 8. Automated GeoIP Deployment Engine
-Automate the end-to-end lifecycle of MaxMind / Digital Envoy GeoIP updates (askF5 K11176 / K78974041):
+### 8. Automated GeoIP Deployment Engine (BIG-IP Only)
+Automate the end-to-end lifecycle of MaxMind / Digital Envoy GeoIP updates on **BIG-IP** appliances (AskF5 K11176 / K78974041). Rejected on BIG-IQ because BIG-IQ Centralized Management does not host TMM GeoIP tables. Stages the `.zip` to `/shared/tmp`, unpacks `.rpm` files into `/shared/GeoIP` via `rpm2cpio | cpio -idmv`, and runs `tmsh load sys geoip`:
 ```bash
-# Download latest GeoIP update package and apply to appliance in a single pipeline:
+# Download latest GeoIP update package and apply to BIG-IP in a single pipeline:
 ./bin/myf5 downloads get "BIG-IP" "big-ip_v17.x" "17.1.1" "GeoLocationUpdates" \
     "ip-geolocation-default.zip" -o /var/tmp/geoip.zip \
     --push 10.1.1.4 --apply-geoip
 
 # Or apply an already downloaded archive directly to a BIG-IP:
-./bin/myf5 geoip 10.1.1.4 /var/tmp/ip-geolocation-default.zip
+./bin/myf5 geoip 10.1.1.4 /var/tmp/ip-geolocation-default.zip --json
 ```
 
 ### 9. Outbound Corporate & Lab Proxy Support
 `myf5` supports outbound HTTP, HTTPS, SOCKS5, and SOCKS5h proxies for corporate networks and isolated lab environments:
 ```bash
-# Probe and test proxy connectivity:
-./bin/myf5 proxy
-./bin/myf5 proxy --proxy socks5://proxy.corp.internal:1080
+# View active proxy configuration and probe connectivity via doctor:
+./bin/myf5 proxy show
+./bin/myf5 --proxy socks5://proxy.corp.internal:1080 doctor
 
 # Run commands through proxy via global flag:
 ./bin/myf5 --proxy socks5://10.0.0.1:1080 doctor
@@ -322,13 +373,14 @@ Launch a guided terminal interface that validates input at every step:
 # Or:
 ./bin/myf5 cases wizard
 ```
-- Auto-detects serial number and TMOS version from a live appliance IP or local `.qkview` archive.
+- Step 1 auto-detects serial number, product family, product name, and version from a live **BIG-IP** or **BIG-IQ** (`ProductFamily: "BIG-IQ"`, `Product: "BIG-IQ Centralized Management"`) appliance IP/hostname or local `.qkview` archive.
+- Non-interactive `myf5 cases create` also supports `--from-appliance`, `--from-device`, `--from-bigip`, and `--from-bigiq`.
 - System timezone detection automatically maps to F5's expected string representation.
-- Multiline description text buffer supports live editing with undo (`Ctrl+Z`) and redo (`Ctrl+Y`).
+- Multiline description text buffer (`:m`) supports line-by-line undo (`:u` / `:undo`), buffer preview (`:p` / `:show`), external editor launch (`:e` / `:edit`), and bi-directional step/field back navigation (`:b` / `:back`).
 - Pre-submission dry-run safety review ensures you never open an accidental case against production.
 
 ### 11. Interactive Console REPL & Tab Completion
-Launch an interactive Read-Eval-Print-Loop (REPL) shell with built-in `TAB` autocompletion (for commands, subcommands, and flags), command history, and isolated per-command `Ctrl+C` handling:
+Launch an interactive Read-Eval-Print-Loop (REPL) shell with built-in `TAB` autocompletion (for commands, subcommands, and flags), command history, and isolated per-command `Ctrl+C` handling (respects `NO_COLOR` to disable ANSI color codes in interactive selectors):
 ```bash
 ./bin/myf5 interactive
 # Or aliases (or invoke `./bin/myf5` with no arguments in a terminal TTY):
@@ -359,23 +411,27 @@ myf5> exit
   Instead of buffering 2.5 GB – 10+ GB BIG-IP ISOs/OVAs into RAM, the streaming engine pipelines chunked HTTP packets directly into disk writes and SHA-256 hashing in a single pass. Memory footprint remains constant at **< 10 MB RAM** regardless of download file size.
 - **Atomic Verification & Promotion:** Downloads are written to a `.part` temporary file and verified against authoritative checksums before atomic promotion to the target filename.
 
-### 2. Zero-Secret Defense-in-Depth Architecture
-- **Process Table Isolation:** Any flag attempting to inject raw credentials (`--password`, `--client-secret`) is trapped by `auth.CheckNoCLISecrets` before flag parsing, exiting with code `2`. This prevents credentials from appearing in `/proc/$PID/cmdline` or `ps aux` listings visible to other unprivileged users on multi-user jump boxes.
-- **Shell History Protection:** Because secrets cannot be provided via arguments, commands stored in `~/.bash_history`, `~/.zsh_history`, and auditing agents (e.g., Falco, auditd) remain free of secrets.
+### 2. Two-Tier Zero-Secret Defense-in-Depth Architecture
+- **Tier 1 Global Pre-Dispatch Rejection (`pkg/auth.CheckNoCLISecrets` on `os.Args[1:]`, Exit Code `2`):** Before command dispatch or flag evaluation, `myf5` scans `os.Args[1:]` and immediately aborts with exit code `2` if any of the 22 global secret flags are present: `--password`, `-password`, `--pw`, `-pw`, `--client-secret`, `-client-secret`, `--clientsecret`, `-clientsecret`, `--secret`, `-secret`, `--token`, `-token`, `--access-token`, `-access-token`, `--api-key`, `-api-key`, `--apikey`, `-apikey`, `--auth-token`, `-auth-token`, `--key`, `-key`.
+- **Tier 2 Appliance Subcommand Flag Rejection (`cmd/myf5.rejectSecretFlag`, Exit Code `1`):** Appliance subcommand flag parsers additionally trap and reject `--pass`, `-P`, and `--ssh-passphrase` with exit code `1`.
+- **Process Table & Shell History Isolation:** Prevents credentials from appearing in `/proc/$PID/cmdline`, `ps aux`, `~/.bash_history`, `~/.zsh_history`, or host audit logs (Falco, `auditd`).
+- **Encrypted SSH Keys via `ssh-agent`:** Private keys specified with `-i` / `--identity` (or `--push-key`) never prompt for a passphrase on the command line; encrypted SSH private keys are supported via `SSH_AUTH_SOCK` (`ssh-agent`).
+- **Pre-Authentication SSH `known_hosts` Verification:** Supports `--known-hosts <path>`, `--push-known-hosts <path>`, `BIGIP_KNOWN_HOSTS`, `BIGIQ_KNOWN_HOSTS`, and `MYF5_SSH_KNOWN_HOSTS`. Setting `MYF5_STRICT_HOST_KEY_CHECKING=1` (`true`/`yes`) enforces strict OpenSSH `known_hosts` verification before sending credentials (rejecting unknown, mismatched, and `@revoked` host keys). In default mode, `~/.ssh/known_hosts` is checked if present and any key mismatch or `@revoked` marker is rejected before credentials are sent, while unknown ephemeral lab hosts are allowed if no entry matches.
+- **TLS 1.2–1.3, PQC Hybrid Suites & Custom CA Bundles:** Cloud APIs enforce `pkg/client.SecureTLSConfig` (TLS 1.2–1.3 with post-quantum hybrid `X25519MLKEM768` and 256-bit AEAD cipher suites). Appliance iControl REST clients default to `SkipTLSVerify: true` for self-signed management certificates unless `MYF5_STRICT_APPLIANCE_TLS=1` (`true`/`yes`) is set or mTLS (`--cert` / `--cert-key`) is used. Custom root CA bundles are loaded via `MYF5_CA_BUNDLE` or `SSL_CERT_FILE`.
 - **Hierarchical Credential Resolution:**
   ```
-  1. OS Environment Variables (F5_CLIENT_ID / F5_CLIENT_SECRET, BIGIP_PASSWORD / BIGIQ_PASSWORD)
+  1. OS Environment Variables (F5_CLIENT_ID / F5_CLIENT_SECRET, IHEALTH_CLIENT_ID / IHEALTH_CLIENT_SECRET, BIGIP_PASSWORD / BIGIQ_PASSWORD)
        │ (Not Found)
        ▼
   2. File: ~/.f5api_credentials (Permissions 0600, INI profile support)
        │ (Not Found)
        ▼
-  3. SSH Keys / Agent (SCP method: ~/.ssh/id_*, $SSH_AUTH_SOCK)
+  3. SSH Keys / Agent (SCP method: -i <key>, ~/.ssh/id_*, $SSH_AUTH_SOCK)
        │ (Not Found)
        ▼
   4. Interactive Masked Terminal Prompt (Echo suppressed via term.ReadPassword)
   ```
-- **Masked Diagnostics:** Diagnostic utilities (`myf5 doctor`) mask all secret strings, displaying only non-sensitive metadata (e.g. `Client ID: 9x8*************************`).
+- **Masked Diagnostics:** Diagnostic utilities (`myf5 doctor`) mask all secret strings, displaying only non-sensitive metadata.
 
 ### 3. Interruption Safety & Resource Cleanup (CTRL+C / SIGINT / SIGTERM)
 - **Top-Level Signal Trapping:** Global context (`signal.NotifyContext`) traps interruption signals across all CLI operations, ensuring clean cancellation rather than abrupt process termination.
@@ -388,6 +444,7 @@ myf5> exit
 
 | Guide | Description |
 | :--- | :--- |
+| **[Interactive Visual Architecture (`docs/how-it-works.html`)](docs/how-it-works.html)** | Interactive visual guide covering OAuth2/CIAM, CloudFront streaming, BIG-IP/BIG-IQ failover, and Zero-Secret enforcement. |
 | **[CLI Reference Manual](docs/cli.md)** | Full reference for all commands, subcommands, arguments, and exit codes. |
 | **[Appliance Push & Deployment Guide](docs/appliance_push.md)** | Direct streaming of ISOs, hotfixes, and GeoDB updates to BIG-IP and BIG-IQ via iControl REST and SCP. |
 | **[MyF5 Downloads & GeoDB Guide](docs/downloads.md)** | Catalog hierarchy, automated GeoDB updates, and end-to-end download & push workflows. |

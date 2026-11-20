@@ -66,6 +66,20 @@ const DefaultUploadChunkSize = 512 * 1024
 // Chunks are transferred sequentially with Content-Range headers and progress callbacks.
 // On success, the file is deposited at /var/config/rest/downloads/<filename> on the appliance.
 func (c *Client) UploadFile(ctx context.Context, localPath string, remoteFilename string, progressCb func(transferred, total int64)) (string, error) {
+	return c.uploadToEndpoint(ctx, localPath, remoteFilename, "/mgmt/shared/file-transfer/uploads", "/var/config/rest/downloads", progressCb)
+}
+
+// UploadSoftwareImage streams a local software image (.iso) directly into /shared/images/<filename>
+// via /mgmt/cm/autodeploy/software-image-uploads/<filename> without requiring /mgmt/tm/util/bash.
+func (c *Client) UploadSoftwareImage(ctx context.Context, localPath string, remoteFilename string, progressCb func(transferred, total int64)) (string, error) {
+	return c.uploadToEndpoint(ctx, localPath, remoteFilename, "/mgmt/cm/autodeploy/software-image-uploads", "/shared/images", progressCb)
+}
+
+func (c *Client) uploadToEndpoint(
+	ctx context.Context,
+	localPath, remoteFilename, endpointPrefix, destDir string,
+	progressCb func(transferred, total int64),
+) (string, error) {
 	file, err := os.Open(localPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open local file: %w", err)
@@ -77,12 +91,22 @@ func (c *Client) UploadFile(ctx context.Context, localPath string, remoteFilenam
 		return "", fmt.Errorf("failed to stat local file: %w", err)
 	}
 	totalSize := stat.Size()
+	if totalSize == 0 {
+		return "", fmt.Errorf("cannot upload empty (0-byte) file %q via iControl REST", localPath)
+	}
 
 	if remoteFilename == "" {
 		remoteFilename = filepath.Base(localPath)
 	}
+	if strings.ContainsAny(remoteFilename, `/\`) || strings.Contains(remoteFilename, "..") {
+		return "", fmt.Errorf("invalid remote filename %q: path separators and traversal are prohibited", remoteFilename)
+	}
+	remotePath := path.Join(destDir, remoteFilename)
+	if err := ValidateRemoteAppliancePath(remotePath); err != nil {
+		return "", fmt.Errorf("invalid remote upload target: %w", err)
+	}
 
-	url := fmt.Sprintf("%s/mgmt/shared/file-transfer/uploads/%s", c.BaseURL(), remoteFilename)
+	url := fmt.Sprintf("%s%s/%s", c.BaseURL(), strings.TrimRight(endpointPrefix, "/"), remoteFilename)
 	chunkSize := DefaultUploadChunkSize
 	buf := make([]byte, chunkSize)
 	var offset int64 = 0
@@ -115,7 +139,7 @@ func (c *Client) UploadFile(ctx context.Context, localPath string, remoteFilenam
 			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 				b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 				resp.Body.Close()
-				return "", fmt.Errorf("chunk upload failed with HTTP %d: %s", resp.StatusCode, string(b))
+				return "", fmt.Errorf("chunk upload failed with HTTP %d: %s", resp.StatusCode, summarizeHTTPErrorBody(b))
 			}
 			resp.Body.Close()
 
@@ -133,7 +157,6 @@ func (c *Client) UploadFile(ctx context.Context, localPath string, remoteFilenam
 		}
 	}
 
-	remotePath := fmt.Sprintf("/var/config/rest/downloads/%s", remoteFilename)
 	return remotePath, nil
 }
 
@@ -177,10 +200,11 @@ func (c *Client) CopyRemoteFile(ctx context.Context, srcPath, destDir string) (s
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+		summary := summarizeHTTPErrorBody(b)
 		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
-			return "", fmt.Errorf("remote copy via TMOS bash utility (/mgmt/tm/util/bash) returned HTTP %d (bash utility may be disabled or appliance in Appliance Mode): %s\nRemediation: Use '--method scp' to write directly to %s without invoking bash", resp.StatusCode, strings.TrimSpace(string(b)), destDir)
+			return "", fmt.Errorf("remote copy via TMOS bash utility (/mgmt/tm/util/bash) returned HTTP %d (bash utility may be disabled, blocked by BIG-IQ webd, or appliance in Appliance Mode): %s\nRemediation: Use '--method scp' to write directly to %s without invoking bash", resp.StatusCode, summary, destDir)
 		}
-		return "", fmt.Errorf("remote copy failed with HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return "", fmt.Errorf("remote copy failed with HTTP %d: %s", resp.StatusCode, summary)
 	}
 
 	return destPath, nil

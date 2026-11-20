@@ -717,6 +717,8 @@ System Information
 		Password: "secret",
 		Timeout:  2 * time.Second,
 	}
+	t.Setenv("MYF5_STRICT_HOST_KEY_CHECKING", "")
+	t.Setenv("MYF5_SSH_KNOWN_HOSTS", "")
 
 	info, err := GetSystemInfoSSH(context.Background(), opts)
 	if err != nil {

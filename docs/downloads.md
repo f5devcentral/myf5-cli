@@ -90,13 +90,16 @@ MyF5 CDN ---> io.TeeReader ---> SHA-256 Checksum Verification
 | Flag | Default | Description |
 | :--- | :--- | :--- |
 | `--push <host>` | *Required for push* | Target BIG-IP or BIG-IQ appliance IP, hostname, or URL. |
-| `--push-method <method>` | `icontrol` | Transfer protocol: `icontrol` (HTTPS) or `scp` (SSH). |
-| `--push-dest <path>` | `/shared/images` or `/var/tmp` | Remote directory on appliance (e.g., `/shared/images` or `/shared/GeoIP`). |
-| `--push-target <target>` | `BIG-IP` | Appliance operating system type: `BIG-IP` or `BIG-IQ`. |
+| `--push-method <method>` | `auto` | Transfer protocol: `auto`, `icontrol` (`512 KiB` HTTPS chunks), or `scp` (`64 KiB` SSH chunks). |
+| `--push-dest <path>` | `/shared/images` or `/var/tmp` | Remote directory on appliance (e.g., `/shared/images` or `/var/tmp`). |
+| `--push-target <target>` | `BIG-IP` | Appliance type: `auto`, `bigip`, or `bigiq` (accepts `"BIG-IQ"`, `"big-iq"`, `"bigiq"`, `"BIG-IP"`, `"big-ip"`, `"bigip"`). |
 | `--push-user <user>` | `$BIGIP_USER` / `"admin"` | Appliance administrative user. |
 | `--push-port <port>` | `443` (iControl) / `22` (SCP) | Appliance management port. |
-| `--push-key <key>` | *Auto-detected* | SSH private key path for SCP authentication. |
-| `--apply-geoip` | `false` | Automatically extract and apply GeoIP RPMs to TMM via `geoip_update_data` post-upload. |
+| `--push-key <key>` | *Auto-detected* | SSH private key path for SCP authentication (encrypted keys supported via `SSH_AUTH_SOCK` `ssh-agent`). |
+| `--push-known-hosts <path>` | `~/.ssh/known_hosts` | OpenSSH `known_hosts` file for host-key verification before sending credentials (`BIGIP_KNOWN_HOSTS`, `BIGIQ_KNOWN_HOSTS`, `MYF5_SSH_KNOWN_HOSTS`). |
+| `--push-cert <path>` / `--push-cert-key <path>` | *Optional* | TLS client certificate and private key for mTLS (`BIGIP_CERT` / `BIGIP_KEY`, `BIGIQ_CERT` / `BIGIQ_KEY`). |
+| `--apply-geoip` | `false` | **BIG-IP only:** Stage `.zip` to `/shared/tmp`, unpack `.rpm` files into `/shared/GeoIP` via `rpm2cpio \| cpio -idmv`, and run `tmsh load sys geoip` (per K11176). Rejected on BIG-IQ. |
+| `--keep-extracted` | `false` | Retain extracted GeoIP staging files on the BIG-IP appliance after installation. |
 
 ### Practical Examples
 
@@ -107,20 +110,21 @@ myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 \
     -o /var/tmp/BIGIP-17.1.1.iso \
     --push 10.1.1.4 \
     --push-method icontrol \
-    --push-dest /shared/images
+    --push-dest /shared/images \
+    --push-known-hosts ~/.ssh/known_hosts
 ```
 
-#### 2. Automated Download & Push of Updated GeoDB Package
-Stage the update archive in `/var/tmp` on the appliance (supported by both iControl REST and SCP whitelist):
+#### 2. Automated Download & One-Step GeoIP Activation on BIG-IP
+Stage and activate the GeoIP archive automatically on a BIG-IP appliance (rejected on BIG-IQ because BIG-IQ Centralized Management does not host TMM GeoIP tables):
 ```bash
 myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 \
     "GeoLocationUpdates" "ip-geolocation-default.zip" \
     -o /var/tmp/ip-geolocation-default.zip \
     --push 10.1.1.4 \
-    --push-method scp \
-    --push-dest /var/tmp
+    --apply-geoip \
+    --push-known-hosts ~/.ssh/known_hosts
 ```
-*Post-transfer on BIG-IP*: Unpack the `.zip` archive in `/shared/tmp/` and execute `geoip_update_data -f <rpm_path>` for each component RPM, then verify via `geoip_lookup <ip>` and `tmsh load sys geoip` (see [Appliance Push Guide](appliance_push.md)).
+*Under the hood on BIG-IP*: Stages the `.zip` archive to `/shared/tmp`, unpacks the `.rpm` files into `/shared/GeoIP` via `rpm2cpio | cpio -idmv` (and `geoip_update_data -f`), and executes `tmsh load sys geoip` (per K11176; see [Appliance Push Guide](appliance_push.md)).
 
 #### 3. Download Engineering Hotfix and Push to BIG-IQ Software Repository
 ```bash
@@ -130,7 +134,8 @@ myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 \
     --push 192.0.2.50 \
     --push-target bigiq \
     --push-method scp \
-    --push-dest /shared/images
+    --push-dest /shared/images \
+    --push-known-hosts ~/.ssh/known_hosts
 ```
 
 For complete technical details on appliance transfer mechanisms, refer to the [Appliance Push Guide](appliance_push.md).
@@ -157,13 +162,13 @@ HTTP TLS Stream ---> io.TeeReader ---> SHA-256 Hasher
 
 ---
 
-## Regional Mirror Selection
+## AWS CloudFront (`*.cloudfront.net`) Signed CDN Delivery & Regional Mirrors
 
-The MyF5 Downloads API generates signed CDN download URLs distributed across global geographic regions:
-- `USA - EAST COAST` (Default Americas CloudFront distribution)
-- `IRELAND` (European CloudFront distribution)
+The MyF5 Downloads API (`api.software.downloads.f5.com`) generates time-limited, cryptographically signed **Amazon CloudFront (`*.cloudfront.net`)** CDN download URLs distributed across global geographic regions:
+- `USA - EAST COAST` (Default Americas AWS CloudFront distribution)
+- `IRELAND` (European AWS CloudFront distribution)
 
-`myf5` automatically selects the optimal mirror for low latency and high bandwidth, while validating the SHA-256 digest regardless of mirror location.
+`myf5` automatically selects the optimal regional CloudFront mirror for low latency and high bandwidth, streams the artifact over TLS 1.2–1.3 (`pkg/client.SecureTLSConfig` with PQC hybrid `X25519MLKEM768` and 256-bit AEAD suites), and validates the SHA-256 digest regardless of mirror location. Ensure outbound HTTPS (TCP 443) firewall policies permit `*.cloudfront.net` alongside `api.software.downloads.f5.com` (see [Network, DNS & Firewall Architecture](network_and_firewall.md)).
 
 ---
 
@@ -179,7 +184,7 @@ The leading `/v1` represents the API gateway route version and the inner `/v1` r
 
 ### Client Architecture
 - **Authoritative Endpoint**: `myf5-cli` connects to `https://api.software.downloads.f5.com` by default.
-- **No Query Key**: Requests authenticate using the OAuth 2.0 Bearer token and do not include a `k` query parameter.
+- **Authentication & Gateway Fallback**: Requests authenticate using the OAuth 2.0 Bearer token (`F5_CLIENT_ID` / `F5_CLIENT_SECRET`, `audience=api://ciam-api-myf5`, `scope=myf5_scope`) without a `k` query parameter on the primary endpoint, and automatically include `F5_API_KEY` (`?k=<APIKey>`) if fallback gateway routing is invoked.
 - **OAuth 2.0 CIAM Alignment**:
   - Primary token issuer (Auth0): `https://idp.identity.f5.com/oauth/token`
   - Dedicated Okta CIAM authorization server: `https://identity.account.f5.com/oauth2/ausp95yxb4ShxMGvW357/v1/token` with scope `myf5_scope` and audience `api://ciam-api-myf5`.

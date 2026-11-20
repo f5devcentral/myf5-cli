@@ -6,55 +6,107 @@
   <title>How myf5-cli Works — Interactive Architecture & Engineering Guide</title>
   <style>
     :root {
-      --bg-canvas: #090d16;
-      --bg-surface: #111827;
-      --bg-surface-elevated: #1f2937;
-      --bg-card: #151e2e;
-      --border-subtle: #263347;
-      --border-focus: #3b82f6;
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dim: #6b7280;
-      --f5-red: #e42313;
-      --f5-red-hover: #c51d0f;
-      --f5-red-glow: rgba(228, 35, 19, 0.25);
-      --accent-blue: #38bdf8;
-      --accent-green: #34d399;
-      --accent-amber: #fbbf24;
-      --accent-purple: #c084fc;
-      --accent-cyan: #22d3ee;
-      --code-bg: #0b1120;
-      --code-text: #e2e8f0;
-      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
-      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5);
-      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6);
+      /* Official F5 Brand Color Palette */
+      --f5-red: #E4002B;
+      --f5-tangerine: #F29A36;
+      --f5-jade: #009639;
+      --f5-surf: #009C93;
+      --f5-bay: #0072B0;
+      --f5-river: #0E41AA;
+      --f5-eggplant: #933DCC;
+      --f5-raspberry: #AB2782;
+      --f5-white: #FFFFFF;
+      --f5-black: #000000;
+
+      /* Official F5 Brand Ramp Tints & Shades */
+      --f5-red-tint: #FF6B7A;
+      --f5-red-shade: #B80022;
+      --f5-tangerine-tint: #F7BC74;
+      --f5-tangerine-shade: #C97316;
+      --f5-tangerine-deep: #9E5400;
+      --f5-jade-tint: #2FD16C;
+      --f5-jade-shade: #00702A;
+      --f5-surf-tint: #29D6CC;
+      --f5-surf-shade: #00736C;
+      --f5-bay-tint: #38B2F0;
+      --f5-bay-shade: #005585;
+      --f5-river-tint: #5C8FF5;
+      --f5-river-shade: #092D78;
+      --f5-eggplant-tint: #C385EB;
+      --f5-eggplant-shade: #6F289E;
+      --f5-raspberry-tint: #E06BB9;
+      --f5-raspberry-shade: #801A60;
+
+      /* Pure Neutral Black / Gray / White Surface Ramp */
+      --f5-neutral-900: #121212;
+      --f5-neutral-850: #1C1C1C;
+      --f5-neutral-800: #262626;
+      --f5-neutral-700: #333333;
+      --f5-neutral-600: #595959;
+      --f5-neutral-400: #8C8C8C;
+      --f5-neutral-200: #D9D9D9;
+      --f5-neutral-100: #EFEFEF;
+      --f5-neutral-50: #F7F7F7;
+
+      /* Dark Theme Semantic Tokens */
+      --bg-canvas: var(--f5-black);
+      --bg-surface: var(--f5-neutral-900);
+      --bg-surface-elevated: var(--f5-neutral-800);
+      --bg-card: var(--f5-neutral-850);
+      --border-subtle: var(--f5-neutral-700);
+      --border-focus: var(--f5-bay);
+      --text-main: var(--f5-white);
+      --text-muted: var(--f5-neutral-200);
+      --text-dim: var(--f5-neutral-400);
+      --f5-red-hover: var(--f5-red-shade);
+      --f5-red-glow: rgba(228, 0, 43, 0.28);
+      --f5-jade-glow: rgba(0, 150, 57, 0.28);
+      --f5-tangerine-glow: rgba(242, 154, 54, 0.75);
+      --accent-red: var(--f5-red-tint);
+      --accent-blue: var(--f5-bay-tint);
+      --accent-green: var(--f5-jade-tint);
+      --accent-amber: var(--f5-tangerine);
+      --accent-purple: var(--f5-eggplant-tint);
+      --accent-cyan: var(--f5-surf-tint);
+      --accent-magenta: var(--f5-raspberry-tint);
+      --code-bg: var(--f5-black);
+      --code-text: var(--f5-neutral-100);
+      --terminal-bg: var(--f5-black);
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.6), 0 2px 4px -2px rgba(0, 0, 0, 0.6);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.7), 0 4px 6px -4px rgba(0, 0, 0, 0.7);
       --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     }
 
     [data-theme="light"] {
-      --bg-canvas: #f8fafc;
-      --bg-surface: #ffffff;
-      --bg-surface-elevated: #f1f5f9;
-      --bg-card: #ffffff;
-      --border-subtle: #cbd5e1;
-      --border-focus: #2563eb;
-      --text-main: #0f172a;
-      --text-muted: #475569;
-      --text-dim: #64748b;
-      --f5-red: #d32011;
-      --f5-red-hover: #b31a0d;
-      --f5-red-glow: rgba(211, 32, 17, 0.15);
-      --accent-blue: #0284c7;
-      --accent-green: #059669;
-      --accent-amber: #d97706;
-      --accent-purple: #9333ea;
-      --accent-cyan: #0891b2;
-      --code-bg: #0f172a;
-      --code-text: #f8fafc;
-      --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+      --bg-canvas: var(--f5-neutral-50);
+      --bg-surface: var(--f5-white);
+      --bg-surface-elevated: var(--f5-neutral-100);
+      --bg-card: var(--f5-white);
+      --border-subtle: var(--f5-neutral-200);
+      --border-focus: var(--f5-river);
+      --text-main: var(--f5-black);
+      --text-muted: var(--f5-neutral-600);
+      --text-dim: var(--f5-neutral-600);
+      --f5-red: #E4002B;
+      --f5-red-hover: var(--f5-red-shade);
+      --f5-red-glow: rgba(228, 0, 43, 0.16);
+      --f5-jade-glow: rgba(0, 150, 57, 0.2);
+      --f5-tangerine-glow: rgba(242, 154, 54, 0.6);
+      --accent-red: var(--f5-red);
+      --accent-blue: var(--f5-bay);
+      --accent-green: var(--f5-jade-shade);
+      --accent-amber: var(--f5-tangerine-deep);
+      --accent-purple: var(--f5-eggplant);
+      --accent-cyan: var(--f5-surf-shade);
+      --accent-magenta: var(--f5-raspberry);
+      --code-bg: var(--f5-neutral-100);
+      --code-text: var(--f5-black);
+      --terminal-bg: var(--f5-neutral-900);
+      --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.08);
       --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.12);
     }
 
     * {
@@ -120,7 +172,7 @@
       align-items: center;
       justify-content: center;
       font-weight: 800;
-      color: #fff;
+      color: var(--f5-white);
       font-family: var(--font-mono);
       font-size: 1rem;
       box-shadow: 0 0 12px var(--f5-red-glow);
@@ -136,13 +188,13 @@
       display: inline-flex;
       align-items: center;
       gap: 0.35rem;
-      background: rgba(52, 211, 153, 0.12);
+      background: rgba(0, 150, 57, 0.14);
       color: var(--accent-green);
       font-size: 0.75rem;
       font-weight: 600;
       padding: 0.2rem 0.55rem;
       border-radius: 9999px;
-      border: 1px solid rgba(52, 211, 153, 0.3);
+      border: 1px solid rgba(0, 150, 57, 0.4);
     }
 
     .badge-offline::before {
@@ -224,7 +276,7 @@
     }
 
     .hero h1 span.highlight {
-      background: linear-gradient(135deg, var(--f5-red), #ff7875);
+      background: linear-gradient(135deg, var(--f5-red), var(--f5-tangerine));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
@@ -279,12 +331,12 @@
       justify-content: center;
       font-size: 1.25rem;
       font-weight: 700;
-      color: #fff;
+      color: var(--f5-white);
     }
 
-    .icon-cloud { background: linear-gradient(135deg, #0284c7, #38bdf8); }
-    .icon-appliance { background: linear-gradient(135deg, #b91c1c, var(--f5-red)); }
-    .icon-diag { background: linear-gradient(135deg, #7c3aed, #a855f7); }
+    .icon-cloud { background: linear-gradient(135deg, var(--f5-river), var(--f5-bay)); }
+    .icon-appliance { background: linear-gradient(135deg, var(--f5-red), var(--f5-raspberry)); }
+    .icon-diag { background: linear-gradient(135deg, var(--f5-eggplant), var(--f5-surf)); }
 
     .pillar-title {
       font-size: 1.15rem;
@@ -329,7 +381,7 @@
       font-family: var(--font-mono);
       font-size: 0.8rem;
       font-weight: 700;
-      color: var(--f5-red);
+      color: var(--accent-red);
       text-transform: uppercase;
       letter-spacing: 0.05em;
       margin-bottom: 0.25rem;
@@ -412,7 +464,7 @@
     }
 
     .workflow-tab.active .tab-step-num {
-      color: var(--f5-red);
+      color: var(--accent-red);
     }
 
     /* Simulator Canvas Area */
@@ -430,7 +482,7 @@
 
     .sim-diagram-col {
       padding: 1.5rem;
-      background: radial-gradient(circle at 50% 50%, rgba(30, 41, 59, 0.4) 0%, transparent 80%);
+      background: radial-gradient(circle at 50% 50%, rgba(0, 114, 176, 0.14) 0%, transparent 80%);
       border-right: 1px solid var(--border-subtle);
       display: flex;
       flex-direction: column;
@@ -475,7 +527,7 @@
     .sim-btn-primary {
       background: var(--f5-red);
       border-color: var(--f5-red);
-      color: #fff;
+      color: var(--f5-white);
     }
 
     .sim-btn-primary:hover {
@@ -525,7 +577,7 @@
 
     .svg-node-box.success {
       stroke: var(--accent-green);
-      filter: drop-shadow(0 0 8px rgba(52, 211, 153, 0.25));
+      filter: drop-shadow(0 0 8px var(--f5-jade-glow));
     }
 
     .svg-node-box.blocked {
@@ -571,20 +623,20 @@
 
     .svg-packet {
       fill: var(--accent-amber);
-      filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.8));
+      filter: drop-shadow(0 0 6px var(--f5-tangerine-glow));
     }
 
     /* Right Column: Interactive Terminal Inspector */
     .sim-terminal-col {
-      background: var(--code-bg);
+      background: var(--terminal-bg);
       display: flex;
       flex-direction: column;
     }
 
     .terminal-header {
-      background: rgba(0, 0, 0, 0.3);
+      background: rgba(0, 0, 0, 0.35);
       padding: 0.6rem 1rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      border-bottom: 1px solid var(--f5-neutral-700);
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -601,21 +653,21 @@
       border-radius: 50%;
     }
 
-    .dot-red { background: #ef4444; }
-    .dot-yellow { background: #f59e0b; }
-    .dot-green { background: #10b981; }
+    .dot-red { background: var(--f5-red); }
+    .dot-yellow { background: var(--f5-tangerine); }
+    .dot-green { background: var(--f5-jade); }
 
     .terminal-title {
       font-family: var(--font-mono);
       font-size: 0.75rem;
-      color: var(--text-muted);
+      color: var(--f5-neutral-200);
     }
 
     .terminal-body {
       padding: 1.25rem;
       font-family: var(--font-mono);
       font-size: 0.825rem;
-      color: var(--code-text);
+      color: var(--f5-neutral-100);
       overflow-y: auto;
       max-height: 400px;
       flex-grow: 1;
@@ -631,7 +683,7 @@
     }
 
     .terminal-ts {
-      color: var(--text-dim);
+      color: var(--f5-neutral-400);
       user-select: none;
     }
 
@@ -639,11 +691,11 @@
       font-weight: 700;
     }
 
-    .tag-info { color: var(--accent-blue); }
-    .tag-ok { color: var(--accent-green); }
-    .tag-failover { color: var(--accent-amber); }
-    .tag-sec-err { color: #f87171; }
-    .tag-cmd { color: var(--accent-purple); }
+    .tag-info { color: var(--f5-bay-tint); }
+    .tag-ok { color: var(--f5-jade-tint); }
+    .tag-failover { color: var(--f5-tangerine); }
+    .tag-sec-err { color: var(--f5-red-tint); }
+    .tag-cmd { color: var(--f5-eggplant-tint); }
 
     /* Mechanism Inspector Drawer */
     .sim-deep-dive {
@@ -708,8 +760,8 @@
       margin-bottom: 0.75rem;
     }
 
-    .badge-rest { background: rgba(56, 189, 248, 0.15); color: var(--accent-blue); border: 1px solid rgba(56, 189, 248, 0.3); }
-    .badge-scp { background: rgba(52, 211, 153, 0.15); color: var(--accent-green); border: 1px solid rgba(52, 211, 153, 0.3); }
+    .badge-rest { background: rgba(0, 114, 176, 0.16); color: var(--accent-blue); border: 1px solid rgba(0, 114, 176, 0.4); }
+    .badge-scp { background: rgba(0, 150, 57, 0.16); color: var(--accent-green); border: 1px solid rgba(0, 150, 57, 0.4); }
 
     .protocol-title {
       font-size: 1.25rem;
@@ -728,21 +780,23 @@
     }
 
     .protocol-list li {
-      display: flex;
-      align-items: flex-start;
-      gap: 0.5rem;
+      position: relative;
+      padding-left: 1.1rem;
     }
 
     .protocol-list li::before {
       content: "•";
+      position: absolute;
+      left: 0;
+      top: 0;
       color: var(--f5-red);
       font-weight: bold;
     }
 
     /* Failover Callout Box */
     .failover-engine-box {
-      background: linear-gradient(135deg, rgba(228, 35, 19, 0.08), rgba(251, 191, 36, 0.08));
-      border: 1px solid rgba(228, 35, 19, 0.25);
+      background: linear-gradient(135deg, rgba(228, 0, 43, 0.1), rgba(242, 154, 54, 0.1));
+      border: 1px solid rgba(228, 0, 43, 0.32);
       border-radius: 12px;
       padding: 1.5rem;
       display: flex;
@@ -756,7 +810,7 @@
       height: 56px;
       border-radius: 12px;
       background: var(--f5-red);
-      color: #fff;
+      color: var(--f5-white);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -811,7 +865,7 @@
     .filter-pill.active {
       background: var(--f5-red);
       border-color: var(--f5-red);
-      color: #fff;
+      color: var(--f5-white);
     }
 
     .search-input-wrap {
@@ -883,11 +937,36 @@
     .cmd-category-tag {
       font-size: 0.7rem;
       font-family: var(--font-mono);
+      font-weight: 600;
       padding: 0.15rem 0.45rem;
       border-radius: 4px;
       background: var(--bg-surface-elevated);
       color: var(--text-muted);
       border: 1px solid var(--border-subtle);
+    }
+
+    .cmd-card[data-category="cloud"] .cmd-category-tag {
+      color: var(--accent-blue);
+      border-color: rgba(0, 114, 176, 0.4);
+      background: rgba(0, 114, 176, 0.12);
+    }
+
+    .cmd-card[data-category="appliance"] .cmd-category-tag {
+      color: var(--accent-cyan);
+      border-color: rgba(0, 156, 147, 0.4);
+      background: rgba(0, 156, 147, 0.12);
+    }
+
+    .cmd-card[data-category="diagnostics"] .cmd-category-tag {
+      color: var(--accent-purple);
+      border-color: rgba(147, 61, 204, 0.4);
+      background: rgba(147, 61, 204, 0.12);
+    }
+
+    .cmd-card[data-category="infra"] .cmd-category-tag {
+      color: var(--accent-magenta);
+      border-color: rgba(171, 39, 130, 0.4);
+      background: rgba(171, 39, 130, 0.12);
     }
 
     .cmd-desc {
@@ -899,7 +978,7 @@
 
     .cmd-snippet-box {
       background: var(--code-bg);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border-subtle);
       border-radius: 6px;
       padding: 0.6rem 0.75rem;
       font-family: var(--font-mono);
@@ -976,7 +1055,7 @@
       border-radius: 50%;
       background: var(--bg-surface-elevated);
       border: 1px solid var(--border-subtle);
-      color: var(--f5-red);
+      color: var(--accent-red);
       font-weight: 700;
       font-family: var(--font-mono);
       font-size: 0.85rem;
@@ -1085,15 +1164,19 @@
     }
 
     .result-safe {
-      background: rgba(52, 211, 153, 0.1);
-      border: 1px solid rgba(52, 211, 153, 0.3);
-      color: #6ee7b7;
+      background: rgba(0, 150, 57, 0.12);
+      border: 1px solid rgba(0, 150, 57, 0.4);
+      color: var(--accent-green);
     }
 
     .result-blocked {
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      color: #fca5a5;
+      background: rgba(228, 0, 43, 0.12);
+      border: 1px solid rgba(228, 0, 43, 0.4);
+      color: var(--f5-red-tint);
+    }
+
+    [data-theme="light"] .result-blocked {
+      color: var(--f5-red-shade);
     }
 
     /* Network Endpoints Table */
@@ -1136,6 +1219,7 @@
     .network-table code {
       font-family: var(--font-mono);
       font-size: 0.8rem;
+      color: var(--code-text);
       background: var(--code-bg);
       padding: 0.15rem 0.35rem;
       border-radius: 4px;
@@ -1212,7 +1296,7 @@
       <div class="hero-eyebrow">Interactive Architectural Guide</div>
       <h1>How <span class="highlight">myf5-cli</span> Works</h1>
       <p class="lead">
-        A single memory-safe, zero-dependency Go binary bridging your local workstation to MyF5 Cloud APIs, iHealth Diagnostics, and BIG-IP/BIG-IQ TMOS appliances.
+        A single memory-safe, statically compiled Go binary (<code>CGO_ENABLED=0</code>, zero external runtime dependencies) bridging your local workstation to MyF5 Cloud APIs, iHealth Diagnostics, and BIG-IP TMOS and BIG-IQ Centralized Management appliances.
       </p>
     </section>
 
@@ -1225,9 +1309,10 @@
           <h2 class="pillar-title">1. MyF5 Cloud APIs</h2>
         </div>
         <p class="pillar-body">
-          Streams multi-gigabyte ISOs, hotfixes, and GeoIP databases with continuous SHA-256 verification and creates/queries official customer support cases over OAuth2 CIAM.
+          Authenticates via OAuth 2.0 <code>client_credentials</code> (defaulting to Auth0 <code>https://idp.identity.f5.com/oauth/token</code>, or Okta CIAM <code>https://identity.account.f5.com/oauth2/ausp95yxb4ShxMGvW357/v1/token</code> when <code>F5_AUTH_FQDN</code> targets <code>account.f5.com</code>) using <code>F5_CLIENT_ID</code> / <code>F5_CLIENT_SECRET</code> (<code>audience=api://ciam-api-myf5</code>, <code>scope=myf5_scope</code>) plus <code>?k=&lt;F5_API_KEY&gt;</code> for <code>support.apis.f5.com</code> (and automatic Downloads gateway fallback). Streams multi-GB ISOs, hotfixes, and GeoIP databases from regional <strong>AWS CloudFront (<code>*.cloudfront.net</code>)</strong> presigned URLs via <code>io.TeeReader</code> into <code>.part</code> files with single-pass SHA-256 verification and atomic <code>os.Rename</code>.
         </p>
         <div class="pillar-tags">
+          <span class="pillar-tag">pkg/auth</span>
           <span class="pillar-tag">pkg/downloads</span>
           <span class="pillar-tag">pkg/cases</span>
           <span class="pillar-tag">io.TeeReader</span>
@@ -1241,12 +1326,12 @@
           <h2 class="pillar-title">2. BIG-IP &amp; BIG-IQ</h2>
         </div>
         <p class="pillar-body">
-          Direct wire-speed appliance orchestration. Pushes software images and GeoIP databases, inspects hardware serials, and generates QKViews with automatic REST-to-SCP failover.
+          Direct wire-speed orchestration across BIG-IP TMOS and BIG-IQ Centralized Management. Supports BIG-IQ token login + 5-min <code>/mgmt/shared/authn/exchange</code> refresh, <code>device-info</code> discovery, direct ISO uploads, and automatic REST-to-SCP failover with SSH <code>known_hosts</code> verification.
         </p>
         <div class="pillar-tags">
           <span class="pillar-tag">pkg/bigip/failover.go</span>
-          <span class="pillar-tag">512KB REST</span>
-          <span class="pillar-tag">Native Go SCP</span>
+          <span class="pillar-tag">Token + Exchange</span>
+          <span class="pillar-tag">SSH known_hosts</span>
         </div>
       </article>
 
@@ -1257,11 +1342,12 @@
           <h2 class="pillar-title">3. iHealth Diagnostics</h2>
         </div>
         <p class="pillar-body">
-          Seamlessly uploads <code>.qkview</code> diagnostic archives to the F5 iHealth API, retrieves health evaluations, and links diagnostics directly to active customer support tickets.
+          Authenticates with dedicated <code>IHEALTH_CLIENT_ID</code> / <code>IHEALTH_CLIENT_SECRET</code> (<code>audience=api://ciam-api-ihealth</code>, empty <code>scope=""</code> per K000130498). Streams <code>.qkview</code> archives (<code>POST /qkview-analyzer/api/qkviews</code>), lists uploaded QKViews (<code>GET /qkview-analyzer/api/qkviews</code>), and retrieves upload metadata, processing status (<code>COMPLETE</code> / <code>IN_PROGRESS</code>), linked case numbers, and direct iHealth analyzer GUI URLs (<code>GET /qkview-analyzer/api/qkviews/{id}</code>).
         </p>
         <div class="pillar-tags">
           <span class="pillar-tag">pkg/ihealth</span>
-          <span class="pillar-tag">cmd/myf5/wizard.go</span>
+          <span class="pillar-tag">cmd/myf5/main.go</span>
+          <span class="pillar-tag">IHEALTH_CLIENT_ID</span>
         </div>
       </article>
     </section>
@@ -1289,7 +1375,7 @@
           </button>
           <button class="workflow-tab" data-flow="qkview-wizard" role="tab" aria-selected="false">
             <span class="tab-step-num">Workflow 3</span>
-            <span>Appliance QKView &rarr; Case Wizard</span>
+            <span>Appliance / QKView &rarr; Case Wizard</span>
           </button>
           <button class="workflow-tab" data-flow="zero-secret" role="tab" aria-selected="false">
             <span class="tab-step-num">Workflow 4</span>
@@ -1319,9 +1405,9 @@
                 <!-- Pipes / Paths -->
                 <line id="pipe1" x1="120" y1="160" x2="220" y2="160" class="svg-pipe" />
                 <line id="pipe2" x1="340" y1="160" x2="440" y2="160" class="svg-pipe" />
-                <line id="pipe3a" x1="560" y1="160" x2="620" y2="80" class="svg-pipe" />
-                <line id="pipe3b" x1="560" y1="160" x2="620" y2="160" class="svg-pipe" />
-                <line id="pipe3c" x1="560" y1="160" x2="620" y2="240" class="svg-pipe" />
+                <line id="pipe3a" x1="560" y1="160" x2="600" y2="72" class="svg-pipe" />
+                <line id="pipe3b" x1="560" y1="160" x2="600" y2="160" class="svg-pipe" />
+                <line id="pipe3c" x1="560" y1="160" x2="600" y2="248" class="svg-pipe" />
 
                 <!-- Layer 1: CLI Entry -->
                 <g id="node-cli" class="svg-node" transform="translate(10, 110)">
@@ -1336,9 +1422,9 @@
                 <g id="node-gate" class="svg-node" transform="translate(220, 110)">
                   <rect class="svg-node-box" width="120" height="100" />
                   <text class="svg-node-title" x="12" y="32">Security Gate</text>
-                  <text class="svg-node-sub" x="12" y="52">pkg/auth</text>
-                  <text class="svg-node-sub" x="12" y="70">pkg/client</text>
-                  <text class="svg-node-sub" x="12" y="88">TLS 1.2+ / Proxy</text>
+                  <text class="svg-node-sub" x="12" y="52">pkg/auth &amp; tls</text>
+                  <text class="svg-node-sub" x="12" y="70">CA Bundle / PQC</text>
+                  <text class="svg-node-sub" x="12" y="88">known_hosts / Proxy</text>
                 </g>
 
                 <!-- Layer 3: Engine & Streaming -->
@@ -1359,10 +1445,10 @@
                   <text class="svg-node-sub" x="8" y="55">.downloads</text>
                 </g>
 
-                <!-- 4B: BIG-IP Appliance -->
+                <!-- 4B: BIG-IP / BIG-IQ Appliance -->
                 <g id="node-dest-appliance" class="svg-node" transform="translate(600, 125)">
                   <rect class="svg-node-box" width="75" height="70" />
-                  <text class="svg-node-title" x="8" y="24">BIG-IP TMOS</text>
+                  <text class="svg-node-title" x="8" y="24">BIG-IP / IQ</text>
                   <text class="svg-node-sub" x="8" y="42">TCP 443 / 22</text>
                   <text class="svg-node-sub" x="8" y="58">REST / SCP</text>
                 </g>
@@ -1393,7 +1479,7 @@
                 <span class="terminal-dot dot-yellow"></span>
                 <span class="terminal-dot dot-green"></span>
               </div>
-              <div class="terminal-title">Internal Execution Trace &bull; pkg/logger</div>
+              <div class="terminal-title">Simulated Execution Trace &bull; CLI &amp; Transport Pipeline (scrubbed via pkg/logger.ScrubSecrets)</div>
             </div>
             <div id="simTerminalLog" class="terminal-body">
               <!-- Dynamically populated by JS -->
@@ -1406,16 +1492,16 @@
           <div class="deep-dive-card">
             <div class="deep-dive-title">Active Flow Command</div>
             <div id="diveCommand" class="deep-dive-val" style="font-family: var(--font-mono); font-size: 0.8rem;">
-              myf5 downloads get BIGIP-17.1.1.0.0.6.iso --push 10.1.1.4
+              myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 "Virtual Edition" BIGIP-17.1.1-0.0.6.iso --push 10.1.1.4
             </div>
           </div>
           <div class="deep-dive-card">
             <div class="deep-dive-title">Memory &amp; Buffering</div>
-            <div id="diveBuffer" class="deep-dive-val">io.TeeReader (&lt;10 MB RAM)</div>
+            <div id="diveBuffer" class="deep-dive-val">64 KiB io.TeeReader + .part Atomic Rename</div>
           </div>
           <div class="deep-dive-card">
             <div class="deep-dive-title">Network Protocols</div>
-            <div id="diveProtocol" class="deep-dive-val">HTTPS (REST 512KB) &amp; SSHv2 (SCP)</div>
+            <div id="diveProtocol" class="deep-dive-val">HTTPS (512 KiB REST) &amp; SSHv2 (64 KiB SCP)</div>
           </div>
           <div class="deep-dive-card">
             <div class="deep-dive-title">Security &amp; Auth</div>
@@ -1441,13 +1527,13 @@
           <span class="protocol-badge badge-rest">Transport 1: HTTPS Port 443</span>
           <h3 class="protocol-title">iControl REST Chunked Transfer</h3>
           <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.75rem;">
-            Default method when password authentication is available. Operates seamlessly through corporate HTTPS reverse proxies and cloud access topologies (such as F5 UDF).
+            Default method when password or mTLS authentication is available. Operates seamlessly across BIG-IP and BIG-IQ through corporate HTTPS reverse proxies and cloud access topologies.
           </p>
           <ul class="protocol-list">
-            <li><strong>Chunking:</strong> Splits payloads into 512 KB sequential chunks using HTTP <code>Content-Range</code> headers.</li>
-            <li><strong>Staging Path:</strong> Targets <code>/mgmt/shared/file-transfer/uploads/&lt;filename&gt;</code>, staging in <code>/var/config/rest/downloads/</code>.</li>
-            <li><strong>Bash Promotion:</strong> Invokes <code>/mgmt/tm/util/bash</code> to copy files directly into <code>/shared/images/</code> or <code>/shared/GeoIP/</code>.</li>
-            <li><strong>QKView Download:</strong> Directly streams diagnostic bundles from <code>/mgmt/cm/autodeploy/qkview-downloads/</code>.</li>
+            <li><strong>BIG-IP &amp; BIG-IQ Token Auth:</strong> Acquires <code>X-F5-Auth-Token</code> via <code>/mgmt/shared/authn/login</code> (omitting <code>loginProviderName</code> for BIG-IQ local auth), refreshes 5-min tokens via <code>/mgmt/shared/authn/exchange</code>, and prevents account lockouts on 401.</li>
+            <li><strong>Platform-Specific Upload Order (512 KiB Chunks):</strong> Streams 512 KiB (<code>DefaultUploadChunkSize</code>) <code>Content-Range</code> chunks. BIG-IQ uses <code>/mgmt/cm/autodeploy/software-image-uploads/</code> first for <code>/shared/images</code>, whereas BIG-IP stages to <code>/mgmt/shared/file-transfer/uploads/</code> (<code>/var/config/rest/downloads/</code>) + <code>/mgmt/tm/util/bash</code> <code>cp -f</code> and falls back to <code>software-image-uploads</code> for <code>.iso</code> files if bash is disabled.</li>
+            <li><strong>Discovery &amp; Promotion:</strong> Queries <code>/mgmt/tm/sys/*</code> with BIG-IQ fallbacks to <code>device-info</code> &amp; <code>cm-shared-all-big-iqs</code>; promotes staged BIG-IP files via <code>/mgmt/tm/util/bash</code>.</li>
+            <li><strong>REST Range Downloads (1 MiB Chunks):</strong> Streams 1 MiB (<code>1024 * 1024</code>) <code>Content-Range</code> chunks from <code>software-image-downloads</code>, <code>file-transfer/downloads</code> (including single-response <code>200 OK</code> handling on BIG-IQ), and BIG-IP <code>qkview-downloads</code>.</li>
           </ul>
         </article>
 
@@ -1459,10 +1545,10 @@
             Direct high-speed streaming implemented in pure Go (<code>golang.org/x/crypto/ssh</code>). Zero external <code>scp</code> or <code>ssh</code> binaries required.
           </p>
           <ul class="protocol-list">
-            <li><strong>Direct Streaming:</strong> Writes directly to destination directory via remote <code>scp -t &lt;dest&gt;</code> without secondary bash staging.</li>
-            <li><strong>Buffer Size:</strong> High-throughput 64 KB streaming buffer tuned for data center LANs and 10GbE management interfaces.</li>
-            <li><strong>Authentication:</strong> Supports SSH private keys (with encrypted passphrase prompting), SSH agent (<code>SSH_AUTH_SOCK</code>), and password.</li>
-            <li><strong>Arbitrary Paths:</strong> Pulls or pushes any file on the TMOS filesystem directly without REST endpoint restrictions.</li>
+            <li><strong>Host-Key Verification:</strong> Enforces strict OpenSSH <code>known_hosts</code> verification via <code>--known-hosts</code> / <code>MYF5_SSH_KNOWN_HOSTS</code> (and rejects <code>~/.ssh/known_hosts</code> key mismatches before any credentials are transmitted).</li>
+            <li><strong>Direct Streaming:</strong> Writes directly to destination directory via remote <code>scp -t &lt;dest&gt;</code> using a tuned 64 KiB buffer without secondary bash staging.</li>
+            <li><strong>Authentication:</strong> Supports unencrypted SSH private keys (<code>-i</code> / default <code>~/.ssh/id_{ed25519,rsa,ecdsa}</code>), SSH agent (<code>SSH_AUTH_SOCK</code>, including passphrase-protected keys loaded in agent), keyboard-interactive (PAM/TACACS+), and password.</li>
+            <li><strong>BIG-IQ Restricted Paths &amp; QKViews:</strong> Handles arbitrary filesystem paths (such as <code>/var/tmp</code>) and BIG-IQ QKView generation/retrieval where BIG-IQ <code>webd</code> restricts <code>/mgmt/tm/util/bash</code>.</li>
           </ul>
         </article>
       </div>
@@ -1473,7 +1559,7 @@
         <div class="failover-engine-text">
           <h3>The Automatic Failover Engine (<code>pkg/bigip/failover.go</code>)</h3>
           <p>
-            When set to <code>--method auto</code> (the default), <code>myf5</code> tries the primary transport first. If port 443 is blocked, an HTTP 500 error occurs, or the REST autodeploy endpoint is disabled, the CLI instantly traps the failure, prints a distinct yellow <code>[FAILOVER]</code> notice, and re-executes the transfer over native Go SCP—zero manual re-runs or lost progress.
+            When set to <code>--method auto</code> (the default), <code>myf5</code> intelligently selects the optimal transport for BIG-IP or BIG-IQ. If port 443 is blocked, an HTTP 500 occurs, or Appliance Mode / BIG-IQ <code>webd</code> blocks <code>/mgmt/tm/util/bash</code> (HTTP 403/400), the CLI seamlessly routes or fails over to native Go SCP/SSH with host-key verification—zero manual re-runs — automatically restarting the stream over the alternate protocol.
           </p>
         </div>
       </div>
@@ -1515,14 +1601,14 @@
               <span class="cmd-category-tag">Cloud</span>
             </div>
             <p class="cmd-desc">
-              Browse the official MyF5 catalog, generate signed CDN links, and stream multi-GB ISOs with live SHA-256 validation.
+              Browse the 5-tier MyF5 catalog, generate signed AWS CloudFront CDN links, and stream multi-GB ISOs via <code>io.TeeReader</code> into <code>.part</code> files with live SHA-256 verification.
             </p>
             <div class="cmd-snippet-box">
-              <code>myf5 downloads get BIGIP-17.1.1.0.0.6.iso</code>
-              <button class="copy-btn" title="Copy command" data-copy="myf5 downloads get BIGIP-17.1.1.0.0.6.iso">📋</button>
+              <code>myf5 downloads browse</code>
+              <button class="copy-btn" title="Copy command" data-copy="myf5 downloads browse">📋</button>
             </div>
           </div>
-          <div class="cmd-flags">Key flags: <code>--push &lt;host&gt;</code>, <code>--apply-geoip</code>, <code>--dry-run</code></div>
+          <div class="cmd-flags">Subcommands: <code>browse</code>, <code>families</code>, <code>lines</code>, <code>versions</code>, <code>containers</code>, <code>files</code>, <code>get [--push &lt;host&gt; --push-known-hosts &lt;path&gt; --apply-geoip]</code></div>
         </div>
 
         <!-- Card: push -->
@@ -1536,11 +1622,11 @@
               Uploads local ISO software images, hotfixes, or config archives directly to BIG-IP or BIG-IQ with automatic REST &rarr; SCP failover.
             </p>
             <div class="cmd-snippet-box">
-              <code>myf5 push BIGIP-17.1.1.iso 10.1.1.4</code>
-              <button class="copy-btn" title="Copy command" data-copy="myf5 push BIGIP-17.1.1.iso 10.1.1.4">📋</button>
+              <code>myf5 push 10.1.1.4 BIGIP-17.1.1.iso</code>
+              <button class="copy-btn" title="Copy command" data-copy="myf5 push 10.1.1.4 BIGIP-17.1.1.iso">📋</button>
             </div>
           </div>
-          <div class="cmd-flags">Key flags: <code>--method auto|icontrol|scp</code>, <code>--dest /shared/images</code></div>
+          <div class="cmd-flags">Key flags: <code>--target bigip|bigiq</code>, <code>--known-hosts &lt;path&gt;</code>, <code>--dest /shared/images</code></div>
         </div>
 
         <!-- Card: pull -->
@@ -1551,14 +1637,14 @@
               <span class="cmd-category-tag">Appliance</span>
             </div>
             <p class="cmd-desc">
-              Downloads files, diagnostics, or configuration archives from remote BIG-IP or BIG-IQ appliances to your workstation.
+              Retrieves <code>.iso</code> software images and <code>.qkview</code> diagnostic bundles (enforced by <code>ValidateApplianceDownloadPath</code>) from remote BIG-IP or BIG-IQ appliances to your workstation.
             </p>
             <div class="cmd-snippet-box">
-              <code>myf5 pull 10.1.1.4 /config/bigip.conf .</code>
-              <button class="copy-btn" title="Copy command" data-copy="myf5 pull 10.1.1.4 /config/bigip.conf .">📋</button>
+              <code>myf5 pull 10.1.1.4 /shared/images/BIGIP-17.1.1.iso -o .</code>
+              <button class="copy-btn" title="Copy command" data-copy="myf5 pull 10.1.1.4 /shared/images/BIGIP-17.1.1.iso -o .">📋</button>
             </div>
           </div>
-          <div class="cmd-flags">Key flags: <code>--method auto|icontrol|scp</code>, <code>-u &lt;user&gt;</code>, <code>-p &lt;port&gt;</code></div>
+          <div class="cmd-flags">Key flags: <code>--target bigip|bigiq</code>, <code>--known-hosts &lt;path&gt;</code>, <code>--method auto|icontrol|scp</code></div>
         </div>
 
         <!-- Card: bigip -->
@@ -1569,14 +1655,14 @@
               <span class="cmd-category-tag">Appliance</span>
             </div>
             <p class="cmd-desc">
-              Inspects BIG-IP TMOS hardware, tests REST readiness (<code>/mgmt/tm/sys/ready</code>), inspects serial numbers, and triggers QKViews.
+              Inspects BIG-IP TMOS hardware or local QKView archives, tests REST readiness (<code>/mgmt/tm/sys/ready</code>), extracts serial numbers, triggers QKViews, and transfers files.
             </p>
             <div class="cmd-snippet-box">
               <code>myf5 bigip info 10.1.1.4</code>
               <button class="copy-btn" title="Copy command" data-copy="myf5 bigip info 10.1.1.4">📋</button>
             </div>
           </div>
-          <div class="cmd-flags">Subcommands: <code>ready</code>, <code>info</code>, <code>serial</code>, <code>qkview</code>, <code>geoip</code></div>
+          <div class="cmd-flags">Subcommands: <code>ready</code>, <code>info &lt;host|file.qkview&gt;</code>, <code>serial &lt;host|file.qkview&gt;</code>, <code>qkview</code>, <code>push</code>, <code>download</code>, <code>geoip</code></div>
         </div>
 
         <!-- Card: bigiq -->
@@ -1587,14 +1673,14 @@
               <span class="cmd-category-tag">Appliance</span>
             </div>
             <p class="cmd-desc">
-              Inspects BIG-IQ Centralized Management system state, software versions, and manages centralized software image deployments.
+              Full BIG-IQ Centralized Management orchestration: token auth + <code>authn/exchange</code> refresh, <code>device-info</code> discovery, direct ISO uploads, and SSH QKView failover.
             </p>
             <div class="cmd-snippet-box">
               <code>myf5 bigiq info 10.1.1.5</code>
               <button class="copy-btn" title="Copy command" data-copy="myf5 bigiq info 10.1.1.5">📋</button>
             </div>
           </div>
-          <div class="cmd-flags">Subcommands: <code>ready</code>, <code>info</code>, <code>serial</code>, <code>push</code>, <code>download</code></div>
+          <div class="cmd-flags">Subcommands: <code>ready</code>, <code>info &lt;host|file.qkview&gt;</code>, <code>serial &lt;host|file.qkview&gt;</code>, <code>qkview</code>, <code>push</code>, <code>download</code></div>
         </div>
 
         <!-- Card: wizard -->
@@ -1605,14 +1691,14 @@
               <span class="cmd-category-tag">Diagnostics</span>
             </div>
             <p class="cmd-desc">
-              Interactive TUI case creation wizard. Auto-discovers appliance chassis serials and TMOS versions via live appliance or local QKView.
+              5-step interactive TUI case creation wizard (with <code>:b</code> back navigation). Auto-discovers BIG-IP / BIG-IQ chassis serials, versions, and EOL status via live appliance or local <code>.qkview</code>.
             </p>
             <div class="cmd-snippet-box">
-              <code>myf5 wizard --discover-serial 10.1.1.4</code>
-              <button class="copy-btn" title="Copy command" data-copy="myf5 wizard --discover-serial 10.1.1.4">📋</button>
+              <code>myf5 wizard</code>
+              <button class="copy-btn" title="Copy command" data-copy="myf5 wizard">📋</button>
             </div>
           </div>
-          <div class="cmd-flags">Key flags: <code>--qkview &lt;path&gt;</code>, <code>--dry-run</code></div>
+          <div class="cmd-flags">Scripted flags: <code>cases create --from-appliance &lt;host&gt;</code>, <code>--from-bigiq &lt;host&gt;</code>, <code>--dry-run</code></div>
         </div>
 
         <!-- Card: cases -->
@@ -1623,14 +1709,14 @@
               <span class="cmd-category-tag">Diagnostics</span>
             </div>
             <p class="cmd-desc">
-              Inspect, query, and comment on MyF5 official support cases directly from the terminal over <code>support.apis.f5.com</code>.
+              Inspect, query, create, and comment on official MyF5 support cases directly from the terminal over <code>support.apis.f5.com</code> (Bearer token + <code>?k=</code> usage key).
             </p>
             <div class="cmd-snippet-box">
-              <code>myf5 cases list --status Open</code>
-              <button class="copy-btn" title="Copy command" data-copy="myf5 cases list --status Open">📋</button>
+              <code>myf5 cases list</code>
+              <button class="copy-btn" title="Copy command" data-copy="myf5 cases list">📋</button>
             </div>
           </div>
-          <div class="cmd-flags">Subcommands: <code>list</code>, <code>view &lt;case-id&gt;</code>, <code>comment &lt;case-id&gt;</code></div>
+          <div class="cmd-flags">Subcommands: <code>list [--all] [--json]</code>, <code>get &lt;case&gt; [--json]</code>, <code>comment &lt;case&gt; [note] [--json]</code>, <code>create</code>, <code>wizard</code>, <code>metadata [--json]</code></div>
         </div>
 
         <!-- Card: ihealth -->
@@ -1641,14 +1727,14 @@
               <span class="cmd-category-tag">Diagnostics</span>
             </div>
             <p class="cmd-desc">
-              Directly uploads QKView diagnostic archives to F5 iHealth API, retrieves health evaluations, and links QKViews to support cases.
+              Streams <code>.qkview</code> diagnostic archives to <code>ihealth2-api.f5.com</code>, lists uploaded QKViews, and retrieves upload metadata, processing status, linked case IDs, and analyzer GUI URLs.
             </p>
             <div class="cmd-snippet-box">
               <code>myf5 ihealth upload bigip1.qkview</code>
               <button class="copy-btn" title="Copy command" data-copy="myf5 ihealth upload bigip1.qkview">📋</button>
             </div>
           </div>
-          <div class="cmd-flags">Subcommands: <code>upload</code>, <code>status &lt;qkview-id&gt;</code></div>
+          <div class="cmd-flags">Subcommands: <code>list [--json]</code>, <code>upload &lt;file.qkview&gt; [case-number] [description] [--json]</code></div>
         </div>
 
         <!-- Card: geoip -->
@@ -1659,14 +1745,14 @@
               <span class="cmd-category-tag">Appliance</span>
             </div>
             <p class="cmd-desc">
-              Automated end-to-end GeoIP update engine: unpacks RPM archives, stages on BIG-IP, runs <code>rpm -Uvh --force</code>, and reloads daemon.
+              Uploads GeoIP archive (<code>.zip</code>/<code>.tgz</code>/<code>.tar.gz</code>) to <code>/var/tmp</code> on BIG-IP, extracts RPMs to <code>/shared/tmp</code>, runs <code>geoip_update_data -f</code>, reloads GeoIP tables via <code>tmsh load sys geoip</code>, and verifies with <code>geoip_lookup</code> (BIG-IP only).
             </p>
             <div class="cmd-snippet-box">
-              <code>myf5 geoip apply 10.1.1.4 geoip.zip</code>
-              <button class="copy-btn" title="Copy command" data-copy="myf5 geoip apply 10.1.1.4 geoip.zip">📋</button>
+              <code>myf5 geoip 10.1.1.4 geoip.zip</code>
+              <button class="copy-btn" title="Copy command" data-copy="myf5 geoip 10.1.1.4 geoip.zip">📋</button>
             </div>
           </div>
-          <div class="cmd-flags">Key flags: <code>--skip-reload</code>, <code>--lookup-ip &lt;ip&gt;</code></div>
+          <div class="cmd-flags">Key flags: <code>--keep-extracted</code>, <code>--known-hosts &lt;path&gt;</code>, <code>--json</code></div>
         </div>
 
         <!-- Card: doctor -->
@@ -1677,7 +1763,7 @@
               <span class="cmd-category-tag">Infra</span>
             </div>
             <p class="cmd-desc">
-              Comprehensive pre-flight diagnostics: tests DNS resolution, TCP 443 egress to all F5 Cloud endpoints, and validates API credentials.
+              Pre-flight environment audit: verifies local <code>~/.f5api_credentials</code> presence &amp; POSIX file permissions (<code>0600</code>), active egress proxy config, and DNS + TCP 443 reachability to all 8 F5 Cloud FQDNs.
             </p>
             <div class="cmd-snippet-box">
               <code>myf5 doctor</code>
@@ -1695,14 +1781,14 @@
               <span class="cmd-category-tag">Infra</span>
             </div>
             <p class="cmd-desc">
-              Inspects active egress proxy configuration and tests reachability across HTTP, HTTPS, SOCKS5, and SOCKS5h corporate proxies.
+              Inspects or updates the active egress proxy (<code>http://</code>, <code>https://</code>, <code>socks5://</code>, <code>socks5h://</code>). Note: <code>set</code> / <code>clear</code> apply in-process (e.g. inside <code>myf5 interactive</code>); use <code>--proxy &lt;url&gt;</code> or <code>MYF5_PROXY</code> for one-shot commands.
             </p>
             <div class="cmd-snippet-box">
               <code>myf5 proxy show</code>
               <button class="copy-btn" title="Copy command" data-copy="myf5 proxy show">📋</button>
             </div>
           </div>
-          <div class="cmd-flags">Subcommands: <code>show</code>, <code>test &lt;url&gt;</code>, <code>set &lt;url&gt;</code></div>
+          <div class="cmd-flags">Subcommands: <code>show</code>, <code>set &lt;url&gt;</code>, <code>clear</code></div>
         </div>
 
         <!-- Card: interactive -->
@@ -1741,9 +1827,9 @@
           <div class="defense-card">
             <div class="defense-num">1</div>
             <div class="defense-info">
-              <h4>Argv Sanitization &amp; Exit Code 2</h4>
+              <h4>Two-Tier Argv Sanitization (Exit Code 2 &amp; Exit Code 1)</h4>
               <p>
-                <code>pkg/auth.CheckNoCLISecrets</code> evaluates <code>os.Args</code> prior to command dispatch. Flags like <code>--password</code>, <code>--client-secret</code>, <code>--token</code>, or <code>--key</code> are strictly forbidden and immediately terminate with <strong>Exit Code 2</strong>.
+                Global <code>pkg/auth.CheckNoCLISecrets</code> evaluates <code>os.Args[1:]</code> prior to command dispatch and blocks 22 secret flags (<code>--password</code>, <code>--client-secret</code>, <code>--token</code>, <code>--api-key</code>, <code>--key</code>, etc.) with <strong>Exit Code 2</strong>. Appliance flag parsers additionally trap <code>--pass</code>, <code>-P</code>, and <code>--ssh-passphrase</code> via <code>rejectSecretFlag</code> with <strong>Exit Code 1</strong>.
               </p>
             </div>
           </div>
@@ -1771,9 +1857,19 @@
           <div class="defense-card">
             <div class="defense-num">4</div>
             <div class="defense-info">
-              <h4>Strict TLS 1.2+ &amp; AEAD Ciphers</h4>
+              <h4>Cloud vs. Appliance TLS 1.2+, PQC &amp; Corporate CA Trust</h4>
               <p>
-                <code>pkg/client.SecureTLSConfig</code> enforces a minimum of TLS 1.2 with modern Perfect Forward Secrecy (PFS) and AEAD cipher suites (ECDHE-ECDSA/RSA with AES-GCM or ChaCha20-Poly1305). Plain unencrypted HTTP is strictly disallowed.
+                Cloud API clients always enforce strict TLS 1.2+ certificate verification with PQC hybrid ML-KEM (<code>X25519MLKEM768</code>), 256-bit AEAD ciphers, and custom corporate CA bundles (<code>MYF5_CA_BUNDLE</code> / <code>SSL_CERT_FILE</code>). Appliance REST clients default to <code>SkipTLSVerify: true</code> for self-signed lab/appliance certs unless <code>MYF5_STRICT_APPLIANCE_TLS=1</code> is set (which enforces full CA verification including <code>MYF5_CA_BUNDLE</code> / <code>SSL_CERT_FILE</code>).
+              </p>
+            </div>
+          </div>
+
+          <div class="defense-card">
+            <div class="defense-num">5</div>
+            <div class="defense-info">
+              <h4>SSH Host-Key Verification &amp; Lockout Guard</h4>
+              <p>
+                Strict mode (<code>--known-hosts</code>, <code>--push-known-hosts</code>, <code>BIGIP_KNOWN_HOSTS</code>, <code>BIGIQ_KNOWN_HOSTS</code>, <code>MYF5_SSH_KNOWN_HOSTS</code>, or <code>MYF5_STRICT_HOST_KEY_CHECKING=1</code>) rejects both unknown and mismatched host keys; default mode checks <code>~/.ssh/known_hosts</code> when present and rejects recorded key mismatches/revocations before sending credentials while allowing unrecorded lab hosts. <code>loginFailedErr</code> prevents multi-endpoint 401 account lockouts on BIG-IP and BIG-IQ.
               </p>
             </div>
           </div>
@@ -1783,21 +1879,21 @@
         <div class="validator-box">
           <div class="validator-header">
             <h3 class="validator-title">Live Zero-Secret Command Validator</h3>
-            <span class="badge-offline">Simulates CheckNoCLISecrets</span>
+            <span class="badge-offline">Simulates CheckNoCLISecrets &amp; rejectSecretFlag</span>
           </div>
           <p style="font-size: 0.85rem; color: var(--text-muted);">
-            Test a command string below to see how the CLI's security filter validates or blocks command arguments before execution:
+            Test a command string below to see how the CLI's two-tier security filter validates or blocks command arguments before execution:
           </p>
 
           <div class="validator-input-area">
-            <input type="text" id="validatorInput" class="validator-input" value="myf5 push BIGIP-17.1.1.iso 10.1.1.4 --password SuperSecret123" aria-label="Command string to validate">
+            <input type="text" id="validatorInput" class="validator-input" value="myf5 push 10.1.1.4 BIGIP-17.1.1.iso --password SuperSecret123" aria-label="Command string to validate">
             
             <div class="validator-presets">
               <span style="font-size: 0.725rem; color: var(--text-dim); margin-right: 0.25rem;">Try:</span>
-              <button class="preset-btn" data-preset="myf5 push BIGIP-17.1.1.iso 10.1.1.4 --password Secret123">--password (Violates)</button>
-              <button class="preset-btn" data-preset="myf5 downloads get BIGIP-17.1.1.iso --token abcdef">--token (Violates)</button>
-              <button class="preset-btn" data-preset="myf5 push BIGIP-17.1.1.iso 10.1.1.4 -p 8443">-p 8443 (Allowed port)</button>
-              <button class="preset-btn" data-preset="export BIGIP_PASSWORD=... &amp;&amp; myf5 push BIGIP-17.1.1.iso 10.1.1.4">Env Var (Safe)</button>
+              <button class="preset-btn" data-preset="myf5 push 10.1.1.4 BIGIP-17.1.1.iso --password Secret123">--password (Exit 2)</button>
+              <button class="preset-btn" data-preset="myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 &quot;Virtual Edition&quot; BIGIP-17.1.1-0.0.6.iso --token abcdef">--token (Exit 2)</button>
+              <button class="preset-btn" data-preset="myf5 push 10.1.1.4 BIGIP-17.1.1.iso --pass Secret123">--pass (Exit 1)</button>
+              <button class="preset-btn" data-preset="myf5 bigiq ready 10.1.1.5 --user admin --known-hosts ~/.ssh/known_hosts">TTY / Env Auth (Safe)</button>
             </div>
           </div>
 
@@ -1815,7 +1911,7 @@
         <div class="section-badge">Firewall &amp; DNS</div>
         <h2 class="section-title">F5 Cloud Service Endpoints &amp; Outbound Proxy</h2>
         <p class="section-desc">
-          Verified FQDNs, published IP addresses, and corporate proxy support (HTTP, HTTPS, SOCKS5, SOCKS5h).
+          All 8 FQDNs audited by <code>myf5 doctor</code>, published IP addresses (F5 K15202 / K000163521), AWS CloudFront CDN streaming, and outbound corporate proxy precedence.
         </p>
       </div>
 
@@ -1824,44 +1920,73 @@
           <thead>
             <tr>
               <th>FQDN</th>
-              <th>Service Role</th>
-              <th>Published IP (K15202 / K000163521)</th>
+              <th>Service Role &amp; API Path</th>
+              <th>Published IP / Routing (K15202 / K000163521)</th>
               <th>Port / Scheme</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td><code>idp.identity.f5.com</code></td>
-              <td>F5 Identity &amp; Auth0 Token Issuer</td>
+              <td>F5 Identity Primary Auth0 OAuth2 Issuer (<code>POST /oauth/token</code>)</td>
               <td>Distributed Cloud Anycast</td>
               <td>TCP 443 (HTTPS)</td>
             </tr>
             <tr>
               <td><code>identity.account.f5.com</code></td>
-              <td>F5 Okta CIAM Authorization Gateway</td>
+              <td>F5 Identity Okta CIAM Issuer (<code>POST /oauth2/ausp95yxb4ShxMGvW357/v1/token</code>)</td>
               <td>Distributed Cloud Anycast</td>
               <td>TCP 443 (HTTPS)</td>
             </tr>
             <tr>
               <td><code>api.software.downloads.f5.com</code></td>
-              <td>MyF5 Downloads Catalog &amp; Signed CDN</td>
-              <td><code>159.60.134.92</code></td>
+              <td>MyF5 Downloads Catalog &amp; Signed-Link API (binaries stream from regional <strong>AWS CloudFront <code>*.cloudfront.net</code></strong> dynamic CDN endpoints)</td>
+              <td>Dynamic Cloud / AWS CloudFront CDN</td>
               <td>TCP 443 (HTTPS)</td>
             </tr>
             <tr>
               <td><code>support.apis.f5.com</code></td>
-              <td>MyF5 Customer Support Cases API</td>
+              <td>MyF5 Customer Support Case API &amp; Downloads Fallback Gateway (requires Bearer token + <code>?k=</code> usage key)</td>
               <td>Distributed Cloud Anycast</td>
               <td>TCP 443 (HTTPS)</td>
             </tr>
             <tr>
+              <td><code>ihealth-api.f5.com</code></td>
+              <td>F5 iHealth Primary API Gateway</td>
+              <td><code>185.56.152.6</code> (K15202)</td>
+              <td>TCP 443 (HTTPS)</td>
+            </tr>
+            <tr>
               <td><code>ihealth2-api.f5.com</code></td>
-              <td>F5 iHealth Diagnostic QKView Analyzer</td>
-              <td><code>185.56.152.6</code></td>
+              <td>F5 iHealth QKView Upload &amp; Analyzer API (<code>/qkview-analyzer/api/qkviews</code>)</td>
+              <td><code>185.56.152.6</code> (K15202)</td>
+              <td>TCP 443 (HTTPS)</td>
+            </tr>
+            <tr>
+              <td><code>callhome.f5.com</code></td>
+              <td>F5 Callhome &amp; Update Check Service</td>
+              <td><code>159.60.134.92</code> (K15202)</td>
+              <td>TCP 443 (HTTPS)</td>
+            </tr>
+            <tr>
+              <td><code>api.f5.com</code></td>
+              <td>F5 Cloud Services Gateway</td>
+              <td><code>185.56.152.6</code> (K15202)</td>
               <td>TCP 443 (HTTPS)</td>
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Outbound Proxy & NO_PROXY Summary Box -->
+      <div class="failover-engine-box" style="margin-top: 1.5rem;">
+        <div class="failover-engine-icon">🌐</div>
+        <div class="failover-engine-text">
+          <h3>Outbound Proxy &amp; <code>NO_PROXY</code> Resolution (<code>pkg/client/proxy.go</code>)</h3>
+          <p>
+            Supports <code>http://</code>, <code>https://</code>, <code>socks5://</code>, and <code>socks5h://</code> (remote DNS resolution over SOCKS5). Precedence order: <code>--proxy &lt;url&gt;</code> &rarr; in-process <code>proxy set</code> &rarr; <code>MYF5_PROXY</code> &rarr; <code>F5_PROXY</code> &rarr; <code>ALL_PROXY</code> &rarr; <code>HTTPS_PROXY</code> &rarr; <code>HTTP_PROXY</code> &rarr; <code>~/.f5api_credentials</code> (<code>proxy</code> key). <code>NO_PROXY</code> / <code>no_proxy</code> supports exact IPs, IPv6, CIDR blocks (e.g. <code>10.0.0.0/8</code>), domain suffixes, and <code>*</code>.
+          </p>
+        </div>
       </div>
     </section>
   </main>
@@ -1877,6 +2002,7 @@
       </div>
       <div class="footer-links">
         <a href="cli.md">CLI Reference</a>
+        <a href="downloads.md">Downloads Guide</a>
         <a href="appliance_push.md">Appliance Push Guide</a>
         <a href="credentials.md">Credentials Guide</a>
         <a href="network_and_firewall.md">Network &amp; Firewall</a>
@@ -1928,133 +2054,133 @@
       const workflows = {
         "download-push": {
           name: "Cloud Download -> Push to BIG-IP",
-          command: "myf5 downloads get BIGIP-17.1.1.0.0.6.iso --push 10.1.1.4",
-          buffer: "io.TeeReader (<10 MB RAM streaming)",
-          protocol: "HTTPS / TLS 1.2+ & SSHv2",
-          security: "OAuth2 Bearer + Scoped Token",
+          command: "myf5 downloads get BIG-IP big-ip_v17.x 17.1.1 \"Virtual Edition\" BIGIP-17.1.1-0.0.6.iso --push 10.1.1.4",
+          buffer: "64 KiB io.TeeReader + .part Atomic Rename",
+          protocol: "HTTPS (512 KiB REST) & SSHv2 (64 KiB SCP)",
+          security: "OAuth2 Bearer (myf5_scope) + 0600 Creds",
           destNode: "node-dest-cloud",
           steps: [
             {
               fromNode: "node-cli",
               toNode: "node-gate",
               pipe: "pipe1",
-              status: "Step 1: Check CLI argv & Zero-Secret rules",
-              log: "[AUTH] auth.CheckNoCLISecrets: scanning argv... clean (no forbidden secret flags)",
+              status: "Step 1: CheckNoCLISecrets on os.Args[1:] & resolve ~/.f5api_credentials (0600)",
+              log: "[AUTH] auth.CheckNoCLISecrets: argv clean; auth.ResolveCredentials verified ~/.f5api_credentials (0600)",
               tag: "tag-info"
             },
             {
               fromNode: "node-gate",
-              toNode: "node-dest-cloud",
-              pipe: "pipe3a",
-              status: "Step 2: Authenticate OAuth2 & request download URL",
-              log: "[OAUTH] POST https://idp.identity.f5.com/oauth/token -> HTTP 200 (Bearer token acquired)",
+              toNode: "node-engine",
+              pipe: "pipe2",
+              status: "Step 2: Acquire OAuth2 token (idp.identity.f5.com) & signed CloudFront URL",
+              log: "[OAUTH] POST https://idp.identity.f5.com/oauth/token (scope=myf5_scope) + GET https://api.software.downloads.f5.com/v1/downloads-management/v1/downloads/product/BIG-IP/big-ip_v17.x/17.1.1/english/Virtual%20Edition/BIGIP-17.1.1-0.0.6.iso",
               tag: "tag-ok"
             },
             {
               fromNode: "node-dest-cloud",
               toNode: "node-engine",
               pipe: "pipe3a",
-              status: "Step 3: Stream ISO bytes with io.TeeReader & live SHA-256",
-              log: "[DOWNLOAD] Streaming 2,845 MB via io.TeeReader -> disk & sha256.New() (RAM < 10 MB)",
+              status: "Step 3: Stream from AWS CloudFront (*.cloudfront.net) via 64 KiB io.TeeReader into .part",
+              log: "[DOWNLOAD] Streaming from *.cloudfront.net via 64 KiB io.TeeReader -> BIGIP-17.1.1-0.0.6.iso.part + sha256.New(), then atomic os.Rename",
               tag: "tag-info"
             },
             {
               fromNode: "node-engine",
               toNode: "node-dest-appliance",
               pipe: "pipe3b",
-              status: "Step 4: Atomic push to BIG-IP /shared/images/",
-              log: "[PUSH] Pushing to BIG-IP 10.1.1.4 via iControl REST chunked transfer -> 100% complete",
+              status: "Step 4: Push 512 KiB Content-Range chunks to BIG-IP & promote to /shared/images/",
+              log: "[PUSH] Uploaded 512 KiB chunks to /mgmt/shared/file-transfer/uploads/BIGIP-17.1.1-0.0.6.iso (/var/config/rest/downloads/) + promoted to /shared/images/ via POST /mgmt/tm/util/bash (or /mgmt/cm/autodeploy/software-image-uploads/ fallback)",
               tag: "tag-ok"
             }
           ]
         },
         "dual-failover": {
-          name: "Appliance Dual Transfer & SCP Failover",
-          command: "myf5 push BIGIP-17.1.1.0.0.6.iso 10.1.1.4",
-          buffer: "512KB REST Chunks -> 64KB SCP Buffer",
-          protocol: "Failover: HTTPS 443 -> SSH 22",
-          security: "Zero-Secret (BIGIP_PASSWORD env / SSH Key)",
+          name: "Dual Transfer & Automatic REST -> SCP Failover",
+          command: "myf5 push 10.1.1.4 hotfix.tar.gz --dest /var/tmp --known-hosts ~/.ssh/known_hosts",
+          buffer: "512 KiB REST Chunks -> 64 KiB SCP Stream",
+          protocol: "Failover: HTTPS 443 -> Verified SSH/SCP 22",
+          security: "BIGIP_PASSWORD / BIGIQ_PASSWORD + OpenSSH known_hosts",
           destNode: "node-dest-appliance",
           steps: [
             {
               fromNode: "node-cli",
               toNode: "node-gate",
               pipe: "pipe1",
-              status: "Step 1: Resolve credentials & validate destination",
-              log: "[INIT] Method 'auto': Resolved BIGIP_USER=admin and password from environment",
+              status: "Step 1: Resolve appliance credentials & validate OpenSSH known_hosts",
+              log: "[INIT] Method 'auto': Resolved appliance credentials & pre-validated ~/.ssh/known_hosts (note: --target bigiq --dest /var/tmp routes directly to verified SCP because BIG-IQ webd blocks /mgmt/tm/util/bash)",
               tag: "tag-info"
             },
             {
               fromNode: "node-gate",
-              toNode: "node-dest-appliance",
-              pipe: "pipe3b",
-              status: "Step 2: Attempt primary transfer (iControl REST 443)",
-              log: "[REST] POST https://10.1.1.4/mgmt/shared/file-transfer/uploads/BIGIP-17.1.1.iso... Connection Timeout / Firewall drop",
+              toNode: "node-engine",
+              pipe: "pipe2",
+              status: "Step 2: Stage via iControl REST until Appliance Mode blocks /mgmt/tm/util/bash",
+              log: "[REST] Uploaded 512 KiB chunks to /var/config/rest/downloads/hotfix.tar.gz; POST /mgmt/tm/util/bash returned HTTP 403/400 (Appliance Mode)",
               tag: "tag-failover"
             },
             {
               fromNode: "node-engine",
               toNode: "node-dest-appliance",
               pipe: "pipe3b",
-              status: "Step 3: Trigger automatic failover to Native Go SCP (Port 22)",
-              log: "[FAILOVER] iControl REST failed (timeout). Seamlessly falling back to native Go SCP over SSH",
+              status: "Step 3: Trigger automatic failover to Native Go SCP with host-key verification",
+              log: "[FAILOVER] iControl REST upload failed... Automatically falling back to SCP over SSH (verified 10.1.1.4 host key against ~/.ssh/known_hosts)",
               tag: "tag-failover"
             },
             {
               fromNode: "node-engine",
               toNode: "node-dest-appliance",
               pipe: "pipe3b",
-              status: "Step 4: Stream file directly to /shared/images/ via SSH",
-              log: "[SCP] Connected to 10.1.1.4:22. Streaming 2,845 MB to /shared/images/BIGIP-17.1.1.iso -> SUCCESS",
+              status: "Step 4: Stream 64 KiB SCP chunks directly to /var/tmp/hotfix.tar.gz",
+              log: "[SCP] Streamed hotfix.tar.gz directly via 'scp -t /var/tmp/hotfix.tar.gz' (64 KiB buffer) -> 100% complete",
               tag: "tag-ok"
             }
           ]
         },
         "qkview-wizard": {
-          name: "Appliance QKView -> Case Wizard",
-          command: "myf5 wizard --discover-serial 10.1.1.4",
-          buffer: "Streaming QKView archive to disk",
-          protocol: "HTTPS /mgmt/tm/util/qkview -> REST",
-          security: "Masked TUI input + Zero-Secret",
-          destNode: "node-dest-ihealth",
+          name: "Appliance / QKView Auto-Detection -> Case Wizard",
+          command: "myf5 wizard   # then link QKView via: myf5 ihealth upload diag.qkview 00449105",
+          buffer: "In-memory tar/gzip stream (mcp_module.xml / VERSION / blade.version)",
+          protocol: "REST/SSH Auto-Detect + support.apis.f5.com (?k=)",
+          security: "OAuth2 Bearer + API Key (?k=) + Masked TUI",
+          destNode: "node-dest-cloud",
           steps: [
             {
               fromNode: "node-cli",
               toNode: "node-gate",
               pipe: "pipe1",
-              status: "Step 1: Launch interactive support wizard",
-              log: "[WIZARD] Initialized wizard TUI. Querying appliance 10.1.1.4 for system serial...",
+              status: "Step 1: Launch 5-step interactive Case Wizard (cmd/myf5/wizard.go)",
+              log: "[WIZARD] Step 1/5: Auto-detect from live BIG-IP/BIG-IQ (GET /mgmt/tm/sys/version + /mgmt/tm/sys/hardware, or BIG-IQ /mgmt/shared/identified-devices/config/device-info / SSH fallback) or local .qkview (pkg/bigip.InspectQKView reading mcp_module.xml / blade.version)",
               tag: "tag-cmd"
             },
             {
               fromNode: "node-gate",
-              toNode: "node-dest-appliance",
-              pipe: "pipe3b",
-              status: "Step 2: Auto-discover chassis serial & TMOS version",
-              log: "[BIGIP] GET /mgmt/tm/sys/hardware -> Chassis Serial: 'f5-bxtn-9821', TMOS 17.1.1",
+              toNode: "node-engine",
+              pipe: "pipe2",
+              status: "Step 2: Extract ChassisSerial, Version, Platform & ProductFamily (BIG-IP / BIG-IQ)",
+              log: "[DETECT] Extracted Serial 'f5-bxtn-9821', ProductFamily 'BIG-IP' (or 'BIG-IQ'), TMOS 17.1.1, and evaluated EOL lifecycle",
               tag: "tag-info"
             },
             {
-              fromNode: "node-dest-appliance",
-              toNode: "node-engine",
+              fromNode: "node-engine",
+              toNode: "node-dest-appliance",
               pipe: "pipe3b",
-              status: "Step 3: Generate diagnostic QKView archive on appliance",
-              log: "[QKVIEW] Generated /var/tmp/qkviews/bigip1.qkview on appliance. Downloaded to local disk",
-              tag: "tag-ok"
+              status: "Step 3: Fetch dynamic case metadata & walk 5-step TUI (:b back navigation)",
+              log: "[METADATA] GET https://support.apis.f5.com/case-management/v1/cases/metadata?k=REDACTED -> validated entitlement & symptoms",
+              tag: "tag-info"
             },
             {
               fromNode: "node-engine",
-              toNode: "node-dest-ihealth",
-              pipe: "pipe3c",
-              status: "Step 4: Upload to iHealth & attach to new Support Case",
-              log: "[CASES] Created Support Case C-9082341 at support.apis.f5.com with attached iHealth QKView",
+              toNode: "node-dest-cloud",
+              pipe: "pipe3a",
+              status: "Step 4: POST support case -> returns 8-digit Case ID (linkable via myf5 ihealth upload)",
+              log: "[CASES] POST https://support.apis.f5.com/case-management/v1/cases?k=REDACTED -> Created Case 00449105 (link QKView via: myf5 ihealth upload diag.qkview 00449105)",
               tag: "tag-ok"
             }
           ]
         },
         "zero-secret": {
           name: "Zero-Secret CLI Rejection (Exit 2)",
-          command: "myf5 push BIGIP-17.1.1.iso 10.1.1.4 --password SuperSecret123",
+          command: "myf5 push 10.1.1.4 BIGIP-17.1.1.iso --password SuperSecret123",
           buffer: "None (Execution blocked before allocation)",
           protocol: "None (Blocked at argv check)",
           security: "Immediate Exit Code 2",
@@ -2179,8 +2305,13 @@
         if (!flow) return;
 
         if (currentStepIndex >= flow.steps.length) {
-          simStatusText.textContent = "Workflow completed";
-          logMessage("[DONE] Execution sequence finished successfully.", "tag-ok");
+          if (currentFlowKey === "zero-secret") {
+            simStatusText.textContent = "Execution blocked (Exit Code 2)";
+            logMessage("[BLOCKED] Process terminated with Exit Code 2 before command dispatch (zero network or disk I/O).", "tag-sec-err");
+          } else {
+            simStatusText.textContent = "Workflow completed";
+            logMessage("[DONE] Execution sequence finished successfully.", "tag-ok");
+          }
           if (playTimer) {
             clearInterval(playTimer);
             playTimer = null;
@@ -2223,20 +2354,15 @@
           }
         }
 
-        // Animate packet position
-        if (animPacket && fromElem && toElem) {
-          try {
-            const bboxFrom = fromElem.getBBox();
-            const bboxTo = toElem.getBBox();
-            const startX = bboxFrom.x + bboxFrom.width / 2;
-            const startY = bboxFrom.y + bboxFrom.height / 2;
-            const endX = bboxTo.x + bboxTo.width / 2;
-            const endY = bboxTo.y + bboxTo.height / 2;
-
-            animPacket.setAttribute("cx", (startX + endX) / 2);
-            animPacket.setAttribute("cy", (startY + endY) / 2);
-            animPacket.style.display = "block";
-          } catch (e) {}
+        // Animate packet position along the active SVG pipe in root SVG coordinates
+        if (animPacket && pipeElem) {
+          const x1 = parseFloat(pipeElem.getAttribute("x1") || "0");
+          const y1 = parseFloat(pipeElem.getAttribute("y1") || "0");
+          const x2 = parseFloat(pipeElem.getAttribute("x2") || "0");
+          const y2 = parseFloat(pipeElem.getAttribute("y2") || "0");
+          animPacket.setAttribute("cx", String((x1 + x2) / 2));
+          animPacket.setAttribute("cy", String((y1 + y2) / 2));
+          animPacket.style.display = "block";
         }
 
         logMessage(step.log, step.tag);
@@ -2259,13 +2385,7 @@
             isPlaying = true;
             simPlayBtn.textContent = "⏸ Pause";
             executeStep();
-            playTimer = setInterval(function() {
-              if (currentStepIndex >= flow.steps.length) {
-                executeStep();
-              } else {
-                executeStep();
-              }
-            }, 1800);
+            playTimer = setInterval(executeStep, 1800);
           }
         });
       }
@@ -2388,8 +2508,8 @@
         document.body.removeChild(textarea);
       }
 
-      // 4. Live Zero-Secret Validator (Replicating pkg/auth/credentials.go CheckNoCLISecrets)
-      const forbiddenFlags = [
+      // 4. Live Zero-Secret Validator (Replicating pkg/auth.CheckNoCLISecrets & cmd/myf5.rejectSecretFlag)
+      const forbiddenFlagsExit2 = [
         "--client-secret", "-client-secret", "--clientsecret", "-clientsecret",
         "--password", "-password", "--pw", "-pw",
         "--secret", "-secret",
@@ -2407,35 +2527,65 @@
         if (!validatorResult) return;
         const tokens = cmdText.trim().split(/\s+/);
         let forbiddenFound = null;
+        let exitCode = 0;
 
+        // Tier 1: Global pkg/auth.CheckNoCLISecrets scans all argv tokens first (Exit Code 2)
         for (let i = 0; i < tokens.length; i++) {
-          const lower = tokens[i].toLowerCase();
-          for (let f = 0; f < forbiddenFlags.length; f++) {
-            const forbidden = forbiddenFlags[f];
+          const raw = tokens[i];
+          const lower = raw.toLowerCase();
+          for (let f = 0; f < forbiddenFlagsExit2.length; f++) {
+            const forbidden = forbiddenFlagsExit2[f];
             if (lower === forbidden || lower.startsWith(forbidden + "=")) {
-              forbiddenFound = tokens[i];
+              forbiddenFound = raw;
+              exitCode = 2;
               break;
             }
           }
           if (forbiddenFound) break;
         }
 
-        if (forbiddenFound) {
+        // Tier 2: Appliance flag parser cmd/myf5.rejectSecretFlag scans remaining flags (Exit Code 1)
+        if (!forbiddenFound) {
+          for (let i = 0; i < tokens.length; i++) {
+            const raw = tokens[i];
+            const lower = raw.toLowerCase();
+            if (
+              lower === "--pass" || lower.startsWith("--pass=") ||
+              lower === "--ssh-passphrase" || lower.startsWith("--ssh-passphrase=") ||
+              raw === "-P" || raw.startsWith("-P=")
+            ) {
+              forbiddenFound = raw;
+              exitCode = 1;
+              break;
+            }
+          }
+        }
+
+        if (forbiddenFound && exitCode === 2) {
           validatorResult.className = "validator-result result-blocked";
           validatorResult.innerHTML = `
-            <div><strong>🚫 [SECURITY ERROR] Exit Code 2</strong></div>
+            <div><strong>🚫 [SECURITY ERROR] Exit Code 2 (<code>pkg/auth.CheckNoCLISecrets</code>)</strong></div>
             <div>Passing secrets via CLI argument '<code>${escapeHtml(forbiddenFound)}</code>' is strictly forbidden.</div>
             <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
-              Violates <code>pkg/auth.CheckNoCLISecrets</code>. Secrets in argv leak into <code>ps aux</code>, <code>/proc/$PID/cmdline</code>, and shell histories. Use <code>BIGIP_PASSWORD</code> or <code>~/.f5api_credentials</code>.
+              Blocked globally before command dispatch. Use <code>F5_CLIENT_ID</code> / <code>F5_CLIENT_SECRET</code> or <code>~/.f5api_credentials</code> (<code>0600</code>) for cloud APIs, and <code>BIGIP_PASSWORD</code> / <code>BIGIQ_PASSWORD</code> or interactive TTY prompt for appliances.
+            </div>
+          `;
+        } else if (forbiddenFound && exitCode === 1) {
+          validatorResult.className = "validator-result result-blocked";
+          validatorResult.innerHTML = `
+            <div><strong>🚫 [SECURITY ERROR] Exit Code 1 (<code>cmd/myf5.rejectSecretFlag</code>)</strong></div>
+            <div>Appliance secret flag '<code>${escapeHtml(forbiddenFound)}</code>' is rejected by the subcommand flag parser.</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+              Never pass passwords or SSH key passphrases on the command line. Use <code>BIGIP_PASSWORD</code> / <code>BIGIQ_PASSWORD</code>, an interactive masked TTY prompt, or <code>SSH_AUTH_SOCK</code> (<code>ssh-agent</code>).
             </div>
           `;
         } else {
           validatorResult.className = "validator-result result-safe";
           validatorResult.innerHTML = `
             <div><strong>✅ [PASS] Clean Command</strong></div>
-            <div>No forbidden secret flags detected in argv.</div>
+            <div>No forbidden secret flags detected in argv (checked all 22 global Exit-2 flags and 3 appliance Exit-1 flags).</div>
             <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
-              Complies with Zero-Secret CLI policy. Safe from process table snooping and audit log leakage.
+              Complies with Zero-Secret CLI policy. Safe from process table snooping (<code>ps aux</code>) and shell history leakage.
             </div>
           `;
         }

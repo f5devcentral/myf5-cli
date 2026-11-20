@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+	"golang.org/x/crypto/ssh/knownhosts"
 
 	"myf5-cli/pkg/auth"
 	"myf5-cli/pkg/client"
@@ -25,15 +26,18 @@ import (
 
 // SCPOptions specifies the SSH connection and authentication configuration for SCP file transfers.
 type SCPOptions struct {
-	Host            string
-	Port            int
-	Username        string
-	Password        string
-	PasswordBytes   []byte
-	KeyPath         string
-	Passphrase      string
-	PassphraseBytes []byte
-	Timeout         time.Duration
+	Host                  string
+	Port                  int
+	Username              string
+	Password              string
+	PasswordBytes         []byte
+	KeyPath               string
+	Passphrase            string
+	PassphraseBytes       []byte
+	KnownHostsPath        string
+	InsecureIgnoreHostKey bool
+	HostKeyCallback       ssh.HostKeyCallback
+	Timeout               time.Duration
 }
 
 // Zero securely scrubs password and passphrase bytes from RAM and clears secret string fields.
@@ -192,6 +196,11 @@ func BuildSSHClientConfig(opts SCPOptions) (*ssh.ClientConfig, error) {
 		return nil, fmt.Errorf("no SSH authentication methods available (provide password, key, or active SSH agent)")
 	}
 
+	hostKeyCb, err := resolveHostKeyCallback(opts)
+	if err != nil {
+		return nil, err
+	}
+
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = DefaultSCPTimeout
@@ -200,11 +209,123 @@ func BuildSSHClientConfig(opts SCPOptions) (*ssh.ClientConfig, error) {
 	config := &ssh.ClientConfig{
 		User:            username,
 		Auth:            authMethods,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Intentionally accept appliance host keys in lab and automation environments
+		HostKeyCallback: hostKeyCb,
 		Timeout:         timeout,
 	}
 
 	return config, nil
+}
+
+func targetRemoteAddr(hostname string, fallback net.Addr) net.Addr {
+	h, pStr, err := net.SplitHostPort(hostname)
+	if err != nil {
+		return fallback
+	}
+	ip := net.ParseIP(strings.Trim(h, "[]"))
+	port, pErr := strconv.Atoi(pStr)
+	if ip != nil && pErr == nil && port > 0 {
+		return &net.TCPAddr{IP: ip, Port: port}
+	}
+	return fallback
+}
+
+func isLoopbackSSHHost(hostname string) bool {
+	h := hostname
+	if splitH, _, err := net.SplitHostPort(hostname); err == nil {
+		h = splitH
+	}
+	h = strings.Trim(h, "[]")
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil && ip.IsLoopback() {
+		return true
+	}
+	return false
+}
+
+// resolveHostKeyCallback configures SSH host-key verification:
+//   - If opts.HostKeyCallback is explicitly supplied, it is used directly.
+//   - If opts.InsecureIgnoreHostKey or MYF5_INSECURE_IGNORE_HOST_KEY=1 is set, host-key checks are bypassed.
+//   - If opts.KnownHostsPath or MYF5_SSH_KNOWN_HOSTS is set (or MYF5_STRICT_HOST_KEY_CHECKING=1),
+//     strict OpenSSH known_hosts verification is enforced (unknown and mismatched keys are rejected).
+//   - Otherwise, for non-loopback hosts when ~/.ssh/known_hosts exists, recorded host-key mismatches
+//     (e.g. cloud EIP reassignment or MITM) are rejected before credentials are sent, while unrecorded
+//     lab hosts remain accepted for backward compatibility.
+func resolveHostKeyCallback(opts SCPOptions) (ssh.HostKeyCallback, error) {
+	if opts.HostKeyCallback != nil {
+		return opts.HostKeyCallback, nil
+	}
+	if opts.InsecureIgnoreHostKey || isTruthyEnv("MYF5_INSECURE_IGNORE_HOST_KEY") {
+		return ssh.InsecureIgnoreHostKey(), nil // #nosec G106 -- explicit caller/env opt-in for ephemeral labs
+	}
+
+	khPath := strings.TrimSpace(opts.KnownHostsPath)
+	if khPath == "" {
+		khPath = strings.TrimSpace(os.Getenv("MYF5_SSH_KNOWN_HOSTS"))
+	}
+	strict := khPath != "" || isTruthyEnv("MYF5_STRICT_HOST_KEY_CHECKING")
+
+	if khPath == "" {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			candidate := filepath.Join(home, ".ssh", "known_hosts")
+			if fi, statErr := os.Stat(candidate); statErr == nil && fi.Mode().IsRegular() {
+				khPath = candidate
+			}
+		}
+	}
+
+	if strict {
+		if khPath == "" {
+			return nil, fmt.Errorf("strict SSH host-key checking enabled (MYF5_STRICT_HOST_KEY_CHECKING), but no known_hosts file was found (set --known-hosts or MYF5_SSH_KNOWN_HOSTS)")
+		}
+		for _, r := range khPath {
+			if r < 32 || r == 127 {
+				return nil, fmt.Errorf("SSH known_hosts path cannot contain control characters")
+			}
+		}
+		cleanKH := filepath.Clean(khPath)
+		fi, err := os.Stat(cleanKH)
+		if err != nil {
+			return nil, fmt.Errorf("failed to access SSH known_hosts file %s: %w", cleanKH, err)
+		}
+		if !fi.Mode().IsRegular() {
+			return nil, fmt.Errorf("SSH known_hosts path must be a regular file: %s", cleanKH)
+		}
+		cb, err := knownhosts.New(cleanKH)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse SSH known_hosts file %s: %w", cleanKH, err)
+		}
+		return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			if err := cb(hostname, targetRemoteAddr(hostname, remote), key); err != nil {
+				return fmt.Errorf("SSH host-key verification failed against %s: %w", cleanKH, err)
+			}
+			return nil
+		}, nil
+	}
+
+	if khPath != "" {
+		if cb, err := knownhosts.New(khPath); err == nil {
+			return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+				if isLoopbackSSHHost(hostname) {
+					return nil
+				}
+				if khErr := cb(hostname, targetRemoteAddr(hostname, remote), key); khErr != nil {
+					var keyErr *knownhosts.KeyError
+					if errors.As(khErr, &keyErr) && len(keyErr.Want) > 0 {
+						return fmt.Errorf("SSH host-key mismatch for %s against %s (possible IP reassignment or MITM): %w", hostname, khPath, khErr)
+					}
+					var revErr *knownhosts.RevokedError
+					if errors.As(khErr, &revErr) {
+						return fmt.Errorf("SSH host key for %s is revoked in %s: %w", hostname, khPath, khErr)
+					}
+				}
+				return nil
+			}, nil
+		}
+	}
+
+	return ssh.InsecureIgnoreHostKey(), nil // #nosec G106 -- fallback when host is not recorded in known_hosts and strict mode is unset
 }
 
 // SCPUpload streams a local file to a remote appliance using the standard SCP sink protocol over SSH.

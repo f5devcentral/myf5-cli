@@ -297,6 +297,8 @@ func TestApplyGeoIPSSHMockServer(t *testing.T) {
 		Port:       port,
 		Timeout:    2 * time.Second,
 	}
+	t.Setenv("MYF5_STRICT_HOST_KEY_CHECKING", "")
+	t.Setenv("MYF5_SSH_KNOWN_HOSTS", "")
 
 	out, err := applyGeoIPSSH(context.Background(), "127.0.0.1", "c2NyaXB0", opts)
 	if err != nil {

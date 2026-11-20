@@ -597,7 +597,7 @@ func runStep1AutoDetection(ctx context.Context, reader *bufio.Reader, out io.Wri
 		if err == nil && host != "" {
 			user, _ := promptNavField(reader, out, "Appliance username", "admin")
 			fmt.Fprintf(out, "Connecting to %s to extract system metadata...\n", host)
-			info := getSystemInfoTarget(ctx, host, "BIG-IP", user, 0, "", "auto", "", "")
+			info := getSystemInfoTarget(ctx, host, "auto", user, 0, "", "auto", "", "")
 			if info != nil {
 				info.PopulateCaseAttributes()
 				if sn := info.PreferredSerialNumber(); sn != "" {
@@ -609,10 +609,19 @@ func runStep1AutoDetection(ctx context.Context, reader *bufio.Reader, out io.Wri
 				if info.Hostname != "" {
 					opts.Hostname = info.Hostname
 				}
-				if info.Platform != "" {
-					opts.Product = fmt.Sprintf("BIG-IP %s", info.Platform)
+				if info.IsBIGIQ() {
+					opts.ProductFamily = "BIG-IQ"
+					opts.Product = "BIG-IQ Centralized Management"
+				} else {
+					opts.ProductFamily = "BIG-IP"
+					if info.Platform != "" {
+						opts.Product = fmt.Sprintf("BIG-IP %s", info.Platform)
+					} else if p := info.CaseAttributes["product"]; p != "" {
+						opts.Product = p
+					}
 				}
 				fmt.Fprintln(out, "\n✓ Successfully extracted appliance details:")
+				fmt.Fprintf(out, "  Product Family : %s\n", opts.ProductFamily)
 				fmt.Fprintf(out, "  Product        : %s\n", opts.Product)
 				fmt.Fprintf(out, "  TMOS Version   : %s\n", opts.Version)
 				fmt.Fprintf(out, "  Serial Number  : %s\n", opts.SerialNumber)
@@ -651,8 +660,18 @@ func runStep1AutoDetection(ctx context.Context, reader *bufio.Reader, out io.Wri
 				if info.Hostname != "" {
 					opts.Hostname = info.Hostname
 				}
-				if info.Platform != "" {
-					opts.Product = fmt.Sprintf("BIG-IP %s", info.Platform)
+				if info.IsBIGIQ() {
+					opts.ProductFamily = "BIG-IQ"
+					opts.Product = "BIG-IQ Centralized Management"
+				} else {
+					if opts.ProductFamily == "" {
+						opts.ProductFamily = "BIG-IP"
+					}
+					if info.Platform != "" {
+						opts.Product = fmt.Sprintf("BIG-IP %s", info.Platform)
+					} else if p := info.CaseAttributes["product"]; p != "" {
+						opts.Product = p
+					}
 				}
 				fmt.Fprintln(out, "\n✓ Successfully extracted QKView diagnostic details:")
 				fmt.Fprintf(out, "  Product Family : %s\n", opts.ProductFamily)

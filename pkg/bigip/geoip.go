@@ -24,21 +24,23 @@ import (
 
 // GeoIPOptions configures connection, execution, and cleanup parameters for appliance GeoIP updates.
 type GeoIPOptions struct {
-	TargetType         string         // Appliance kind: must be "BIG-IP" (BIG-IQ is unsupported)
-	Method             TransferMethod // "auto", "icontrol", "scp", or "ssh"
-	Username           string         // Appliance username (default: "admin")
-	Password           string         // Appliance password
-	PasswordBytes      []byte         // Mutable appliance password bytes for memory scrubbing
-	Port               int            // Management port override (default: 443 for REST, 22 for SSH)
-	IdentityFile       string         // SSH private key path
-	SSHPassphrase      string         // SSH private key passphrase
-	SSHPassphraseBytes []byte         // Mutable SSH passphrase bytes for memory scrubbing
-	ClientCertPath     string         // mTLS client certificate path
-	ClientKeyPath      string         // mTLS client private key path
-	Timeout            time.Duration  // Execution timeout (default: 3 minutes)
-	HTTPClient         *http.Client   // Custom HTTP client for mock/testing
-	Force              bool           // Pass --force to rpm via geoip_update_data -f (default: true)
-	KeepExtracted      bool           // Retain extracted files on appliance (default: false, cleans up temp dir)
+	TargetType            string         // Appliance kind: must be "BIG-IP" (BIG-IQ is unsupported)
+	Method                TransferMethod // "auto", "icontrol", "scp", or "ssh"
+	Username              string         // Appliance username (default: "admin")
+	Password              string         // Appliance password
+	PasswordBytes         []byte         // Mutable appliance password bytes for memory scrubbing
+	Port                  int            // Management port override (default: 443 for REST, 22 for SSH)
+	IdentityFile          string         // SSH private key path
+	SSHPassphrase         string         // SSH private key passphrase
+	SSHPassphraseBytes    []byte         // Mutable SSH passphrase bytes for memory scrubbing
+	KnownHostsPath        string         // Optional OpenSSH known_hosts path for strict SSH host-key verification
+	InsecureIgnoreHostKey bool           // Explicitly bypass SSH host-key verification
+	ClientCertPath        string         // mTLS client certificate path
+	ClientKeyPath         string         // mTLS client private key path
+	Timeout               time.Duration  // Execution timeout (default: 3 minutes)
+	HTTPClient            *http.Client   // Custom HTTP client for mock/testing
+	Force                 bool           // Pass --force to rpm via geoip_update_data -f (default: true)
+	KeepExtracted         bool           // Retain extracted files on appliance (default: false, cleans up temp dir)
 }
 
 // Zero securely scrubs password and passphrase bytes from RAM and clears secret fields.
@@ -128,7 +130,7 @@ func ApplyGeoIP(
 	opts GeoIPOptions,
 	statusCb func(string),
 ) (*GeoIPResult, error) {
-	if strings.EqualFold(opts.TargetType, "BIG-IQ") {
+	if isBigIQTarget(opts.TargetType) {
 		return nil, fmt.Errorf("GeoIP database updates are only supported on BIG-IP appliances (not BIG-IQ)")
 	}
 
@@ -352,15 +354,17 @@ func applyGeoIPSSH(ctx context.Context, host, scriptB64 string, opts GeoIPOption
 		copy(ppCopy, opts.SSHPassphraseBytes)
 	}
 	scpOpts := SCPOptions{
-		Host:            host,
-		Port:            opts.Port,
-		Username:        opts.Username,
-		Password:        opts.Password,
-		PasswordBytes:   pwCopy,
-		KeyPath:         opts.IdentityFile,
-		Passphrase:      opts.SSHPassphrase,
-		PassphraseBytes: ppCopy,
-		Timeout:         opts.Timeout,
+		Host:                  host,
+		Port:                  opts.Port,
+		Username:              opts.Username,
+		Password:              opts.Password,
+		PasswordBytes:         pwCopy,
+		KeyPath:               opts.IdentityFile,
+		Passphrase:            opts.SSHPassphrase,
+		PassphraseBytes:       ppCopy,
+		KnownHostsPath:        opts.KnownHostsPath,
+		InsecureIgnoreHostKey: opts.InsecureIgnoreHostKey,
+		Timeout:               opts.Timeout,
 	}
 	defer scpOpts.Zero()
 
@@ -455,6 +459,7 @@ func applyGeoIPREST(ctx context.Context, host, scriptB64 string, opts GeoIPOptio
 		Username:       user,
 		Password:       opts.Password,
 		PasswordBytes:  pwCopy,
+		TargetType:     opts.TargetType,
 		SkipTLSVerify:  true,
 		ClientCertPath: opts.ClientCertPath,
 		ClientKeyPath:  opts.ClientKeyPath,
@@ -480,10 +485,9 @@ func applyGeoIPREST(ctx context.Context, host, scriptB64 string, opts GeoIPOptio
 	if err != nil {
 		return "", fmt.Errorf("failed to create REST bash request: %w", err)
 	}
-	client.setAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.HTTPClient.Do(req)
+	resp, err := client.doWithAuth(req)
 	if err != nil {
 		return "", fmt.Errorf("REST bash execution request failed: %w", err)
 	}
@@ -495,10 +499,11 @@ func applyGeoIPREST(ctx context.Context, host, scriptB64 string, opts GeoIPOptio
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		summary := summarizeHTTPErrorBody(body)
 		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
-			return "", fmt.Errorf("TMOS bash utility (/mgmt/tm/util/bash) returned HTTP %d (bash utility may be disabled or appliance in Appliance Mode): %s\nRemediation: Use '--method scp' or SSH key authentication to execute directly without the REST bash utility", resp.StatusCode, strings.TrimSpace(string(body)))
+			return "", fmt.Errorf("TMOS bash utility (/mgmt/tm/util/bash) returned HTTP %d (bash utility may be disabled or appliance in Appliance Mode): %s\nRemediation: Use '--method scp' or SSH key authentication to execute directly without the REST bash utility", resp.StatusCode, summary)
 		}
-		return "", fmt.Errorf("REST bash execution failed with HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return "", fmt.Errorf("REST bash execution failed with HTTP %d: %s", resp.StatusCode, summary)
 	}
 
 	var bashResp struct {

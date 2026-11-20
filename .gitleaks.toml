@@ -22,6 +22,8 @@ regexes = [
   '''aus19gt5bu0jGw9Fi358''',
   '''ausp95yxb4ShxMGvW357''',
   '''YourAppliancePassword''',
+  '''YourSecureAppliancePassword''',
+  '''MyP@ssw0rd!\$''',
   '''YourPassword''',
   '''YourF5SupportAPIClientID''',
   '''YourF5SupportAPIClientSecret''',
@@ -31,17 +33,17 @@ regexes = [
 [[rules]]
 id = "f5-auth0-client-secret"
 description = "F5 Identity / Auth0 / Okta Client Secret"
-regex = '''(?i)(?:myf5|ihealth|auth0|f5)[-_]?(?:client)?[-_]?secret\s*[=:]\s*["']?([a-zA-Z0-9_\-]{32,64})'''
+regex = '''(?i)(?:(?:myf5|ihealth|auth0|f5)[-_]?(?:client)?[-_]?secret|client[-_]?secret)\s*[=:]\s*["']?([a-zA-Z0-9_\-]{32,64})'''
 secretGroup = 1
 keywords = ["client-secret", "client_secret", "auth0", "myf5", "ihealth"]
 
-# Guard against BIG-IP admin passwords
+# Guard against BIG-IP / BIG-IQ admin passwords
 [[rules]]
 id = "bigip-admin-password"
-description = "F5 BIG-IP Appliance Password"
-regex = '''(?i)(?:bigip|f5|tmos)[-_]?(?:admin)?[-_]?pass(?:word)?\s*[=:]\s*["']?([^\s'"#]{6,64})'''
+description = "F5 BIG-IP / BIG-IQ Appliance Password"
+regex = '''(?i)(?:bigip|bigiq|f5|tmos)[-_]?(?:admin)?[-_]?pass(?:word)?\s*[=:]\s*["']?([^\s'"#]{6,64})'''
 secretGroup = 1
-keywords = ["bigip", "password", "tmos"]
+keywords = ["bigip", "bigiq", "f5", "pass", "tmos"]
 
 # Guard against iControl REST session tokens
 [[rules]]
@@ -51,11 +53,11 @@ regex = '''(?i)(?:X-F5-Auth-Token|icontrol_token)[\s=:'"]+([A-Z0-9]{20,64})'''
 secretGroup = 1
 keywords = ["x-f5-auth-token", "icontrol"]
 
-# Guard against accidental commitment of QKView bundles
+# Guard against accidental commitment of QKView, UCS, SCF, or Terraform state/plan bundles
 [[rules]]
 id = "f5-qkview-bundle-inclusion"
-description = "Accidental commit of F5 QKView diagnostic bundle"
-path = '''(?i)\.qkview$'''
+description = "Accidental commit of F5 diagnostic archive or Terraform state/plan"
+path = '''(?i)\.(?:qkview|ucs|scf|tfstate|tfplan)$'''
 
 # Guard against API input JSON payloads with embedded credentials
 [[rules]]

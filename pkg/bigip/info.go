@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -484,12 +485,15 @@ func InspectQKViewReader(r io.Reader) (*SystemInfo, error) {
 	return info, nil
 }
 
-// GetSystemInfo queries the live BIG-IP appliance via iControl REST endpoints
-// (/mgmt/tm/sys/hardware, /mgmt/tm/sys/version, /mgmt/tm/sys/license, /mgmt/tm/sys/global-settings).
+// GetSystemInfo queries the live BIG-IP or BIG-IQ appliance via iControl REST endpoints
+// (/mgmt/tm/sys/* with BIG-IQ fallbacks to /mgmt/shared/identified-devices/config/device-info
+// and /mgmt/shared/resolver/device-groups/cm-shared-all-big-iqs/devices).
 func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 	info := &SystemInfo{
 		Source: fmt.Sprintf("appliance: %s (iControl REST)", c.Host),
 	}
+
+	errAuthFailed := errors.New("appliance authentication failed")
 
 	doGet := func(apiPath string, maxBytes int64) ([]byte, error) {
 		if ctx.Err() != nil {
@@ -502,34 +506,53 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 		}
 		resp, err := c.doWithAuth(req)
 		if err != nil {
+			c.authMu.Lock()
+			hasLoginErr := c.loginFailedErr != nil
+			c.authMu.Unlock()
+			if hasLoginErr {
+				return nil, fmt.Errorf("%w: %w", errAuthFailed, err)
+			}
 			return nil, err
 		}
 		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, fmt.Errorf("%w on %s (HTTP 401): verify appliance username and password", errAuthFailed, c.Host)
+		}
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("status %d", resp.StatusCode)
 		}
 		return io.ReadAll(io.LimitReader(resp.Body, maxBytes))
 	}
 
+	checkFatal := func(err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if errors.Is(err, errAuthFailed) {
+			return err
+		}
+		return nil
+	}
+
 	// 1. Hardware & Serial
 	if body, err := doGet("/mgmt/tm/sys/hardware", 1024*1024); err == nil {
 		parseHardwareJSON(body, info)
-	} else if ctx.Err() != nil {
-		return nil, ctx.Err()
+	} else if fErr := checkFatal(err); fErr != nil {
+		return nil, fErr
 	}
 
 	// 2. Version & Build
 	if body, err := doGet("/mgmt/tm/sys/version", 512*1024); err == nil {
 		parseVersionJSON(body, info)
-	} else if ctx.Err() != nil {
-		return nil, ctx.Err()
+	} else if fErr := checkFatal(err); fErr != nil {
+		return nil, fErr
 	}
 
 	// 3. License
 	if body, err := doGet("/mgmt/tm/sys/license", 512*1024); err == nil {
 		parseLicenseJSON(body, info)
-	} else if ctx.Err() != nil {
-		return nil, ctx.Err()
+	} else if fErr := checkFatal(err); fErr != nil {
+		return nil, fErr
 	}
 
 	// 4. Hostname
@@ -540,15 +563,32 @@ func (c *Client) GetSystemInfo(ctx context.Context) (*SystemInfo, error) {
 		if json.Unmarshal(body, &gs) == nil && gs.Hostname != "" {
 			info.Hostname = gs.Hostname
 		}
-	} else if ctx.Err() != nil {
-		return nil, ctx.Err()
+	} else if fErr := checkFatal(err); fErr != nil {
+		return nil, fErr
 	}
 
 	// 5. Provisioned Modules
 	if body, err := doGet("/mgmt/tm/sys/provision", 256*1024); err == nil {
 		parseProvisionJSON(body, info)
-	} else if ctx.Err() != nil {
-		return nil, ctx.Err()
+	} else if fErr := checkFatal(err); fErr != nil {
+		return nil, fErr
+	}
+
+	// 6. BIG-IQ / restjavad shared device-info & self-resolver fallbacks when /mgmt/tm/sys/* is unavailable
+	if info.ChassisSerialNumber == "" || info.Version == "" || info.Hostname == "" {
+		if body, err := doGet("/mgmt/shared/identified-devices/config/device-info", 512*1024); err == nil {
+			parseDeviceInfoJSON(body, info)
+		} else if fErr := checkFatal(err); fErr != nil {
+			return nil, fErr
+		}
+	}
+
+	if info.Version == "" || info.Hostname == "" || info.Product == "" {
+		if body, err := doGet("/mgmt/shared/resolver/device-groups/cm-shared-all-big-iqs/devices", 512*1024); err == nil {
+			parseBigIQResolverDevicesJSON(body, c.Host, info)
+		} else if fErr := checkFatal(err); fErr != nil {
+			return nil, fErr
+		}
 	}
 
 	if info.ChassisSerialNumber == "" && info.RegistrationKey == "" && info.Version == "" {
@@ -728,6 +768,170 @@ func parseProvisionJSON(body []byte, info *SystemInfo) {
 				info.ProvisionedModules[name] = lvl
 			}
 		}
+	}
+}
+
+// parseDeviceInfoJSON extracts system metadata from /mgmt/shared/identified-devices/config/device-info
+// (used by BIG-IQ and BIG-IP restjavad DeviceInfoWorker; fields documented in F5 CloudDocs bigiq_device_info).
+func parseDeviceInfoJSON(body []byte, info *SystemInfo) {
+	var d struct {
+		ChassisSerialNumber   string `json:"chassisSerialNumber"`
+		BigipChassisSerialNum string `json:"bigipChassisSerialNum"`
+		SystemSerialNumber    string `json:"systemSerialNumber"`
+		HostBoardSerial       string `json:"hostBoardSerial"`
+		RegistrationKey       string `json:"registrationKey"`
+		BaseRegKey            string `json:"baseRegKey"`
+		Platform              string `json:"platform"`
+		MarketingName         string `json:"marketingName"`
+		Product               string `json:"product"`
+		ProductCode           string `json:"productCode"`
+		Version               string `json:"version"`
+		ProductVersion        string `json:"productVersion"`
+		Build                 string `json:"build"`
+		ProductBuild          string `json:"productBuild"`
+		Edition               string `json:"edition"`
+		PackageEdition        string `json:"packageEdition"`
+		Hostname              string `json:"hostname"`
+		MCPDeviceName         string `json:"mcpDeviceName"`
+		BaseMac               string `json:"baseMac"`
+		BaseMacAddress        string `json:"baseMacAddress"`
+		Slots                 []struct {
+			Product  string `json:"product"`
+			Version  string `json:"version"`
+			Build    string `json:"build"`
+			IsActive bool   `json:"isActive"`
+		} `json:"slots"`
+	}
+	if err := json.Unmarshal(body, &d); err != nil {
+		return
+	}
+
+	if info.ChassisSerialNumber == "" {
+		for _, s := range []string{d.ChassisSerialNumber, d.BigipChassisSerialNum, d.SystemSerialNumber, d.HostBoardSerial} {
+			if strings.TrimSpace(s) != "" {
+				info.ChassisSerialNumber = strings.TrimSpace(s)
+				break
+			}
+		}
+	}
+	if info.RegistrationKey == "" {
+		for _, s := range []string{d.RegistrationKey, d.BaseRegKey} {
+			if strings.TrimSpace(s) != "" {
+				info.RegistrationKey = strings.TrimSpace(s)
+				break
+			}
+		}
+	}
+	if info.Platform == "" {
+		if strings.TrimSpace(d.Platform) != "" {
+			info.Platform = strings.TrimSpace(d.Platform)
+		} else if strings.TrimSpace(d.MarketingName) != "" {
+			info.Platform = strings.TrimSpace(d.MarketingName)
+		}
+	}
+	if info.Product == "" {
+		if strings.TrimSpace(d.Product) != "" {
+			info.Product = strings.TrimSpace(d.Product)
+		} else if strings.TrimSpace(d.ProductCode) != "" {
+			info.Product = strings.TrimSpace(d.ProductCode)
+		}
+	}
+	if info.Version == "" {
+		if strings.TrimSpace(d.Version) != "" {
+			info.Version = strings.TrimSpace(d.Version)
+		} else if strings.TrimSpace(d.ProductVersion) != "" {
+			info.Version = strings.TrimSpace(d.ProductVersion)
+		}
+	}
+	if info.Build == "" {
+		if strings.TrimSpace(d.Build) != "" {
+			info.Build = strings.TrimSpace(d.Build)
+		} else if strings.TrimSpace(d.ProductBuild) != "" {
+			info.Build = strings.TrimSpace(d.ProductBuild)
+		}
+	}
+	if info.Edition == "" {
+		if strings.TrimSpace(d.Edition) != "" {
+			info.Edition = strings.TrimSpace(d.Edition)
+		} else if strings.TrimSpace(d.PackageEdition) != "" {
+			info.Edition = strings.TrimSpace(d.PackageEdition)
+		}
+	}
+	if info.Hostname == "" {
+		if strings.TrimSpace(d.Hostname) != "" {
+			info.Hostname = strings.TrimSpace(d.Hostname)
+		} else if mcp := strings.TrimPrefix(strings.TrimSpace(d.MCPDeviceName), "/Common/"); mcp != "" {
+			info.Hostname = mcp
+		}
+	}
+	if info.BaseMac == "" {
+		if strings.TrimSpace(d.BaseMac) != "" {
+			info.BaseMac = strings.TrimSpace(d.BaseMac)
+		} else if strings.TrimSpace(d.BaseMacAddress) != "" {
+			info.BaseMac = strings.TrimSpace(d.BaseMacAddress)
+		}
+	}
+	for _, slot := range d.Slots {
+		if !slot.IsActive {
+			continue
+		}
+		if info.Product == "" && strings.TrimSpace(slot.Product) != "" {
+			info.Product = strings.TrimSpace(slot.Product)
+		}
+		if info.Version == "" && strings.TrimSpace(slot.Version) != "" {
+			info.Version = strings.TrimSpace(slot.Version)
+		}
+		if info.Build == "" && strings.TrimSpace(slot.Build) != "" {
+			info.Build = strings.TrimSpace(slot.Build)
+		}
+	}
+}
+
+// parseBigIQResolverDevicesJSON extracts BIG-IQ self-node version/hostname/product metadata from
+// /mgmt/shared/resolver/device-groups/cm-shared-all-big-iqs/devices.
+func parseBigIQResolverDevicesJSON(body []byte, targetHost string, info *SystemInfo) {
+	type resolverItem struct {
+		Address           string `json:"address"`
+		ManagementAddress string `json:"managementAddress"`
+		Hostname          string `json:"hostname"`
+		Product           string `json:"product"`
+		Version           string `json:"version"`
+		Build             string `json:"build"`
+		Edition           string `json:"edition"`
+	}
+	var resp struct {
+		Items []resolverItem `json:"items"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil || len(resp.Items) == 0 {
+		return
+	}
+
+	selected := &resp.Items[0]
+	for i := range resp.Items {
+		it := &resp.Items[i]
+		if strings.EqualFold(it.Address, targetHost) ||
+			strings.EqualFold(it.ManagementAddress, targetHost) ||
+			strings.EqualFold(it.Hostname, targetHost) ||
+			it.Address == "127.0.0.1" {
+			selected = it
+			break
+		}
+	}
+
+	if info.Product == "" && strings.TrimSpace(selected.Product) != "" {
+		info.Product = strings.TrimSpace(selected.Product)
+	}
+	if info.Version == "" && strings.TrimSpace(selected.Version) != "" {
+		info.Version = strings.TrimSpace(selected.Version)
+	}
+	if info.Build == "" && strings.TrimSpace(selected.Build) != "" {
+		info.Build = strings.TrimSpace(selected.Build)
+	}
+	if info.Edition == "" && strings.TrimSpace(selected.Edition) != "" {
+		info.Edition = strings.TrimSpace(selected.Edition)
+	}
+	if info.Hostname == "" && strings.TrimSpace(selected.Hostname) != "" {
+		info.Hostname = strings.TrimSpace(selected.Hostname)
 	}
 }
 

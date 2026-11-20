@@ -18,36 +18,49 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"myf5-cli/pkg/auth"
 	"myf5-cli/pkg/client"
 )
 
-// Client interacts with BIG-IP iControl REST APIs.
+// Client interacts with BIG-IP and BIG-IQ iControl REST APIs.
 type Client struct {
-	Scheme        string
-	Host          string
-	Port          int
-	Username      string
-	Password      string
-	PasswordBytes []byte
-	authToken     []byte
-	HTTPClient    *http.Client
+	Scheme         string
+	Host           string
+	Port           int
+	Username       string
+	Password       string
+	PasswordBytes  []byte
+	TargetType     string
+	authMu         sync.Mutex
+	authToken      []byte
+	refreshToken   []byte
+	loginFailedErr error
+	HTTPClient     *http.Client
 }
 
-// Zero securely scrubs appliance password bytes from RAM and clears password string fields.
+// Zero securely scrubs appliance password bytes and REST tokens from RAM and clears secret fields.
 func (c *Client) Zero() {
 	if c == nil {
 		return
 	}
-	if len(c.PasswordBytes) > 0 {
-		auth.ZeroBytes(c.PasswordBytes)
-		c.PasswordBytes = nil
-	}
+	c.authMu.Lock()
 	if len(c.authToken) > 0 {
 		auth.ZeroBytes(c.authToken)
 		c.authToken = nil
+	}
+	if len(c.refreshToken) > 0 {
+		auth.ZeroBytes(c.refreshToken)
+		c.refreshToken = nil
+	}
+	c.loginFailedErr = nil
+	c.authMu.Unlock()
+
+	if len(c.PasswordBytes) > 0 {
+		auth.ZeroBytes(c.PasswordBytes)
+		c.PasswordBytes = nil
 	}
 	c.Password = ""
 }
@@ -222,6 +235,7 @@ type ClientOptions struct {
 	Username       string
 	Password       string
 	PasswordBytes  []byte
+	TargetType     string
 	SkipTLSVerify  bool
 	ClientCertPath string
 	ClientKeyPath  string
@@ -229,7 +243,16 @@ type ClientOptions struct {
 	HTTPClient     *http.Client
 }
 
-// NewClientWithOptions initializes a BIG-IP appliance client with validation and optional mTLS client certificates.
+func isTruthyEnv(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// NewClientWithOptions initializes a BIG-IP / BIG-IQ appliance client with validation and optional mTLS client certificates.
 func NewClientWithOptions(opts ClientOptions) (*Client, error) {
 	if opts.Username != "" {
 		if err := ValidateApplianceUsername(opts.Username); err != nil {
@@ -269,6 +292,11 @@ func NewClientWithOptions(opts ClientOptions) (*Client, error) {
 		timeout = 60 * time.Minute
 	}
 
+	skipTLS := opts.SkipTLSVerify
+	if isTruthyEnv("MYF5_STRICT_APPLIANCE_TLS") {
+		skipTLS = false
+	}
+
 	var httpClient *http.Client
 	if opts.HTTPClient != nil {
 		httpClient = opts.HTTPClient
@@ -277,13 +305,13 @@ func NewClientWithOptions(opts ClientOptions) (*Client, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to load client certificate: %w", err)
 		}
-		if opts.SkipTLSVerify {
+		if skipTLS {
 			httpClient = client.NewInsecureHTTPClientWithCert(timeout, cert)
 		} else {
 			httpClient = client.NewSecureHTTPClientWithCert(timeout, cert)
 		}
 	} else {
-		if opts.SkipTLSVerify {
+		if skipTLS {
 			httpClient = client.NewInsecureHTTPClient(timeout)
 		} else {
 			httpClient = client.NewSecureHTTPClient(timeout)
@@ -302,8 +330,26 @@ func NewClientWithOptions(opts ClientOptions) (*Client, error) {
 		Username:      opts.Username,
 		Password:      opts.Password,
 		PasswordBytes: pwBytes,
+		TargetType:    normalizeTargetType(opts.TargetType),
 		HTTPClient:    httpClient,
 	}, nil
+}
+
+// isBigIQTarget reports whether targetType refers to a BIG-IQ appliance (accepting both "BIG-IQ" and "bigiq").
+func isBigIQTarget(targetType string) bool {
+	t := strings.TrimSpace(targetType)
+	return strings.EqualFold(t, "BIG-IQ") || strings.EqualFold(t, "bigiq")
+}
+
+func normalizeTargetType(targetType string) string {
+	t := strings.TrimSpace(targetType)
+	if isBigIQTarget(t) {
+		return "BIG-IQ"
+	}
+	if strings.EqualFold(t, "BIG-IP") || strings.EqualFold(t, "bigip") {
+		return "BIG-IP"
+	}
+	return targetType
 }
 
 // NewClient initializes a BIG-IP appliance client with insecure TLS bypass enabled by default for lab/self-signed appliances.
@@ -385,8 +431,25 @@ func (c *Client) BaseURL() string {
 	return fmt.Sprintf("%s://%s:%d", scheme, host, c.Port)
 }
 
-// CheckReadyWithKind queries /mgmt/tm/sys/ready (or /mgmt/shared/echo for BIG-IQ) to verify appliance availability and returns the appliance kind.
+// CheckReadyWithKind queries /mgmt/tm/sys/ready (with BIG-IQ fallbacks to /mgmt/shared/echo,
+// /mgmt/cm/system/machineid-resolver, and /mgmt/shared/failover-state) to verify appliance
+// availability and returns the detected appliance kind ("BIG-IP", "BIG-IQ", or "" if not ready).
 func (c *Client) CheckReadyWithKind(ctx context.Context) (string, error) {
+	probeOK := func(endpoint string) (int, error) {
+		u := fmt.Sprintf("%s%s", c.BaseURL(), endpoint)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return 0, err
+		}
+		resp, err := c.doWithAuth(req)
+		if err != nil {
+			return 0, err
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+		_ = resp.Body.Close()
+		return resp.StatusCode, nil
+	}
+
 	url := fmt.Sprintf("%s/mgmt/tm/sys/ready", c.BaseURL())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -398,6 +461,10 @@ func (c *Client) CheckReadyWithKind(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("device reachability check failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return "", fmt.Errorf("authentication failed on %s (HTTP 401): verify appliance username and password", c.Host)
+	}
 
 	if resp.StatusCode == http.StatusOK {
 		verURL := fmt.Sprintf("%s/mgmt/tm/sys/version", c.BaseURL())
@@ -418,15 +485,28 @@ func (c *Client) CheckReadyWithKind(ctx context.Context) (string, error) {
 		return "BIG-IP", nil
 	}
 
-	// Fallback to /mgmt/shared/echo for BIG-IQ and appliances without sys ready
-	if resp.StatusCode == http.StatusNotFound {
-		echoURL := fmt.Sprintf("%s/mgmt/shared/echo", c.BaseURL())
-		echoReq, echoErr := http.NewRequestWithContext(ctx, http.MethodGet, echoURL, nil)
-		if echoErr == nil {
-			if echoResp, doErr := c.doWithAuth(echoReq); doErr == nil {
-				defer echoResp.Body.Close()
-				if echoResp.StatusCode == http.StatusOK {
-					return "BIG-IQ", nil
+	// Fallback to /mgmt/shared/echo for BIG-IQ and appliances without /mgmt/tm/sys/ready
+	// (BIG-IQ webd / restjavad returns 404 or 403 on /mgmt/tm/sys/ready).
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusBadRequest {
+		if code, echoErr := probeOK("/mgmt/shared/echo"); echoErr == nil {
+			if code == http.StatusOK {
+				return "BIG-IQ", nil
+			}
+			if code == http.StatusUnauthorized {
+				return "", fmt.Errorf("authentication failed on %s (HTTP 401): verify appliance username and password", c.Host)
+			}
+		}
+		// When explicitly targeting BIG-IQ, also probe documented public BIG-IQ API endpoints
+		// in case webd blocks internal /mgmt/shared/echo on hardened BIG-IQ 8.x builds.
+		if isBigIQTarget(c.TargetType) {
+			for _, pubEndpoint := range []string{"/mgmt/cm/system/machineid-resolver", "/mgmt/shared/failover-state"} {
+				if code, pubErr := probeOK(pubEndpoint); pubErr == nil {
+					if code == http.StatusOK {
+						return "BIG-IQ", nil
+					}
+					if code == http.StatusUnauthorized {
+						return "", fmt.Errorf("authentication failed on %s (HTTP 401): verify appliance username and password", c.Host)
+					}
 				}
 			}
 		}
@@ -703,17 +783,21 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 				defer bashResp.Body.Close()
 				bashBody, _ := io.ReadAll(io.LimitReader(bashResp.Body, 1024*1024))
 				if bashResp.StatusCode < 200 || bashResp.StatusCode >= 300 {
-					return "", fmt.Errorf("bash qkview generation failed with HTTP %d: %s", bashResp.StatusCode, string(bashBody))
+					summary := summarizeHTTPErrorBody(bashBody)
+					if bashResp.StatusCode == http.StatusForbidden || bashResp.StatusCode == http.StatusNotFound {
+						return "", fmt.Errorf("bash qkview generation failed with HTTP %d (%s): /mgmt/tm/util/bash is blocked or unavailable on this appliance (use --method scp or SSH)", bashResp.StatusCode, summary)
+					}
+					return "", fmt.Errorf("bash qkview generation failed with HTTP %d: %s", bashResp.StatusCode, summary)
 				}
 				if strings.Contains(string(bashBody), "command not found") || strings.Contains(string(bashBody), "syntax error") {
-					return "", fmt.Errorf("bash qkview generation command failed: %s", string(bashBody))
+					return "", fmt.Errorf("bash qkview generation command failed: %s", summarizeHTTPErrorBody(bashBody))
 				}
 				return filename, nil
 			}
 
 			if res.resp.StatusCode < 200 || res.resp.StatusCode >= 300 {
 				b, _ := io.ReadAll(io.LimitReader(res.resp.Body, 1024*1024))
-				return "", fmt.Errorf("qkview generation failed with HTTP %d: %s", res.resp.StatusCode, string(b))
+				return "", fmt.Errorf("qkview generation failed with HTTP %d: %s", res.resp.StatusCode, summarizeHTTPErrorBody(b))
 			}
 
 			return filename, nil
@@ -722,7 +806,8 @@ func (c *Client) GenerateQKViewWithStatus(ctx context.Context, filename string, 
 }
 
 // DownloadFromURI streams a file from an iControl REST endpoint URI (e.g. /mgmt/cm/autodeploy/software-image-downloads/<filename>)
-// to a local file using Content-Range chunking and reports progress via progressCb.
+// to a local file using Content-Range chunking (or single-response 200 OK for BIG-IQ /mgmt/shared/file-transfer/downloads)
+// and reports progress via progressCb.
 func (c *Client) DownloadFromURI(ctx context.Context, endpointURI, localPath string, progressCb func(transferred, total int64)) error {
 	localPath = filepath.Clean(localPath)
 	if dir := filepath.Dir(localPath); dir != "." && dir != "" {
@@ -770,17 +855,15 @@ func (c *Client) DownloadFromURI(ctx context.Context, endpointURI, localPath str
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 			_ = resp.Body.Close()
-			return fmt.Errorf("chunk download failed with HTTP %d: %s", resp.StatusCode, string(b))
+			return fmt.Errorf("chunk download failed with HTTP %d: %s", resp.StatusCode, summarizeHTTPErrorBody(b))
 		}
 
-		if totalSize == 0 {
-			crange := resp.Header.Get("Content-Range")
-			if crange != "" {
-				parts := strings.Split(crange, "/")
-				if len(parts) == 2 {
-					if total, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
-						totalSize = total
-					}
+		crange := resp.Header.Get("Content-Range")
+		if totalSize == 0 && crange != "" {
+			parts := strings.Split(crange, "/")
+			if len(parts) == 2 {
+				if total, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+					totalSize = total
 				}
 			}
 		}
@@ -791,11 +874,22 @@ func (c *Client) DownloadFromURI(ctx context.Context, endpointURI, localPath str
 			return fmt.Errorf("failed saving chunk: %w", err)
 		}
 		currentBytes += n
+
+		// Endpoints such as BIG-IQ GET /mgmt/shared/file-transfer/downloads/<file-name>
+		// return the full file in a single 200 OK body without a Content-Range header.
+		if crange == "" && resp.StatusCode == http.StatusOK {
+			totalSize = currentBytes
+			if progressCb != nil && totalSize > 0 {
+				progressCb(currentBytes, totalSize)
+			}
+			break
+		}
+
 		if progressCb != nil && totalSize > 0 {
 			progressCb(currentBytes, totalSize)
 		}
 
-		if totalSize > 0 && currentBytes >= totalSize {
+		if (totalSize > 0 && currentBytes >= totalSize) || n == 0 {
 			break
 		}
 
@@ -807,7 +901,9 @@ func (c *Client) DownloadFromURI(ctx context.Context, endpointURI, localPath str
 		}
 	}
 
-	_ = out.Close()
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("failed closing downloaded file: %w", err)
+	}
 	return os.Rename(partPath, localPath)
 }
 
@@ -816,6 +912,9 @@ func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath s
 	if err := ValidateQKViewFilename(remoteFilename); err != nil {
 		return err
 	}
+	if isBigIQTarget(c.TargetType) {
+		return fmt.Errorf("BIG-IQ does not expose /mgmt/cm/autodeploy/qkview-downloads over iControl REST; use --method scp to download /var/tmp/qkviews/%s", remoteFilename)
+	}
 	endpoint := fmt.Sprintf("/mgmt/cm/autodeploy/qkview-downloads/%s", remoteFilename)
 	return c.DownloadFromURI(ctx, endpoint, localPath, progressCb)
 }
@@ -823,7 +922,8 @@ func (c *Client) DownloadQKView(ctx context.Context, remoteFilename, localPath s
 // DownloadFile downloads a file from the BIG-IP or BIG-IQ appliance via iControl REST.
 // Downloads are strictly restricted to .qkview and .iso files.
 // For files in /shared/images/, it queries /mgmt/cm/autodeploy/software-image-downloads/.
-// For files in /var/tmp/qkviews/, it queries /mgmt/cm/autodeploy/qkview-downloads/.
+// For files in /var/config/rest/downloads/, it queries /mgmt/shared/file-transfer/downloads/.
+// For files in /var/tmp/qkviews/ (BIG-IP only), it queries /mgmt/cm/autodeploy/qkview-downloads/.
 // Other absolute paths are rejected because iControl REST endpoints only serve those specific directories.
 func (c *Client) DownloadFile(ctx context.Context, remotePath, localPath string, progressCb func(transferred, total int64)) error {
 	cleanRemote := path.Clean(remotePath)
@@ -847,16 +947,25 @@ func (c *Client) DownloadFile(ctx context.Context, remotePath, localPath string,
 		if path.Dir(cleanRemote) == "/shared/images" && ext == ".iso" {
 			return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/software-image-downloads/%s", baseFilename), localPath, progressCb)
 		}
+		if path.Dir(cleanRemote) == "/var/config/rest/downloads" && (ext == ".iso" || ext == ".qkview") {
+			return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/shared/file-transfer/downloads/%s", baseFilename), localPath, progressCb)
+		}
 		if path.Dir(cleanRemote) == "/var/tmp/qkviews" && ext == ".qkview" {
+			if isBigIQTarget(c.TargetType) {
+				return fmt.Errorf("BIG-IQ does not expose /mgmt/cm/autodeploy/qkview-downloads for /var/tmp/qkviews/ over iControl REST (supported BIG-IQ REST download paths: /shared/images/*.iso and /var/config/rest/downloads/*.{iso,qkview}); use --method scp for %q", remotePath)
+			}
 			return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/qkview-downloads/%s", baseFilename), localPath, progressCb)
 		}
-		return fmt.Errorf("iControl REST download only supports .qkview files in /var/tmp/qkviews/ and .iso files in /shared/images/ (got %q); use --method scp for other paths", remotePath)
+		return fmt.Errorf("iControl REST download only supports .qkview files in /var/tmp/qkviews/, .iso files in /shared/images/, and .iso/.qkview files in /var/config/rest/downloads/ (got %q); use --method scp for other paths", remotePath)
 	}
 
 	if ext == ".iso" {
 		return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/software-image-downloads/%s", baseFilename), localPath, progressCb)
 	}
 	if ext == ".qkview" {
+		if isBigIQTarget(c.TargetType) {
+			return fmt.Errorf("BIG-IQ does not expose /mgmt/cm/autodeploy/qkview-downloads over iControl REST; specify /var/config/rest/downloads/%s or use --method scp", baseFilename)
+		}
 		return c.DownloadFromURI(ctx, fmt.Sprintf("/mgmt/cm/autodeploy/qkview-downloads/%s", baseFilename), localPath, progressCb)
 	}
 
@@ -882,7 +991,7 @@ func (c *Client) DeleteQKView(ctx context.Context, remoteFilename string) error 
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-		return fmt.Errorf("delete failed with HTTP %d: %s", resp.StatusCode, string(b))
+		return fmt.Errorf("delete failed with HTTP %d: %s", resp.StatusCode, summarizeHTTPErrorBody(b))
 	}
 
 	return nil
@@ -930,7 +1039,7 @@ func (c *Client) GetEndpointExample(ctx context.Context, endpoint string) ([]byt
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("example request to %s returned HTTP %d: %s", p, resp.StatusCode, string(body))
+		return nil, fmt.Errorf("example request to %s returned HTTP %d: %s", p, resp.StatusCode, summarizeHTTPErrorBody(body))
 	}
 
 	// Indent JSON if valid
@@ -942,9 +1051,86 @@ func (c *Client) GetEndpointExample(ctx context.Context, endpoint string) ([]byt
 	return body, nil
 }
 
+var (
+	htmlTagRe        = regexp.MustCompile(`<[^>]+>`)
+	htmlTitleRe      = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	htmlWebdFooterRe = regexp.MustCompile(`(?is)<center>\s*webd\s*</center>`)
+	multiSpaceRe     = regexp.MustCompile(`\s+`)
+)
+
+// summarizeHTTPErrorBody converts multi-line HTML error pages (e.g. BIG-IQ webd 403 or
+// WSGI/Apache 404 responses) into compact single-line summaries while preserving JSON
+// and plain-text error payloads intact.
+func summarizeHTTPErrorBody(body []byte) string {
+	s := strings.TrimSpace(string(body))
+	if s == "" {
+		return ""
+	}
+	lower := strings.ToLower(s)
+	if !strings.Contains(lower, "<html") && !strings.Contains(lower, "<!doctype html") && !strings.Contains(lower, "<title>") && !strings.Contains(lower, "<h1>") {
+		return s
+	}
+
+	isWebd := htmlWebdFooterRe.MatchString(s)
+	title := ""
+	if m := htmlTitleRe.FindStringSubmatch(s); len(m) > 1 {
+		title = multiSpaceRe.ReplaceAllString(strings.TrimSpace(htmlTagRe.ReplaceAllString(m[1], " ")), " ")
+	}
+
+	stripped := htmlTagRe.ReplaceAllString(s, " ")
+	stripped = multiSpaceRe.ReplaceAllString(strings.TrimSpace(stripped), " ")
+	if title != "" && isWebd && (stripped == title+" "+title+" webd" || strings.EqualFold(stripped, title+" webd")) {
+		return title + " (webd)"
+	}
+	if title != "" && strings.HasPrefix(stripped, title+" ") {
+		rest := strings.TrimSpace(strings.TrimPrefix(stripped, title))
+		// Avoid repeating identical heading after <title> (e.g. "404 Not Found" + "Not Found")
+		for _, dup := range []string{title, strings.TrimSpace(strings.TrimLeft(title, "0123456789 "))} {
+			if dup != "" && strings.HasPrefix(rest, dup) {
+				rest = strings.TrimSpace(strings.TrimPrefix(rest, dup))
+			}
+		}
+		if isWebd && strings.HasSuffix(rest, "webd") {
+			rest = strings.TrimSpace(strings.TrimSuffix(rest, "webd"))
+			if rest == "" {
+				return title + " (webd)"
+			}
+			return fmt.Sprintf("%s: %s (webd)", title, rest)
+		}
+		if rest == "" {
+			return title
+		}
+		return fmt.Sprintf("%s: %s", title, rest)
+	}
+	return stripped
+}
+
+type authHTTPStatusError struct {
+	statusCode int
+	message    string
+}
+
+func (e *authHTTPStatusError) Error() string {
+	return fmt.Sprintf("login failed with HTTP %d: %s", e.statusCode, e.message)
+}
+
+func (c *Client) hasClientCert() bool {
+	if c == nil || c.HTTPClient == nil {
+		return false
+	}
+	if tr, ok := c.HTTPClient.Transport.(*http.Transport); ok && tr != nil && tr.TLSClientConfig != nil {
+		return len(tr.TLSClientConfig.Certificates) > 0
+	}
+	return false
+}
+
 func (c *Client) setAuth(req *http.Request) {
-	if len(c.authToken) > 0 {
-		req.Header.Set("X-F5-Auth-Token", string(c.authToken))
+	c.authMu.Lock()
+	tokenCopy := string(c.authToken)
+	c.authMu.Unlock()
+
+	if tokenCopy != "" {
+		req.Header.Set("X-F5-Auth-Token", tokenCopy)
 		req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
 		return
 	}
@@ -952,6 +1138,10 @@ func (c *Client) setAuth(req *http.Request) {
 	pwBytes := c.PasswordBytes
 	if len(pwBytes) == 0 && c.Password != "" {
 		pwBytes = []byte(c.Password)
+	}
+	if len(pwBytes) == 0 && c.hasClientCert() {
+		req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
+		return
 	}
 	buf := make([]byte, len(c.Username)+1+len(pwBytes))
 	copy(buf, c.Username)
@@ -964,78 +1154,239 @@ func (c *Client) setAuth(req *http.Request) {
 	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
 }
 
-func (c *Client) acquireAuthToken(ctx context.Context) error {
-	loginURL := fmt.Sprintf("%s/mgmt/shared/authn/login", c.BaseURL())
-	pw := string(c.PasswordBytes)
-	if pw == "" && c.Password != "" {
-		pw = c.Password
+func (c *Client) storeTokensLocked(accessToken, refresh string) {
+	if len(c.authToken) > 0 {
+		auth.ZeroBytes(c.authToken)
 	}
-	payload := map[string]string{
-		"username":          c.Username,
-		"password":          pw,
-		"loginProviderName": "tmos",
+	c.authToken = []byte(accessToken)
+	if refresh != "" {
+		if len(c.refreshToken) > 0 {
+			auth.ZeroBytes(c.refreshToken)
+		}
+		c.refreshToken = []byte(refresh)
 	}
+	c.loginFailedErr = nil
+}
+
+func (c *Client) postAuthTokenPayload(ctx context.Context, endpointURL string, payload any) (string, string, int, error) {
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("failed to marshal login payload: %w", err)
+		return "", "", 0, fmt.Errorf("failed to marshal login payload: %w", err)
 	}
+	defer auth.ZeroBytes(bodyBytes)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return fmt.Errorf("failed to create login request: %w", err)
+		return "", "", 0, fmt.Errorf("failed to create login request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "myf5-cli-go/1.0.0")
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("login request failed: %w", err)
+		return "", "", 0, fmt.Errorf("login request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-		return fmt.Errorf("login failed with HTTP %d: %s", resp.StatusCode, string(b))
+		return "", "", resp.StatusCode, &authHTTPStatusError{
+			statusCode: resp.StatusCode,
+			message:    summarizeHTTPErrorBody(b),
+		}
 	}
 
 	var parsed struct {
 		Token struct {
 			Token string `json:"token"`
 		} `json:"token"`
+		RefreshToken struct {
+			Token string `json:"token"`
+		} `json:"refreshToken"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1024*1024)).Decode(&parsed); err != nil {
-		return fmt.Errorf("failed to decode login token response: %w", err)
+		return "", "", resp.StatusCode, fmt.Errorf("failed to decode login token response: %w", err)
 	}
 	if parsed.Token.Token == "" {
-		return errors.New("empty token received from login response")
+		return "", "", resp.StatusCode, errors.New("empty token received from login response")
+	}
+	return parsed.Token.Token, parsed.RefreshToken.Token, resp.StatusCode, nil
+}
+
+// acquireAuthToken obtains an iControl REST X-F5-Auth-Token via POST /mgmt/shared/authn/login.
+// Per F5 BIG-IQ API Reference (r_auth_login.html), BIG-IQ local authentication omits
+// loginProviderName (resolving to provider "local"), whereas BIG-IP TMOS uses
+// "loginProviderName": "tmos". Both forms are supported cleanly without redundant lockouts.
+func (c *Client) acquireAuthToken(ctx context.Context) error {
+	c.authMu.Lock()
+	defer c.authMu.Unlock()
+	return c.acquireAuthTokenLocked(ctx)
+}
+
+func (c *Client) acquireAuthTokenLocked(ctx context.Context) error {
+	loginURL := fmt.Sprintf("%s/mgmt/shared/authn/login", c.BaseURL())
+	pw := string(c.PasswordBytes)
+	if pw == "" && c.Password != "" {
+		pw = c.Password
 	}
 
-	c.authToken = []byte(parsed.Token.Token)
-	return nil
+	if pw == "" && c.hasClientCert() {
+		tok, refTok, status, err := c.postAuthTokenPayload(ctx, loginURL, map[string]bool{"needsToken": true})
+		if err != nil {
+			if status == http.StatusUnauthorized || status == http.StatusForbidden {
+				c.loginFailedErr = err
+			}
+			return err
+		}
+		c.storeTokensLocked(tok, refTok)
+		return nil
+	}
+
+	bigiqPayload := map[string]string{
+		"username": c.Username,
+		"password": pw,
+	}
+	tmosPayload := map[string]string{
+		"username":          c.Username,
+		"password":          pw,
+		"loginProviderName": "tmos",
+	}
+
+	if isBigIQTarget(c.TargetType) {
+		tok, refTok, status, err := c.postAuthTokenPayload(ctx, loginURL, bigiqPayload)
+		if err == nil {
+			c.storeTokensLocked(tok, refTok)
+			return nil
+		}
+		// Only retry with "tmos" if the endpoint rejected the schema (HTTP 400) or mentioned loginProviderName,
+		// avoiding duplicate failed login attempts on BIG-IQ when a password is wrong.
+		if status == http.StatusBadRequest || (status == http.StatusUnauthorized && strings.Contains(strings.ToLower(err.Error()), "provider")) {
+			if tok2, refTok2, status2, err2 := c.postAuthTokenPayload(ctx, loginURL, tmosPayload); err2 == nil {
+				c.storeTokensLocked(tok2, refTok2)
+				return nil
+			} else if status2 == http.StatusUnauthorized || status2 == http.StatusForbidden {
+				c.loginFailedErr = err2
+				return err2
+			}
+		}
+		if status == http.StatusUnauthorized || status == http.StatusForbidden {
+			c.loginFailedErr = err
+		}
+		return err
+	}
+
+	// Default (BIG-IP or auto): try standard TMOS provider first; if rejected with 400/401
+	// (e.g. auto-detecting a BIG-IQ whose local provider is "local", not "tmos"), retry without loginProviderName.
+	tok, refTok, status, err := c.postAuthTokenPayload(ctx, loginURL, tmosPayload)
+	if err == nil {
+		c.storeTokensLocked(tok, refTok)
+		return nil
+	}
+	if status == http.StatusBadRequest || status == http.StatusUnauthorized {
+		if tok2, refTok2, _, err2 := c.postAuthTokenPayload(ctx, loginURL, bigiqPayload); err2 == nil {
+			c.storeTokensLocked(tok2, refTok2)
+			return nil
+		}
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		c.loginFailedErr = err
+	}
+	return err
+}
+
+// refreshAuthToken exchanges an unexpired BIG-IQ refreshToken via POST /mgmt/shared/authn/exchange
+// (F5 BIG-IQ API Reference r_auth_exchange.html) when the 5-minute access token expires mid-session,
+// falling back to acquireAuthTokenLocked if no refresh token is available or exchange fails.
+func (c *Client) refreshAuthTokenLocked(ctx context.Context) error {
+	if len(c.authToken) > 0 {
+		auth.ZeroBytes(c.authToken)
+		c.authToken = nil
+	}
+	if len(c.refreshToken) > 0 {
+		exchangeURL := fmt.Sprintf("%s/mgmt/shared/authn/exchange", c.BaseURL())
+		payload := map[string]any{
+			"refreshToken": map[string]string{
+				"token": string(c.refreshToken),
+			},
+		}
+		if tok, refTok, _, err := c.postAuthTokenPayload(ctx, exchangeURL, payload); err == nil {
+			c.storeTokensLocked(tok, refTok)
+			return nil
+		}
+		auth.ZeroBytes(c.refreshToken)
+		c.refreshToken = nil
+	}
+	if len(c.PasswordBytes) > 0 || c.Password != "" || c.hasClientCert() {
+		return c.acquireAuthTokenLocked(ctx)
+	}
+	return errors.New("cannot refresh expired auth token without credentials")
 }
 
 func (c *Client) doWithAuth(req *http.Request) (*http.Response, error) {
+	hasCreds := len(c.PasswordBytes) > 0 || c.Password != "" || c.hasClientCert()
+
+	c.authMu.Lock()
+	hasToken := len(c.authToken) > 0
+	priorLoginErr := c.loginFailedErr
+	isBigIQ := isBigIQTarget(c.TargetType)
+	if isBigIQ && !hasToken && hasCreds && priorLoginErr == nil {
+		// BIG-IQ disables HTTP Basic authentication by default (r_auth_login.html) and its
+		// WSGI file-transfer handlers require X-F5-Auth-Token on the initial request.
+		tokenErr := c.acquireAuthTokenLocked(req.Context())
+		if tokenErr == nil {
+			hasToken = true
+		} else {
+			var statusErr *authHTTPStatusError
+			if errors.As(tokenErr, &statusErr) && (statusErr.statusCode == http.StatusUnauthorized || statusErr.statusCode == http.StatusForbidden) {
+				c.authMu.Unlock()
+				return nil, fmt.Errorf("BIG-IQ authentication failed on %s: %w", c.Host, tokenErr)
+			}
+			// If /mgmt/shared/authn/login returned 404 (e.g. a simplified mock server in tests),
+			// fall through and send the request normally.
+		}
+	} else if isBigIQ && !hasToken && priorLoginErr != nil {
+		c.authMu.Unlock()
+		return nil, fmt.Errorf("BIG-IQ authentication failed on %s: %w", c.Host, priorLoginErr)
+	}
+	c.authMu.Unlock()
+
 	c.setAuth(req)
 	resp, err := c.HTTPClient.Do(req)
-	if err == nil && resp.StatusCode == http.StatusUnauthorized && len(c.authToken) == 0 && (len(c.PasswordBytes) > 0 || c.Password != "") {
-		if req.Body == nil || req.GetBody != nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
+	if err == nil && resp.StatusCode == http.StatusUnauthorized && hasCreds && (req.Body == nil || req.GetBody != nil) {
+		origBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+		_ = resp.Body.Close()
 
-			if tokenErr := c.acquireAuthToken(req.Context()); tokenErr == nil {
-				req2 := req.Clone(req.Context())
-				if req.GetBody != nil {
-					b, err := req.GetBody()
-					if err != nil {
-						return resp, err
-					}
-					req2.Body = b
-				}
-				req2.Header.Del("Authorization")
-				c.setAuth(req2)
-				return c.HTTPClient.Do(req2)
-			}
+		c.authMu.Lock()
+		var tokenErr error
+		if !hasToken && len(c.authToken) > 0 {
+			// Another concurrent caller already acquired a token.
+			tokenErr = nil
+		} else if !hasToken && c.loginFailedErr != nil {
+			tokenErr = c.loginFailedErr
+		} else if hasToken {
+			// Existing token expired (e.g. BIG-IQ 5-minute access token timeout); refresh once.
+			tokenErr = c.refreshAuthTokenLocked(req.Context())
+		} else {
+			tokenErr = c.acquireAuthTokenLocked(req.Context())
 		}
+		c.authMu.Unlock()
+
+		if tokenErr == nil {
+			req2 := req.Clone(req.Context())
+			if req.GetBody != nil {
+				b, getErr := req.GetBody()
+				if getErr != nil {
+					resp.Body = io.NopCloser(bytes.NewReader(origBody))
+					return resp, getErr
+				}
+				req2.Body = b
+			}
+			req2.Header.Del("Authorization")
+			c.setAuth(req2)
+			return c.HTTPClient.Do(req2)
+		}
+
+		resp.Body = io.NopCloser(bytes.NewReader(origBody))
 	}
 	return resp, err
 }

@@ -56,6 +56,48 @@ func TestCheckReady(t *testing.T) {
 	}
 }
 
+// TestCheckReadyWithKind_NotReady pins the contract the `ready` command relies
+// on to set its exit code: a device that answers but is not ready yields an
+// empty kind and a nil error. The caller must treat the empty kind, not the nil
+// error, as the failure signal. The lab matrix caught `bigiq ready` printing
+// NOT READY while still exiting 0 because that distinction was missed.
+func TestCheckReadyWithKind_NotReady(t *testing.T) {
+	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Neither the BIG-IP readiness route nor the BIG-IQ echo fallback
+		// reports availability, so no appliance kind can be established.
+		switch r.URL.Path {
+		case "/mgmt/tm/sys/ready", "/mgmt/shared/echo":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+
+	c := NewClient(u.Hostname(), port, "admin", "secret")
+	c.Scheme = "http"
+	c.HTTPClient = server.Client()
+
+	kind, err := c.CheckReadyWithKind(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if kind != "" {
+		t.Errorf("expected empty kind for an unready appliance, got %q", kind)
+	}
+
+	ready, err := c.CheckReady(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ready {
+		t.Error("expected CheckReady to report not ready")
+	}
+}
+
 func TestCheckReadyWithKind_BIGIQ(t *testing.T) {
 	server := newMockServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/mgmt/tm/sys/ready" {
